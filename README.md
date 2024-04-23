@@ -15,4 +15,7 @@
 
 ```
 xmake bi [游戏目录] [项目]
+
+# 例子
+xmake bi "F:\steam\steamapps\common\Internet Cafe Evolution" "InternetCafeEvolution"
 ```
