@@ -1,0 +1,9 @@
+{
+    mtimes = {
+        ["xmake.lua"] = 1713865686,
+        ["Scripts\\xmake.lua"] = 1713866323,
+        ["InternetCafeEvolution\\xmake.lua"] = 1713866316
+    },
+    options = { },
+    recheck = false
+}

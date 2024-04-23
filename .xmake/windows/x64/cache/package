@@ -1,0 +1,70 @@
+{
+    imgui = {
+        sysincludedirs = {
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include]],
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\imgui]],
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\backends]],
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\misc\cpp]],
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\include]]
+        },
+        __requireconfs = {
+            configs = {
+                win32 = true,
+                dx11 = true,
+                glfw_opengl3 = true,
+                opengl3 = true
+            }
+        },
+        syslinks = {
+            "imm32",
+            "user32",
+            "shell32",
+            "gdi32"
+        },
+        linkdirs = {
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\lib]],
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\lib]]
+        },
+        license = "MIT",
+        defines = "GLFW_INCLUDE_NONE",
+        links = {
+            "imgui",
+            "glfw3",
+            "opengl32"
+        },
+        installdir = [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090]],
+        libfiles = {
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\lib\imgui.lib]],
+            [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\lib\glfw3.lib]]
+        },
+        static = true,
+        __enabled = true,
+        __requirestr = "imgui",
+        version = "v1.90.5",
+        envs = {
+            PATH = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\bin]],
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\c\cmake\3.28.3\1f4b73d574724faaad4b9db019f6e0e8\bin]],
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\o\opengl\latest\b1caf5aecf3447d1bfaf66081135de32\bin]],
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\bin]]
+            }
+        }
+    },
+    minhook = {
+        sysincludedirs = [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\include]],
+        __enabled = true,
+        linkdirs = [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\lib]],
+        links = "minhook",
+        license = "BSD-2-Clause",
+        libfiles = [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\lib\minhook.lib]],
+        version = "v1.3.3",
+        static = true,
+        __requirestr = "minhook",
+        installdir = [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2]],
+        envs = {
+            PATH = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\bin]]
+            }
+        }
+    }
+}

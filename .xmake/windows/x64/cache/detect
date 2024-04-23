@@ -1,0 +1,106 @@
+{
+    find_program = {
+        ["C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]],
+        zig = false,
+        git = "git",
+        ["7z"] = [[C:\Program Files\xmake\winenv\bin\7z]],
+        nim = false,
+        unzip = false,
+        ["cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]],
+        gzip = false
+    },
+    find_programver = {
+        ["C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe"] = false
+    },
+    find_program_msvc_arch_x64_plat_windows_checktoolld = {
+        ["link.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\link.exe]]
+    },
+    find_program_fetch_package_xmake = {
+        cmake = false
+    },
+    find_programver_fetch_package_system = {
+        ["C:\\Program Files\\CMake\\bin\\cmake"] = "3.29.2"
+    },
+    find_program_fetch_package_system = {
+        cmake = [[C:\Program Files\CMake\bin\cmake]]
+    },
+    find_program_msvc_arch_x64_plat_windows_checktoolsh = {
+        ["link.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\link.exe]]
+    },
+    find_program_msvc_arch_x64_plat_windows_checktoolcxx = {
+        ["cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]]
+    },
+    find_package_windows_x64_fetch_package_xmake = {
+        ["xmake::glfw_fc47358da159466996f7d289b4cf1b4e_release_3.4_external"] = {
+            sysincludedirs = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\include]]
+            },
+            syslinks = {
+                "user32",
+                "shell32",
+                "gdi32"
+            },
+            linkdirs = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\lib]]
+            },
+            defines = "GLFW_INCLUDE_NONE",
+            links = {
+                "glfw3"
+            },
+            libfiles = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\lib\glfw3.lib]]
+            },
+            static = true,
+            version = "3.4",
+            license = "zlib"
+        },
+        ["xmake::minhook_8b3a4100e1d64d71aff2558d20d9dfa2_release_v1.3.3_external"] = {
+            links = {
+                "minhook"
+            },
+            sysincludedirs = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\include]]
+            },
+            static = true,
+            libfiles = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\lib\minhook.lib]]
+            },
+            linkdirs = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\lib]]
+            },
+            version = "v1.3.3",
+            license = "BSD-2-Clause"
+        },
+        ["xmake::imgui_eba17209c79c4929b5dadc96afb81090_release_v1.90.5_external"] = {
+            links = {
+                "imgui"
+            },
+            sysincludedirs = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include]],
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\imgui]],
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\backends]],
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\misc\cpp]]
+            },
+            static = true,
+            syslinks = "imm32",
+            libfiles = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\lib\imgui.lib]]
+            },
+            linkdirs = {
+                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\lib]]
+            },
+            version = "v1.90.5",
+            license = "MIT"
+        }
+    },
+    ["lib.detect.has_flags"] = {
+        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx_cxflags_-nologo_-std:c++20"] = true,
+        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx__-nologo_-O2 -fp:fast"] = true,
+        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx_cxflags_-nologo_cl_external_includedir"] = true,
+        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx_cxflags_-nologo_cl_sourceDependencies"] = true,
+        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx_cxflags_-nologo_-DNDEBUG"] = true
+    },
+    find_program_msvc_arch_x64_plat_windows_checktoolcc = {
+        ["cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]]
+    }
+}

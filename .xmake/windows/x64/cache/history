@@ -1,0 +1,24 @@
+{
+    cmdlines = {
+        [[xmake lua "C:\\\\Program Files\\\\xmake\\\\modules\\\\private\\\\utils\\\\statistics.lua"]],
+        "xmake ",
+        "xmake ",
+        "xmake ",
+        "xmake bi",
+        "xmake bi",
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution"]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution"]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution"]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution"]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution"]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution"]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]]
+    }
+}

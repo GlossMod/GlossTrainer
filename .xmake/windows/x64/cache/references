@@ -1,0 +1,8 @@
+{
+    packages = {
+        [[C:\Users\xiaom\AppData\Local\.xmake\packages\o\opengl\latest\b1caf5aecf3447d1bfaf66081135de32]],
+        [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e]],
+        [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090]],
+        [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2]]
+    }
+}
