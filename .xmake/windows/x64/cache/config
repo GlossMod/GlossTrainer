@@ -1,9 +1,10 @@
 {
-    mtimes = {
-        ["xmake.lua"] = 1713865686,
-        ["Scripts\\xmake.lua"] = 1713866323,
-        ["InternetCafeEvolution\\xmake.lua"] = 1713866316
-    },
     options = { },
-    recheck = false
+    recheck = true,
+    mtimes = {
+        ["InternetCafeEvolution\\xmake.lua"] = 1713940168,
+        ["Scripts\\xmake.lua"] = 1713866323,
+        ["xmake.lua"] = 1713939764,
+        ["GTA4\\xmake.lua"] = 1713941510
+    }
 }

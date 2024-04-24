@@ -31,7 +31,7 @@
 #endif
 
 #if KIERO_USE_MINHOOK
-#include "../minhook/include/MinHook.h"
+#include "MinHook.h"
 #endif
 
 #ifdef _UNICODE
@@ -277,7 +277,7 @@ kiero::Status::Enum kiero::init(RenderType::Enum _renderType)
 				}
 
 				void *D3D11CreateDeviceAndSwapChain;
-				if ((D3D11CreateDeviceAndSwapChain = (void *)(::GetProcAddress(libD3D11, "D3D11CreateDeviceAndSwapChain"))) == NULL)
+				if ((D3D11CreateDeviceAndSwapChain = ::GetProcAddress(libD3D11, "D3D11CreateDeviceAndSwapChain")) == NULL)
 				{
 					::DestroyWindow(window);
 					::UnregisterClass(windowClass.lpszClassName, windowClass.hInstance);
@@ -683,20 +683,10 @@ kiero::Status::Enum kiero::bind(uint16_t _index, void **_original, void *_functi
 	{
 #if KIERO_USE_MINHOOK
 		void *target = (void *)g_methodsTable[_index];
-
-		Logger::info("Kiero", "Hooking %p", target);
-
 		if (MH_CreateHook(target, _function, _original) != MH_OK || MH_EnableHook(target) != MH_OK)
 		{
 			return Status::UnknownError;
 		}
-#else
-		void *target = (void *)g_methodsTable[_index];
-
-		auto protect = new XMHook::Hook();
-		protect->HookByVoid(target, _function);
-		_original = (void **)protect->original;
-
 #endif
 
 		return Status::Success;

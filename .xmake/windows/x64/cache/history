@@ -19,6 +19,26 @@
         [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
         [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
         [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
-        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]]
+        [[xmake bi "F:\\steam\\steamapps\\common\\Internet Cafe Evolution" InternetCafeEvolution]],
+        [[xmake bi F:\steam\steamapps\common\下一站江湖Ⅱ\下一站江湖Ⅱ NextJianghu2]],
+        [[xmake lua "C:\\\\Program Files\\\\xmake\\\\modules\\\\private\\\\utils\\\\statistics.lua" --yes]],
+        [[xmake bi F:\steam\steamapps\common\下一站江湖Ⅱ\下一站江湖Ⅱ NextJianghu2]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        "xmake require --info imgui",
+        "xmake require --info minhook",
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        "xmake require --info imgui",
+        "xmake require --info minhook",
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        "xmake f --arch=i386",
+        "xmake f --arch=i386",
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        [[xmake bi "F:\\steam\\steamapps\\common\\Grand Theft Auto IV\\GTAIV\\plugins" GTA4]],
+        "xmake f --arch=i386"
     }
 }

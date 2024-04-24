@@ -9,7 +9,7 @@ target("InternetCafeEvolution")
     add_files("src/**.cpp")
     set_targetdir("build/$(mode)")
     set_extension(".asi")           -- 设置后缀名为 .asi
-    add_packages("imgui", "minhook", { public = true })
+    add_packages("imgui", "minhook")
     set_languages("cxx20")
     -- 引入 D3D11.lib
     add_links("D3D11")

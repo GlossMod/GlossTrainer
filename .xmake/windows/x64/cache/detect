@@ -1,106 +1,58 @@
 {
-    find_program = {
-        ["C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]],
-        zig = false,
-        git = "git",
-        ["7z"] = [[C:\Program Files\xmake\winenv\bin\7z]],
-        nim = false,
-        unzip = false,
-        ["cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]],
-        gzip = false
+    find_program_cuda_arch_i386_plat_windows_checktoolcxx = {
+        ["nvc++"] = false
     },
-    find_programver = {
-        ["C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe"] = false
-    },
-    find_program_msvc_arch_x64_plat_windows_checktoolld = {
-        ["link.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\link.exe]]
-    },
-    find_program_fetch_package_xmake = {
-        cmake = false
+    ["detect.sdks.find_cuda"] = {
+        cuda = {
+            bindir = [[C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3\bin]],
+            msbuildextensionsdir = [[C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3\extras\visual_studio_integration\MSBuildExtensions]],
+            linkdirs = {
+                [[C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3\lib\Win32]]
+            },
+            sdkdir = [[C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3]],
+            version = "12.3",
+            includedirs = {
+                [[C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3\include]]
+            }
+        }
     },
     find_programver_fetch_package_system = {
         ["C:\\Program Files\\CMake\\bin\\cmake"] = "3.29.2"
     },
+    find_package_windows_i386_fetch_package_system = {
+        glfw_80da61f676614045b6d4c3b645cf1caa_release_external = false,
+        minhook_872a4b19af2e4cdab94921acba7e0dbc_release_external = false,
+        imgui_081c1e355987460fba5f488df6989b48_release_external = false
+    },
+    ["detect.sdks.find_vcpkgdir"] = false,
+    find_program = {
+        zig = false,
+        unzip = false,
+        gzip = false,
+        git = "git",
+        clang = false,
+        ["7z"] = [[C:\Program Files\xmake\winenv\bin\7z]],
+        ping = "ping",
+        ["pkg-config"] = "pkg-config",
+        ["cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]],
+        nim = false
+    },
     find_program_fetch_package_system = {
         cmake = [[C:\Program Files\CMake\bin\cmake]]
     },
-    find_program_msvc_arch_x64_plat_windows_checktoolsh = {
-        ["link.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\link.exe]]
+    find_programver = {
+        ["C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe"] = false,
+        ["C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.3\\bin\\nvcc"] = "12.3"
     },
-    find_program_msvc_arch_x64_plat_windows_checktoolcxx = {
-        ["cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]]
+    find_program_fetch_package_xmake = {
+        cmake = false
     },
-    find_package_windows_x64_fetch_package_xmake = {
-        ["xmake::glfw_fc47358da159466996f7d289b4cf1b4e_release_3.4_external"] = {
-            sysincludedirs = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\include]]
-            },
-            syslinks = {
-                "user32",
-                "shell32",
-                "gdi32"
-            },
-            linkdirs = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\lib]]
-            },
-            defines = "GLFW_INCLUDE_NONE",
-            links = {
-                "glfw3"
-            },
-            libfiles = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\g\glfw\3.4\fc47358da159466996f7d289b4cf1b4e\lib\glfw3.lib]]
-            },
-            static = true,
-            version = "3.4",
-            license = "zlib"
-        },
-        ["xmake::minhook_8b3a4100e1d64d71aff2558d20d9dfa2_release_v1.3.3_external"] = {
-            links = {
-                "minhook"
-            },
-            sysincludedirs = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\include]]
-            },
-            static = true,
-            libfiles = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\lib\minhook.lib]]
-            },
-            linkdirs = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\m\minhook\v1.3.3\8b3a4100e1d64d71aff2558d20d9dfa2\lib]]
-            },
-            version = "v1.3.3",
-            license = "BSD-2-Clause"
-        },
-        ["xmake::imgui_eba17209c79c4929b5dadc96afb81090_release_v1.90.5_external"] = {
-            links = {
-                "imgui"
-            },
-            sysincludedirs = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include]],
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\imgui]],
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\backends]],
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\include\misc\cpp]]
-            },
-            static = true,
-            syslinks = "imm32",
-            libfiles = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\lib\imgui.lib]]
-            },
-            linkdirs = {
-                [[C:\Users\xiaom\AppData\Local\.xmake\packages\i\imgui\v1.90.5\eba17209c79c4929b5dadc96afb81090\lib]]
-            },
-            version = "v1.90.5",
-            license = "MIT"
-        }
+    find_program_cuda_arch_i386_plat_windows_checktoolcc = {
+        nvc = false
     },
-    ["lib.detect.has_flags"] = {
-        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx_cxflags_-nologo_-std:c++20"] = true,
-        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx__-nologo_-O2 -fp:fast"] = true,
-        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx_cxflags_-nologo_cl_external_includedir"] = true,
-        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx_cxflags_-nologo_cl_sourceDependencies"] = true,
-        ["windows_x64_C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.39.33519\\bin\\HostX64\\x64\\cl.exe__cxx_cxflags_-nologo_-DNDEBUG"] = true
-    },
-    find_program_msvc_arch_x64_plat_windows_checktoolcc = {
-        ["cl.exe"] = [[C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.39.33519\bin\HostX64\x64\cl.exe]]
+    find_package_windows_i386_fetch_package_xmake = {
+        ["xmake::minhook_872a4b19af2e4cdab94921acba7e0dbc_release_v1.3.3_external"] = false,
+        ["xmake::glfw_80da61f676614045b6d4c3b645cf1caa_release_3.4_external"] = false,
+        ["xmake::imgui_081c1e355987460fba5f488df6989b48_release_v1.90.5_external"] = false
     }
 }
