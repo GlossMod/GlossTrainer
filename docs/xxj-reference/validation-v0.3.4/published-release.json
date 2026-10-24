@@ -1,0 +1,57 @@
+{
+  "tag": "v0.3.4",
+  "releaseUrl": "https://github.com/GlossMod/GlossTrainer/releases/tag/v0.3.4",
+  "sourceRevision": "303837d9b4ce8ad97a01b01f5db0772aafcb86b3",
+  "zipSha256": "9918509dd02a541328a200897a5f7aea68120fb194eb0efbd108ee408ad84cbe",
+  "zipBytes": 678450,
+  "verifiedPayloads": 7,
+  "manifest": {
+    "schemaVersion": 1,
+    "project": "GlossTrainer",
+    "game": "BlackMythWukong",
+    "version": "0.3.4",
+    "tag": "v0.3.4",
+    "architecture": "x64",
+    "entryPoint": "InitializeASI",
+    "sourceRepository": "https://github.com/GlossMod/GlossTrainer",
+    "sourceRevision": "303837d9b4ce8ad97a01b01f5db0772aafcb86b3",
+    "configurationPolicy": "User configuration is created at runtime and is never included in the release package.",
+    "files": [
+      {
+        "path": "docs/install.md",
+        "size": 4333,
+        "sha256": "958cf7b31f4e84c76a8fc5b34926f8028baa7a58af54d978f1f4d5ca3805c37e"
+      },
+      {
+        "path": "licenses/imgui.txt",
+        "size": 1104,
+        "sha256": "f20418b409e53c8c9f4e90917ff395554a60320d4dfbf833da89b339cad8628a"
+      },
+      {
+        "path": "licenses/minhook.txt",
+        "size": 4446,
+        "sha256": "4f21f857550d7be854da6ea5f2da4e6775ca4e3fbb535e4f3d961c47d0bf3335"
+      },
+      {
+        "path": "licenses/nlohmann_json.txt",
+        "size": 1096,
+        "sha256": "61e08da79c44061654015ce6b0c4061c23ee1dd18237fbf09e9bfda3c0ea2831"
+      },
+      {
+        "path": "README.md",
+        "size": 9104,
+        "sha256": "ec5577e4fcf541040582a2e50f5839af62d2dc1c64578dc327cd7389916e02aa"
+      },
+      {
+        "path": "scripts/GlossTrainer.asi",
+        "size": 1367040,
+        "sha256": "5a4a2f170eb51fd325c0344a263979588b2b67642065be7e8117277886857386"
+      },
+      {
+        "path": "Scripts/install.ps1",
+        "size": 14306,
+        "sha256": "6c3ac2b93c152080455b0ac988b58f6c482a0b5ca44fb88e3bf2c3f1326c69d8"
+      }
+    ]
+  }
+}
