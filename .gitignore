@@ -3,6 +3,10 @@
 .xmake
 .vscode
 build
+tmp/
 
 # MacOS Cache
 .DS_Store
+output
+Tests
+docs/evidence

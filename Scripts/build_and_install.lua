@@ -4,25 +4,25 @@ import("core.project.config")
 import("core.project.project")
 
 function main()
-    task.run("build", { yes = {} }, option.get("name"))
-    installmod()
-end
-
--- 安装
-function installmod()
-    -- 获取游戏目录
     local game_dir = option.get("exedir")
     local name = option.get("name")
-
-    -- 获取项目名称.
-    local target = project.target(name)
-
-    -- 如果没有则创建目录
-    if not os.exists(game_dir) then
-        print("%s not found. Creating...", game_dir)
-        os.mkdir(game_dir)
+    assert(name == "BlackMythWukong", "--name must be BlackMythWukong")
+    assert(game_dir and path.is_absolute(game_dir), "--exedir must be an existing absolute game executable directory")
+    assert(os.isdir(game_dir), "game executable directory does not exist: %s", game_dir)
+    assert(os.isfile(path.join(game_dir, "b1-Win64-Shipping.exe")),
+        "b1-Win64-Shipping.exe was not found in --exedir: %s", game_dir)
+    local installer = path.join(os.projectdir(), "Scripts", "install.ps1")
+    local arguments = {"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", installer, "-ExeDir", path.absolute(game_dir)}
+    if option.get("uninstall") then
+        table.insert(arguments, "-Uninstall")
+    else
+        task.run("build", {yes = true, targets = {name}})
+        local target = assert(project.target(name), "unknown project target: " .. name)
+        table.insert(arguments, "-Artifact")
+        table.insert(arguments, path.absolute(target:targetfile()))
     end
-
-    -- 拷贝文件
-    os.cp(target:targetfile(), path.join(game_dir, "GlossTrainer.asi"))
+    if option.get("dry-run") then
+        table.insert(arguments, "-DryRun")
+    end
+    os.execv("powershell.exe", arguments)
 end
