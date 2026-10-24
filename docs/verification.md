@@ -24,8 +24,10 @@ IME候选窗和组合窗位置回读仍有两项环境SKIP，不视为搜狗真�
 
 发布前实网GET确认公开仓库存在，latest API当时返回404，生产ASI日志也报告“暂无正式发布版本”；没有用虚假Release测试强制更新。异步检查失败不保留旧锁定，详细原因只写日志；更新页仍允许关闭菜单。已排队扩展修改按请求代次取消，恢复继续推进；已经完成的游戏数据操作不回滚。
 
-**2026-10-25 01:52 在游戏退出状态安装最终Release**，构建和安装哈希一致，ui.ini / hotkeys.ini哈希前后相同：[安装输出](xxj-reference/validation-v0.3.4/install.txt)、[回执](xxj-reference/validation-v0.3.4/installation.json)。
+**2026-10-25 01:51 在游戏退出状态安装最终Release**，构建和安装哈希一致，ui.ini / hotkeys.ini哈希前后相同：[安装输出](xxj-reference/validation-v0.3.4/install.txt)、[回执](xxj-reference/validation-v0.3.4/installation.json)。
 Release SHA-256：`4D37DE1373AC7192422DF4E89714E9E2DBE7A2E7D4F4F863AAC9EACC2B126F90`。Debug SHA-256：`7F3C82D50FAF5650DEBE43E12ED4FAF4F3D8BE1E99722BDF8F9D2B192D57718D`。
+
+云端手动运行 [40118206227](https://github.com/GlossMod/GlossTrainer/actions/runs/40118206227) 已成功，x64 Debug / Release 两个作业均 success；手动运行的发布作业按设计 skipped。正式标签仍单独触发构建和发布。
 
 ## v0.3.3：中文输入法与自定义界面开关按键
 
