@@ -10,3 +10,7 @@ tmp/
 output
 Tests
 docs/evidence
+data
+
+docs/*-reference
+tools
