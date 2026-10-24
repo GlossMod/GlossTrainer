@@ -1,0 +1,3 @@
+GlossTrainer AOT tests passed
+
+EXIT_CODE=0

@@ -1,0 +1,189 @@
+Microsoft (R) COFF/PE Dumper Version 14.44.35222.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+
+Dump of file build\release\BlackMythWukong.asi
+
+PE signature found
+
+File Type: DLL
+
+FILE HEADER VALUES
+            8664 machine (x64)
+               5 number of sections
+        6ADCBE6B time date stamp Sat Oct 24 22:19:23 2026
+               0 file pointer to symbol table
+               0 number of symbols
+              F0 size of optional header
+            2022 characteristics
+                   Executable
+                   Application can handle large (>2GB) addresses
+                   DLL
+
+OPTIONAL HEADER VALUES
+             20B magic # (PE32+)
+           14.44 linker version
+           B8000 size of code
+           79000 size of initialized data
+               0 size of uninitialized data
+           B4DB4 entry point (00000001800B4DB4)
+            1000 base of code
+       180000000 image base (0000000180000000 to 0000000180133FFF)
+            1000 section alignment
+             200 file alignment
+            6.00 operating system version
+            0.00 image version
+            6.00 subsystem version
+               0 Win32 version
+          134000 size of image
+             400 size of headers
+               0 checksum
+               2 subsystem (Windows GUI)
+             160 DLL characteristics
+                   High Entropy Virtual Addresses
+                   Dynamic base
+                   NX compatible
+          100000 size of stack reserve
+            1000 size of stack commit
+          100000 size of heap reserve
+            1000 size of heap commit
+               0 loader flags
+              10 number of directories
+          11CF80 [      54] RVA [size] of Export Directory
+          11CFD4 [     1A4] RVA [size] of Import Directory
+               0 [       0] RVA [size] of Resource Directory
+          128000 [    86B8] RVA [size] of Exception Directory
+               0 [       0] RVA [size] of Certificates Directory
+          131000 [    2504] RVA [size] of Base Relocation Directory
+          10B7F0 [      1C] RVA [size] of Debug Directory
+               0 [       0] RVA [size] of Architecture Directory
+               0 [       0] RVA [size] of Global Pointer Directory
+          10B880 [      28] RVA [size] of Thread Storage Directory
+          10B6B0 [     140] RVA [size] of Load Configuration Directory
+               0 [       0] RVA [size] of Bound Import Directory
+           B9000 [     A80] RVA [size] of Import Address Table Directory
+               0 [       0] RVA [size] of Delay Import Directory
+               0 [       0] RVA [size] of COM Descriptor Directory
+               0 [       0] RVA [size] of Reserved Directory
+
+
+SECTION HEADER #1
+   .text name
+   B7EA3 virtual size
+    1000 virtual address (0000000180001000 to 00000001800B8EA2)
+   B8000 size of raw data
+     400 file pointer to raw data (00000400 to 000B83FF)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+60000020 flags
+         Code
+         Execute Read
+
+SECTION HEADER #2
+  .rdata name
+   67116 virtual size
+   B9000 virtual address (00000001800B9000 to 0000000180120115)
+   67200 size of raw data
+   B8400 file pointer to raw data (000B8400 to 0011F5FF)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40000040 flags
+         Initialized Data
+         Read Only
+
+  Debug Directories
+
+        Time Type        Size      RVA  Pointer
+    -------- ------- -------- -------- --------
+    6ADCBE6B coffgrp      33C 0010D928   10CD28
+
+  Image has the following dependencies:
+
+    dxgi.dll
+    D3DCOMPILER_47.dll
+    USER32.dll
+    GDI32.dll
+    IMM32.dll
+    MSVCP140.dll
+    KERNEL32.dll
+    SHELL32.dll
+    VCRUNTIME140.dll
+    VCRUNTIME140_1.dll
+    api-ms-win-crt-runtime-l1-1-0.dll
+    api-ms-win-crt-math-l1-1-0.dll
+    api-ms-win-crt-heap-l1-1-0.dll
+    api-ms-win-crt-stdio-l1-1-0.dll
+    api-ms-win-crt-locale-l1-1-0.dll
+    api-ms-win-crt-string-l1-1-0.dll
+    api-ms-win-crt-filesystem-l1-1-0.dll
+    api-ms-win-crt-convert-l1-1-0.dll
+    api-ms-win-crt-utility-l1-1-0.dll
+    api-ms-win-crt-time-l1-1-0.dll
+
+  Section contains the following exports for BlackMythWukong.asi
+
+    00000000 characteristics
+    FFFFFFFF time date stamp
+        0.00 version
+           1 ordinal base
+           1 number of functions
+           1 number of names
+
+    ordinal hint RVA      name
+
+          1    0 00047560 InitializeASI
+
+SECTION HEADER #3
+   .data name
+    6FC8 virtual size
+  121000 virtual address (0000000180121000 to 0000000180127FC7)
+    4400 size of raw data
+  11F600 file pointer to raw data (0011F600 to 001239FF)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+C0000040 flags
+         Initialized Data
+         Read Write
+
+SECTION HEADER #4
+  .pdata name
+    86B8 virtual size
+  128000 virtual address (0000000180128000 to 00000001801306B7)
+    8800 size of raw data
+  123A00 file pointer to raw data (00123A00 to 0012C1FF)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+40000040 flags
+         Initialized Data
+         Read Only
+
+SECTION HEADER #5
+  .reloc name
+    2504 virtual size
+  131000 virtual address (0000000180131000 to 0000000180133503)
+    2600 size of raw data
+  12C200 file pointer to raw data (0012C200 to 0012E7FF)
+       0 file pointer to relocation table
+       0 file pointer to line numbers
+       0 number of relocations
+       0 number of line numbers
+42000040 flags
+         Initialized Data
+         Discardable
+         Read Only
+
+  Summary
+
+        7000 .data
+        9000 .pdata
+       68000 .rdata
+        3000 .reloc
+       B8000 .text

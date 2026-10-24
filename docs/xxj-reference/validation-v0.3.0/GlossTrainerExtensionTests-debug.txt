@@ -1,0 +1,1 @@
+GlossTrainer extension tests passed

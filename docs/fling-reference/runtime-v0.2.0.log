@@ -1,0 +1,71 @@
+2026-10-24 20:22:44.978 [67644] GlossTrainer 0.2.0 initializing; process 68236
+2026-10-24 20:22:44.979 [67644] Initializing MinHook
+2026-10-24 20:22:44.980 [67644] Installing input hooks
+2026-10-24 20:22:44.982 [67644] Input hook ClipCursor: resolving target
+2026-10-24 20:22:44.983 [67644] Input hook ClipCursor: MH_CreateHook begin
+2026-10-24 20:22:44.984 [67644] Input hook ClipCursor: MH_CreateHook returned MH_OK
+2026-10-24 20:22:44.986 [67644] Input hook ClipCursor: MH_QueueEnableHook begin
+2026-10-24 20:22:44.987 [67644] Input hook ClipCursor: MH_QueueEnableHook returned MH_OK
+2026-10-24 20:22:44.988 [67644] Input hook SetCursorPos: resolving target
+2026-10-24 20:22:44.990 [67644] Input hook SetCursorPos: MH_CreateHook begin
+2026-10-24 20:22:44.991 [67644] Input hook SetCursorPos: MH_CreateHook returned MH_OK
+2026-10-24 20:22:44.992 [67644] Input hook SetCursorPos: MH_QueueEnableHook begin
+2026-10-24 20:22:44.994 [67644] Input hook SetCursorPos: MH_QueueEnableHook returned MH_OK
+2026-10-24 20:22:44.995 [67644] Input hook GetRawInputData: resolving target
+2026-10-24 20:22:44.997 [67644] Input hook GetRawInputData: MH_CreateHook begin
+2026-10-24 20:22:44.998 [67644] Input hook GetRawInputData: MH_CreateHook returned MH_OK
+2026-10-24 20:22:44.999 [67644] Input hook GetRawInputData: MH_QueueEnableHook begin
+2026-10-24 20:22:45.001 [67644] Input hook GetRawInputData: MH_QueueEnableHook returned MH_OK
+2026-10-24 20:22:45.002 [67644] Input hooks: MH_ApplyQueued begin
+2026-10-24 20:22:45.089 [67644] Input hooks: MH_ApplyQueued returned MH_OK
+2026-10-24 20:22:45.090 [67644] Installing graphics hooks
+2026-10-24 20:22:45.091 [67644] Graphics initialization: loading dxgi.dll
+2026-10-24 20:22:45.092 [67644] Graphics initialization: dxgi.dll loaded
+2026-10-24 20:22:45.093 [67644] Graphics initialization: loading d3d11.dll
+2026-10-24 20:22:45.094 [67644] Graphics initialization: d3d11.dll loaded
+2026-10-24 20:22:45.094 [67644] Graphics initialization: creating CreateDXGIFactory hook
+2026-10-24 20:22:45.096 [67644] Graphics initialization: creating CreateDXGIFactory1 hook
+2026-10-24 20:22:45.097 [67644] Graphics initialization: creating CreateDXGIFactory2 hook
+2026-10-24 20:22:45.097 [67644] Graphics initialization: creating D3D11CreateDeviceAndSwapChain hook
+2026-10-24 20:22:45.098 [67644] Graphics initialization: applying discovery hooks
+2026-10-24 20:22:45.176 [67644] Graphics initialization: discovery hooks applied
+2026-10-24 20:22:45.177 [67644] Graphics initialization: factory and device bootstrap probes skipped
+2026-10-24 20:22:45.178 [67644] Graphics DX11/DX12 discovery hooks installed
+2026-10-24 20:22:45.179 [67644] Early hooks installed; waiting for the game's swapchain
+2026-10-24 20:22:45.546 [68864] Gameplay player attributes: 1 executable signature match(es)
+2026-10-24 20:22:45.667 [68864] Gameplay hook installed at 1428C4777
+2026-10-24 20:22:45.866 [68864] Gameplay attribute changes: 1 executable signature match(es)
+2026-10-24 20:22:45.988 [68864] Gameplay hook installed at 142AEA28E
+2026-10-24 20:22:46.324 [68864] Gameplay god mode r12: 1 executable signature match(es)
+2026-10-24 20:22:46.437 [68864] Gameplay hook installed at 142AEF8F3
+2026-10-24 20:22:46.878 [68864] Gameplay spell cooldown: 1 executable signature match(es)
+2026-10-24 20:22:46.958 [68864] Gameplay hook installed at 142BEEC55
+2026-10-24 20:22:47.392 [68864] Gameplay selected item: 1 executable signature match(es)
+2026-10-24 20:22:47.472 [68864] Gameplay hook installed at 141651383
+2026-10-24 20:22:47.912 [68864] Gameplay will: 1 executable signature match(es)
+2026-10-24 20:22:48.045 [68864] Gameplay hook installed at 142E6EE3F
+2026-10-24 20:22:48.608 [68864] Gameplay experience/sparks: 1 executable signature match(es)
+2026-10-24 20:22:48.731 [68864] Gameplay hook installed at 14555F43B
+2026-10-24 20:22:49.108 [68864] Gameplay relic points: 1 executable signature match(es)
+2026-10-24 20:22:49.247 [68864] Gameplay hook installed at 141584FC9
+2026-10-24 20:22:49.565 [68864] Gameplay drop: 1 executable signature match(es)
+2026-10-24 20:22:49.710 [68864] Gameplay hook installed at 142E70D70
+2026-10-24 20:22:50.086 [68864] Gameplay native player: 1 executable signature match(es)
+2026-10-24 20:22:50.225 [68864] Gameplay hook installed at 14E7D797D
+2026-10-24 20:22:50.593 [68864] Gameplay movement: 1 executable signature match(es)
+2026-10-24 20:22:50.744 [68864] Gameplay hook installed at 14E36EBF9
+2026-10-24 20:22:51.059 [68864] Gameplay player speed: 1 executable signature match(es)
+2026-10-24 20:22:51.188 [68864] Gameplay hook installed at 14E378B55
+2026-10-24 20:22:51.555 [68864] Gameplay jump: 1 executable signature match(es)
+2026-10-24 20:22:51.739 [68864] Gameplay hook installed at 14E378411
+2026-10-24 20:22:51.892 [68864] Gameplay static hook pass complete; waiting for the player's virtual attribute method
+2026-10-24 20:22:53.899 [67644] Graphics swap chain captured
+2026-10-24 20:22:53.976 [63088] Game window input attached; Insert toggles the menu
+2026-10-24 20:22:53.977 [63088] ImGui initialized with Simplified Chinese UI
+2026-10-24 20:22:53.986 [63088] DX12 renderer initialized with verified swap-chain command queue
+2026-10-24 20:24:00.738 [68864] Gameplay hook installed at 1438377F8
+2026-10-24 20:24:00.739 [68864] Mono generic List<float> call probe installed at 1438377F8
+2026-10-24 20:24:00.745 [68864] Player attribute method 14255CAF0: 0 scoped matches
+2026-10-24 20:24:01.554 [68864] Player attribute method 140B5AE90: 1 scoped matches
+2026-10-24 20:24:01.701 [68864] Gameplay hook installed at 140B5AEC8
+2026-10-24 20:24:01.803 [68864] Player attribute identity verified; 44/44 feature handlers connected

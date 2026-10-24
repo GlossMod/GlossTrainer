@@ -1,0 +1,13 @@
+PASS: valid x64 ASI with InitializeASI produces a release
+PASS: external checksum identifies the complete ZIP
+PASS: only ASI, installer, user documentation, licenses and manifest are included
+PASS: game README is relocated with working package and versioned source links
+PASS: manifest covers every payload exactly once with version, size and SHA-256
+PASS: package extraction preserves existing configuration and ships no defaults or local data
+PASS: unchanged inputs produce the same ZIP again
+PASS: repeat packaging is byte-for-byte deterministic
+PASS: mismatching tag is rejected
+PASS: x86 artifact is rejected
+PASS: no-export-directory artifact is rejected
+PASS: missing-initialize-asi artifact is rejected
+GlossTrainer release package tests passed (12 checks). No game files were accessed.

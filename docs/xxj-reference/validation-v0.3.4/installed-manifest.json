@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "project": "GlossTrainer",
+  "gameDirectory": "E:\\steam\\steamapps\\common\\BlackMythWukong\\b1\\Binaries\\Win64",
+  "installedAtUtc": "2026-10-24T17:51:25.2189229Z",
+  "loaderVersion": "10.0.0",
+  "loaderArchiveSha256": "3d5f2f2a47f456db878d17c1b135b0eae3209a7d8dabb0ff3f84e1b008c4f3a7",
+  "files": [
+    {
+      "path": "version.dll",
+      "sha256": "900fa114af8317bfe22015ca77becc1afa9853831213ff17a5e03e0f45d58937"
+    },
+    {
+      "path": "version.ini",
+      "sha256": "04aa27969ec669b32ba538dd6678e3a9da2d548db7b9f3d35c5d73f5f93647fe"
+    },
+    {
+      "path": "scripts\\GlossTrainer.asi",
+      "sha256": "4d37de1373ac7192422df4e89714e9e2dbe7a2e7d4f4f863aac9eacc2b126f90"
+    }
+  ]
+}

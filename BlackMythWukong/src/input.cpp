@@ -1,4 +1,7 @@
 #include "runtime.hpp"
+#include "features.hpp"
+#include "update.hpp"
+#include "ime.hpp"
 #include <MinHook.h>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -29,8 +32,10 @@ struct WindowState {
     std::mutex mutex;
     RECT desiredClip{};
     bool hasDesiredClip{}, clipSuppressed{}, cursorCaptured{}, pendingRelease{};
-    bool rawMouseOnly{}, rawKeyboardOnly{}, rawInsertDown{};
+    bool rawMouseOnly{}, rawKeyboardOnly{};
     std::array<bool, 256> gameKeys{}, systemKeys{};
+    std::array<bool, 256> rawShortcutDown{}, legacyShortcutDown{}, shortcutConsumed{}, rawShortcutConsumed{};
+    std::array<bool, 512> shortcutCharacters{};
     std::array<LPARAM, 256> keyParams{};
     std::array<bool, 5> gameButtons{};
     std::set<RawKey> rawKeys;
@@ -196,10 +201,51 @@ void SyncCursor(const std::shared_ptr<WindowState>& state) {
         if (pending) ReleaseGameKeys(state);
         if (GetCapture() == state->window) ReleaseCapture();
     }
+    if (ime::Sync(state->window, Active(state->window))) ReadRawRegistration(state);
 }
 bool IsInputMessage(UINT message) {
     return (message >= WM_KEYFIRST && message <= WM_KEYLAST) ||
         (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) || message == WM_UNICHAR;
+}
+unsigned HotkeyModifiers() {
+    return ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? features::Ctrl : 0u) |
+        ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? features::Shift : 0u) |
+        ((GetAsyncKeyState(VK_MENU) & 0x8000) ? features::Alt : 0u);
+}
+bool EditingText() {
+    std::lock_guard lock(OverlayMutex());
+    return ImGui::GetCurrentContext() && overlay::Visible() && ImGui::GetIO().WantTextInput;
+}
+enum class ShortcutAction { None, Consumed, ToggleMenu };
+ShortcutAction DispatchHotkey(unsigned key) {
+    features::SetUpdateRequired(update::Required());
+    const auto modifiers = HotkeyModifiers();
+    // A key accepted by a recorder must not also trigger the newly assigned
+    // menu chord or a feature during the same physical press.
+    if (features::AnyHotkeyCapture())
+        return features::HandleHotkey(key, modifiers) ? ShortcutAction::Consumed : ShortcutAction::None;
+    if (features::IsMenuHotkey(key, modifiers)) return ShortcutAction::ToggleMenu;
+    if (EditingText()) return ShortcutAction::None;
+    return features::HandleHotkey(key, modifiers) ? ShortcutAction::Consumed : ShortcutAction::None;
+}
+bool MatchesLegacyShortcut(unsigned key) {
+    const auto modifiers = HotkeyModifiers();
+    if (features::AnyHotkeyCapture() || features::IsMenuHotkey(key, modifiers)) return true;
+    if (EditingText()) return false;
+    if (key == VK_HOME && modifiers == (features::Ctrl | features::Shift)) return true;
+    if (!features::HotkeysEnabled() && !update::Required()) return false;
+    for (const auto& definition : features::Definitions()) {
+        const auto binding = features::GetHotkey(definition.id);
+        if (binding.key && binding.key == key && binding.modifiers == modifiers) return true;
+    }
+    return false;
+}
+void ToggleMenu(const std::shared_ptr<WindowState>& state) {
+    {
+        std::lock_guard lock(OverlayMutex());
+        overlay::SetVisible(!overlay::Visible());
+    }
+    SyncCursor(state);
 }
 bool ReadRaw(HRAWINPUT handle, RAWINPUT& raw) {
     UINT size{};
@@ -235,26 +281,43 @@ void TrackRaw(const std::shared_ptr<WindowState>& state, const RAWINPUT& raw) {
 // Feed raw events only for devices whose registration suppresses legacy events.
 // The caller never holds state->mutex while touching ImGui.
 bool FeedRaw(const std::shared_ptr<WindowState>& state, const RAWINPUT& raw) {
-    bool mouseOnly{}, keyboardOnly{}, toggle{};
+    bool mouseOnly{}, keyboardOnly{}, hotkeyDown{}, consumed{};
     {
         std::lock_guard lock(state->mutex);
         mouseOnly = state->rawMouseOnly;
         keyboardOnly = state->rawKeyboardOnly;
-        if (raw.header.dwType == RIM_TYPEKEYBOARD && raw.data.keyboard.VKey == VK_INSERT) {
+        if (raw.header.dwType == RIM_TYPEKEYBOARD && raw.data.keyboard.VKey < 256) {
+            const auto key = raw.data.keyboard.VKey;
             const bool released = (raw.data.keyboard.Flags & RI_KEY_BREAK) != 0;
-            toggle = keyboardOnly && !released && !state->rawInsertDown && GetForegroundWindow() == state->window;
-            state->rawInsertDown = !released;
+            hotkeyDown = !released && !state->rawShortcutDown[key];
+            state->rawShortcutDown[key] = !released;
+            consumed = state->rawShortcutConsumed[key];
+            if (released) {
+                state->rawShortcutConsumed[key] = false;
+                if (keyboardOnly || !state->legacyShortcutDown[key]) state->shortcutConsumed[key] = false;
+            }
         }
     }
-    const bool insert = raw.header.dwType == RIM_TYPEKEYBOARD && raw.data.keyboard.VKey == VK_INSERT;
-    if (toggle) {
-        {
-            std::lock_guard lock(OverlayMutex());
-            overlay::SetVisible(!overlay::Visible());
+    if (consumed) return true;
+    if (hotkeyDown && GetForegroundWindow() == state->window) {
+        if (!keyboardOnly) {
+            // Legacy will execute the action. Suppress only this raw copy so
+            // the same shortcut cannot also reach the game's raw consumer.
+            if (MatchesLegacyShortcut(raw.data.keyboard.VKey)) {
+                std::lock_guard lock(state->mutex);
+                state->rawShortcutConsumed[raw.data.keyboard.VKey] = true;
+                return true;
+            }
+        } else if (const auto action = DispatchHotkey(raw.data.keyboard.VKey); action != ShortcutAction::None) {
+            {
+                std::lock_guard lock(state->mutex);
+                state->rawShortcutConsumed[raw.data.keyboard.VKey] = true;
+                state->shortcutConsumed[raw.data.keyboard.VKey] = true;
+            }
+            if (action == ShortcutAction::ToggleMenu) ToggleMenu(state);
+            return true;
         }
-        SyncCursor(state);
     }
-    if (insert) return true;
     if (!Active(state->window)) return false;
     std::lock_guard lock(OverlayMutex());
     if (!ImGui::GetCurrentContext()) return false;
@@ -327,12 +390,16 @@ void TrackLegacy(const std::shared_ptr<WindowState>& state, UINT message, WPARAM
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     const auto state = FindState(window);
     if (!state) return DefWindowProcW(window, message, wparam, lparam);
-    if (message == CursorSync) { SyncCursor(state); return 0; }
+    if (message == CursorSync || message == ime::UpdateMessage) { SyncCursor(state); return 0; }
     const bool isTarget = window == targetWindow.load();
     if (isTarget && (message == WM_KILLFOCUS || (message == WM_ACTIVATEAPP && !wparam))) {
         {
             std::lock_guard lock(state->mutex);
-            state->rawInsertDown = false;
+            state->rawShortcutDown.fill(false);
+            state->legacyShortcutDown.fill(false);
+            state->shortcutConsumed.fill(false);
+            state->rawShortcutConsumed.fill(false);
+            state->shortcutCharacters.fill(false);
         }
         {
             std::lock_guard lock(OverlayMutex());
@@ -341,18 +408,59 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         capture = false;
         SyncCursor(state);
     }
-    if (isTarget && message == WM_KEYDOWN && wparam == VK_INSERT) {
-        if (!(lparam & (LPARAM(1) << 30))) {
-            {
-                std::lock_guard lock(OverlayMutex());
-                overlay::SetVisible(!overlay::Visible());
-            }
-            SyncCursor(state);
+    if (isTarget && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && wparam < 256) {
+        const auto scan = (static_cast<ULONG_PTR>(lparam) >> 16) & 0x1ff;
+        bool consumed{};
+        {
+            std::lock_guard lock(state->mutex);
+            state->legacyShortcutDown[wparam] = true;
+            consumed = state->shortcutConsumed[wparam];
+            state->shortcutCharacters[scan] = consumed;
         }
-        return 0;
+        if (consumed) return 0;
+        if (!(lparam & (LPARAM(1) << 30)) && GetForegroundWindow() == window) {
+            if (const auto action = DispatchHotkey(static_cast<unsigned>(wparam)); action != ShortcutAction::None) {
+                {
+                    std::lock_guard lock(state->mutex);
+                    state->shortcutConsumed[wparam] = true;
+                    state->rawShortcutConsumed[wparam] = true;
+                    state->shortcutCharacters[scan] = true;
+                }
+                if (action == ShortcutAction::ToggleMenu) ToggleMenu(state);
+                return 0;
+            }
+        }
     }
-    if (isTarget && message == WM_KEYUP && wparam == VK_INSERT) return 0;
+    if (isTarget && (message == WM_KEYUP || message == WM_SYSKEYUP) && wparam < 256) {
+        std::lock_guard lock(state->mutex);
+        state->legacyShortcutDown[wparam] = false;
+        const bool consumed = state->shortcutConsumed[wparam];
+        state->shortcutConsumed[wparam] = false;
+        if (!state->rawShortcutDown[wparam]) state->rawShortcutConsumed[wparam] = false;
+        if (consumed) return 0;
+    }
+    if (isTarget && (message == WM_CHAR || message == WM_SYSCHAR || message == WM_DEADCHAR || message == WM_SYSDEADCHAR)) {
+        const auto scan = (static_cast<ULONG_PTR>(lparam) >> 16) & 0x1ff;
+        std::lock_guard lock(state->mutex);
+        if (scan && state->shortcutCharacters[scan]) return 0;
+    }
     if (message == WM_INPUT) return DispatchRaw(state, wparam, lparam, isTarget);
+    if (ime::IsImeMessage(message)) {
+        // The 1.92.9 backend itself calls DefWindowProcW for composition.
+        // Intercept before it, outside OverlayMutex: the default procedure can
+        // synchronously generate WM_IME_CHAR and then WM_CHAR into this hook.
+        if (message == WM_INPUTLANGCHANGE && isTarget) {
+            std::lock_guard lock(OverlayMutex());
+            if (ImGui::GetCurrentContext()) ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam);
+        }
+        if ((isTarget && Active(window)) || ime::OwnsMessages(window))
+            return ime::ProcessMessage(window, message, wparam, lparam);
+        // Inactive game IME messages must also skip the backend's default
+        // processing, so the original window procedure receives them once.
+        return CallWindowProcW(state->original, window, message, wparam, lparam);
+    }
+    if ((message == WM_CHAR || message == WM_UNICHAR) && !Active(window) && ime::OwnsMessages(window))
+        return 0;
     if (isTarget) {
         {
             std::lock_guard lock(OverlayMutex());
@@ -364,6 +472,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
     if (message == WM_NCDESTROY) {
         if (isTarget) { capture = false; HWND expected = window; targetWindow.compare_exchange_strong(expected, nullptr); }
         RestoreClip(state);
+        ime::Detach(window);
         const auto result = CallWindowProcW(state->original, window, message, wparam, lparam);
         std::lock_guard lock(windowsMutex);
         windows.erase(window);
@@ -419,11 +528,16 @@ bool Attach(HWND window) {
     }
     {
         std::lock_guard lock(state->mutex);
-        state->rawInsertDown = false;
+        state->rawShortcutDown.fill(false);
+        state->legacyShortcutDown.fill(false);
+        state->shortcutConsumed.fill(false);
+        state->rawShortcutConsumed.fill(false);
+        state->shortcutCharacters.fill(false);
     }
     ReadRawRegistration(state);
+    ime::Attach(window);
     targetWindow = window;
-    Log("Game window input attached; Insert toggles the menu");
+    Log("Game window input attached; the configured menu hotkey toggles the menu");
     return true;
 }
 void SetMenuVisible(bool visible) {
@@ -435,6 +549,7 @@ void SetMenuVisible(bool visible) {
     }
     capture = visible && state != nullptr && rawFilterReady.load();
     if (state) {
+        if (!visible) ime::Clear(window);
         if (!visible) RestoreClip(state);
         PostMessageW(window, CursorSync, 0, 0);
     }
@@ -443,10 +558,15 @@ void Shutdown() {
     capture = false;
     const auto window = targetWindow.exchange(nullptr);
     if (const auto state = FindState(window)) {
+        ime::Clear(window);
         {
             std::lock_guard lock(state->mutex);
             state->pendingRelease = true;
-            state->rawInsertDown = false;
+            state->rawShortcutDown.fill(false);
+            state->legacyShortcutDown.fill(false);
+            state->shortcutConsumed.fill(false);
+            state->rawShortcutConsumed.fill(false);
+            state->shortcutCharacters.fill(false);
         }
         // ClipCursor can be restored from the renderer thread. Synthetic key ups
         // and ReleaseCapture are deferred to the owning window thread.

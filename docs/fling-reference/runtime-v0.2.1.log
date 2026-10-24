@@ -1,0 +1,116 @@
+2026-10-24 20:33:27.935 [75708] GlossTrainer 0.2.1 initializing; process 75660
+2026-10-24 20:33:27.936 [75708] Initializing MinHook
+2026-10-24 20:33:27.937 [75708] Installing input hooks
+2026-10-24 20:33:27.938 [75708] Input hook ClipCursor: resolving target
+2026-10-24 20:33:27.939 [75708] Input hook ClipCursor: MH_CreateHook begin
+2026-10-24 20:33:27.940 [75708] Input hook ClipCursor: MH_CreateHook returned MH_OK
+2026-10-24 20:33:27.941 [75708] Input hook ClipCursor: MH_QueueEnableHook begin
+2026-10-24 20:33:27.942 [75708] Input hook ClipCursor: MH_QueueEnableHook returned MH_OK
+2026-10-24 20:33:27.943 [75708] Input hook SetCursorPos: resolving target
+2026-10-24 20:33:27.944 [75708] Input hook SetCursorPos: MH_CreateHook begin
+2026-10-24 20:33:27.945 [75708] Input hook SetCursorPos: MH_CreateHook returned MH_OK
+2026-10-24 20:33:27.946 [75708] Input hook SetCursorPos: MH_QueueEnableHook begin
+2026-10-24 20:33:27.947 [75708] Input hook SetCursorPos: MH_QueueEnableHook returned MH_OK
+2026-10-24 20:33:27.947 [75708] Input hook GetRawInputData: resolving target
+2026-10-24 20:33:27.948 [75708] Input hook GetRawInputData: MH_CreateHook begin
+2026-10-24 20:33:27.950 [75708] Input hook GetRawInputData: MH_CreateHook returned MH_OK
+2026-10-24 20:33:27.951 [75708] Input hook GetRawInputData: MH_QueueEnableHook begin
+2026-10-24 20:33:27.951 [75708] Input hook GetRawInputData: MH_QueueEnableHook returned MH_OK
+2026-10-24 20:33:27.952 [75708] Input hooks: MH_ApplyQueued begin
+2026-10-24 20:33:28.058 [75708] Input hooks: MH_ApplyQueued returned MH_OK
+2026-10-24 20:33:28.059 [75708] Installing graphics hooks
+2026-10-24 20:33:28.060 [75708] Graphics initialization: loading dxgi.dll
+2026-10-24 20:33:28.060 [75708] Graphics initialization: dxgi.dll loaded
+2026-10-24 20:33:28.062 [75708] Graphics initialization: loading d3d11.dll
+2026-10-24 20:33:28.063 [75708] Graphics initialization: d3d11.dll loaded
+2026-10-24 20:33:28.064 [75708] Graphics initialization: creating CreateDXGIFactory hook
+2026-10-24 20:33:28.064 [75708] Graphics initialization: creating CreateDXGIFactory1 hook
+2026-10-24 20:33:28.065 [75708] Graphics initialization: creating CreateDXGIFactory2 hook
+2026-10-24 20:33:28.065 [75708] Graphics initialization: creating D3D11CreateDeviceAndSwapChain hook
+2026-10-24 20:33:28.066 [75708] Graphics initialization: applying discovery hooks
+2026-10-24 20:33:28.171 [75708] Graphics initialization: discovery hooks applied
+2026-10-24 20:33:28.172 [75708] Graphics initialization: factory and device bootstrap probes skipped
+2026-10-24 20:33:28.173 [75708] Graphics DX11/DX12 discovery hooks installed
+2026-10-24 20:33:28.174 [75708] Early hooks installed; waiting for the game's swapchain
+2026-10-24 20:33:28.566 [9576] Gameplay player attributes: 1 executable signature match(es)
+2026-10-24 20:33:28.692 [9576] Gameplay hook installed at 1428C4777
+2026-10-24 20:33:28.891 [9576] Gameplay attribute changes: 1 executable signature match(es)
+2026-10-24 20:33:29.005 [9576] Gameplay hook installed at 142AEA28E
+2026-10-24 20:33:29.386 [9576] Gameplay god mode r12: 1 executable signature match(es)
+2026-10-24 20:33:29.500 [9576] Gameplay hook installed at 142AEF8F3
+2026-10-24 20:33:29.961 [9576] Gameplay spell cooldown: 1 executable signature match(es)
+2026-10-24 20:33:30.043 [9576] Gameplay hook installed at 142BEEC55
+2026-10-24 20:33:30.474 [9576] Gameplay selected item: 1 executable signature match(es)
+2026-10-24 20:33:30.558 [9576] Gameplay hook installed at 141651383
+2026-10-24 20:33:31.047 [9576] Gameplay will: 1 executable signature match(es)
+2026-10-24 20:33:31.191 [9576] Gameplay hook installed at 142E6EE3F
+2026-10-24 20:33:31.758 [9576] Gameplay experience/sparks: 1 executable signature match(es)
+2026-10-24 20:33:31.867 [9576] Gameplay hook installed at 14555F43B
+2026-10-24 20:33:32.248 [9576] Gameplay relic points: 1 executable signature match(es)
+2026-10-24 20:33:32.423 [9576] Gameplay hook installed at 141584FC9
+2026-10-24 20:33:32.853 [9576] Gameplay drop: 1 executable signature match(es)
+2026-10-24 20:33:33.007 [9576] Gameplay hook installed at 142E70D70
+2026-10-24 20:33:33.369 [9576] Gameplay native player: 1 executable signature match(es)
+2026-10-24 20:33:33.507 [9576] Gameplay hook installed at 14E7D797D
+2026-10-24 20:33:33.911 [9576] Gameplay movement: 1 executable signature match(es)
+2026-10-24 20:33:34.111 [9576] Gameplay hook installed at 14E36EBF9
+2026-10-24 20:33:34.428 [9576] Gameplay player speed: 1 executable signature match(es)
+2026-10-24 20:33:34.587 [9576] Gameplay hook installed at 14E378B55
+2026-10-24 20:33:34.965 [9576] Gameplay jump: 1 executable signature match(es)
+2026-10-24 20:33:35.070 [9576] Gameplay hook installed at 14E378411
+2026-10-24 20:33:35.176 [9576] Gameplay static hook pass complete; waiting for the player's virtual attribute method
+2026-10-24 20:33:37.698 [75708] Graphics swap chain captured
+2026-10-24 20:33:37.785 [35780] Game window input attached; Insert toggles the menu
+2026-10-24 20:33:37.787 [35780] ImGui initialized with Simplified Chinese UI
+2026-10-24 20:33:37.800 [35780] DX12 renderer initialized with verified swap-chain command queue
+2026-10-24 20:34:20.743 [75708] Menu opened
+2026-10-24 20:34:32.737 [9576] Gameplay hook installed at 1438377F8
+2026-10-24 20:34:32.738 [9576] Mono generic List<float> call probe installed at 1438377F8
+2026-10-24 20:34:32.744 [9576] Player attribute method 14255CAF0: 0 scoped matches
+2026-10-24 20:34:33.398 [75708] Feature hotkeys disabled
+2026-10-24 20:34:33.555 [9576] Player attribute method 141A23130: 1 scoped matches
+2026-10-24 20:34:33.728 [9576] Gameplay hook installed at 141A23168
+2026-10-24 20:34:33.831 [9576] Player attribute identity verified; 44/44 feature handlers connected
+2026-10-24 20:34:34.353 [75708] Feature hotkeys enabled
+2026-10-24 20:34:40.479 [68460] Menu hidden
+2026-10-24 20:34:52.577 [75708] Menu opened
+2026-10-24 20:35:00.055 [68460] Feature 4 enabled value 0
+2026-10-24 20:35:00.056 [68460] Feature 4: success: 已启用
+2026-10-24 20:35:02.957 [68460] Feature 6 enabled value 0
+2026-10-24 20:35:02.958 [68460] Feature 6: success: 已启用
+2026-10-24 20:35:07.565 [68460] Feature 10 enabled value 0
+2026-10-24 20:35:07.565 [68460] Feature 10: success: 已启用
+2026-10-24 20:35:08.117 [68460] Feature 9 enabled value 0
+2026-10-24 20:35:08.118 [68460] Feature 9: success: 已启用
+2026-10-24 20:35:09.799 [68460] Menu hidden
+2026-10-24 20:35:16.018 [75708] Menu opened
+2026-10-24 20:35:22.318 [68460] Feature 30 enabled value 1000
+2026-10-24 20:35:22.320 [68460] Feature 30: success: 已启用
+2026-10-24 20:35:25.183 [68460] Feature 30 enabled value 1000
+2026-10-24 20:35:25.184 [68460] Feature 30: success: 已启用
+2026-10-24 20:35:26.082 [68460] Feature 30 disabled value 1000
+2026-10-24 20:35:26.083 [68460] Feature 30: success: 已关闭；事件属性将在下一次气力更新时恢复
+2026-10-24 20:35:28.983 [68460] Feature 32 enabled value 1000
+2026-10-24 20:35:28.985 [68460] Feature 32: success: 已启用
+2026-10-24 20:35:29.403 [68460] Feature 32 disabled value 1000
+2026-10-24 20:35:29.404 [68460] Feature 32: success: 已关闭；事件属性将在下一次气力更新时恢复
+2026-10-24 20:35:30.046 [68460] Feature 30 enabled value 1000
+2026-10-24 20:35:30.046 [68460] Feature 30: success: 已启用
+2026-10-24 20:35:30.423 [68460] Feature 30 disabled value 1000
+2026-10-24 20:35:30.423 [68460] Feature 30: success: 已关闭；事件属性将在下一次气力更新时恢复
+2026-10-24 20:35:31.255 [68460] Feature 30 enabled value 1000
+2026-10-24 20:35:31.256 [68460] Feature 30: success: 已启用
+2026-10-24 20:35:31.710 [68460] Feature 30 enabled value 1000
+2026-10-24 20:35:31.710 [68460] Feature 30: success: 已启用
+2026-10-24 20:35:32.184 [68460] Feature 30 enabled value 1000
+2026-10-24 20:35:32.185 [68460] Feature 30: success: 已启用
+2026-10-24 20:35:32.868 [68460] Feature 31 enabled value 1000
+2026-10-24 20:35:32.869 [68460] Feature 31: success: 已启用
+2026-10-24 20:35:33.379 [68460] Feature 31 enabled value 1000
+2026-10-24 20:35:33.380 [68460] Feature 31: success: 已启用
+2026-10-24 20:35:33.902 [68460] Feature 31 disabled value 1000
+2026-10-24 20:35:33.902 [68460] Feature 31: success: 已关闭；事件属性将在下一次气力更新时恢复
+2026-10-24 20:35:36.100 [68460] Menu hidden
+2026-10-24 20:35:40.819 [75708] Menu opened
+2026-10-24 20:35:45.137 [68460] Feature 30 disabled value 1000
+2026-10-24 20:35:45.139 [68460] Feature 30: success: 已关闭；事件属性将在下一次气力更新时恢复

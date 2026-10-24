@@ -1,0 +1,146 @@
+{
+  "pid": 68236,
+  "image": "E:\\steam\\steamapps\\common\\BlackMythWukong\\b1\\Binaries\\Win64\\b1-Win64-Shipping.exe",
+  "root": "0x140b5ae90",
+  "functions": [
+    {
+      "entry": "0x140b5ae90",
+      "depth": 0,
+      "instructions": [
+        {
+          "address": "0x140b5ae90",
+          "offset": 0,
+          "bytes": "55",
+          "mnemonic": "push",
+          "operands": "rbp"
+        },
+        {
+          "address": "0x140b5ae91",
+          "offset": 1,
+          "bytes": "48 8b ec",
+          "mnemonic": "mov",
+          "operands": "rbp, rsp"
+        },
+        {
+          "address": "0x140b5ae94",
+          "offset": 4,
+          "bytes": "48 83 ec 30",
+          "mnemonic": "sub",
+          "operands": "rsp, 0x30"
+        },
+        {
+          "address": "0x140b5ae98",
+          "offset": 8,
+          "bytes": "48 89 4d f8",
+          "mnemonic": "mov",
+          "operands": "qword ptr [rbp - 8], rcx"
+        },
+        {
+          "address": "0x140b5ae9c",
+          "offset": 12,
+          "bytes": "48 89 55 f0",
+          "mnemonic": "mov",
+          "operands": "qword ptr [rbp - 0x10], rdx"
+        },
+        {
+          "address": "0x140b5aea0",
+          "offset": 16,
+          "bytes": "48 8b c1",
+          "mnemonic": "mov",
+          "operands": "rax, rcx"
+        },
+        {
+          "address": "0x140b5aea3",
+          "offset": 19,
+          "bytes": "48 63 40 20",
+          "mnemonic": "movsxd",
+          "operands": "rax, dword ptr [rax + 0x20]"
+        },
+        {
+          "address": "0x140b5aea7",
+          "offset": 23,
+          "bytes": "39 45 f0",
+          "mnemonic": "cmp",
+          "operands": "dword ptr [rbp - 0x10], eax"
+        },
+        {
+          "address": "0x140b5aeaa",
+          "offset": 26,
+          "bytes": "0f 83 27 00 00 00",
+          "mnemonic": "jae",
+          "operands": "0x140b5aed7"
+        },
+        {
+          "address": "0x140b5aeb0",
+          "offset": 32,
+          "bytes": "48 8b 45 f8",
+          "mnemonic": "mov",
+          "operands": "rax, qword ptr [rbp - 8]"
+        },
+        {
+          "address": "0x140b5aeb4",
+          "offset": 36,
+          "bytes": "48 8b 40 10",
+          "mnemonic": "mov",
+          "operands": "rax, qword ptr [rax + 0x10]"
+        },
+        {
+          "address": "0x140b5aeb8",
+          "offset": 40,
+          "bytes": "48 63 4d f0",
+          "mnemonic": "movsxd",
+          "operands": "rcx, dword ptr [rbp - 0x10]"
+        },
+        {
+          "address": "0x140b5aebc",
+          "offset": 44,
+          "bytes": "48 63 c9",
+          "mnemonic": "movsxd",
+          "operands": "rcx, ecx"
+        },
+        {
+          "address": "0x140b5aebf",
+          "offset": 47,
+          "bytes": "39 48 18",
+          "mnemonic": "cmp",
+          "operands": "dword ptr [rax + 0x18], ecx"
+        },
+        {
+          "address": "0x140b5aec2",
+          "offset": 50,
+          "bytes": "0f 86 16 00 00 00",
+          "mnemonic": "jbe",
+          "operands": "0x140b5aede"
+        },
+        {
+          "address": "0x140b5aec8",
+          "offset": 56,
+          "bytes": "e9 86 5d 49 ff",
+          "mnemonic": "jmp",
+          "operands": "0x13fff0c53"
+        }
+      ],
+      "edges": [
+        {
+          "offset": 56,
+          "target": "0x13fff0c53"
+        }
+      ]
+    },
+    {
+      "entry": "0x13fff0c53",
+      "depth": 1,
+      "instructions": [
+        {
+          "address": "0x13fff0c53",
+          "offset": 0,
+          "bytes": "ff 25 00 00 00 00",
+          "mnemonic": "jmp",
+          "operands": "qword ptr [rip]"
+        }
+      ],
+      "edges": []
+    }
+  ],
+  "bounded": true
+}

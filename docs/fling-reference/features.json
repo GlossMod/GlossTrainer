@@ -1,0 +1,397 @@
+{
+  "title": "黑神话：悟空 FLiNG/3DMGAME v1.0-v1.0.20 Plus 44 Trainer",
+  "count": 44,
+  "sources": {
+    "archive_readme": "data/flyy/extracted/说明.txt",
+    "ui_screenshot": "用户在本次对话提供的修改器截图",
+    "defaults_note": "数值与开关状态记录截图当时显示值，不代表首次启动或重置后的默认值。开关状态截图中均为关闭。",
+    "tooltip_note": "截图中的圆形感叹号标记了有提示入口，但没有悬停显示提示正文；tooltip_text 因此为 null，不能据此补写提示。"
+  },
+  "global_hotkey": {
+    "key": "Ctrl+Shift+Home",
+    "description": "禁用/启用快捷键",
+    "source": "截图页脚"
+  },
+  "features": [
+    {
+      "key": "Num 1",
+      "name": "无敌模式/无视伤害判定",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": true,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 2",
+      "name": "无限生命",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": true,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 3",
+      "name": "无限法力",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": true,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 4",
+      "name": "无限气力",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 5",
+      "name": "无限棍势",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 6",
+      "name": "无限葫芦使用次数",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 7",
+      "name": "法术瞬间冷却",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": true,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 8",
+      "name": "变身瞬间冷却",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 9",
+      "name": "无限变身时间",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num 0",
+      "name": "无限化身技元气",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num .",
+      "name": "无限法宝元气",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num +",
+      "name": "最高暴击率",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": true,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num -",
+      "name": "最高韧性",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Num /",
+      "name": "防止异常状态",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": true,
+      "tooltip_text": null
+    },
+    {
+      "key": "Ctrl+Num /",
+      "name": "灵蕴倍率",
+      "shown_value": 2.0,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+Num *",
+      "name": "经验倍率",
+      "shown_value": 2.0,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+Num +",
+      "name": "编辑根器点数",
+      "shown_value": 3,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+Num -",
+      "name": "100%掉宝率",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": false,
+      "tooltip_text": null
+    },
+    {
+      "key": "Ctrl+Num 1",
+      "name": "超级伤害/一击必杀",
+      "shown_value": false,
+      "value_kind": "toggle",
+      "tooltip_marker": true,
+      "tooltip_text": null
+    },
+    {
+      "key": "Ctrl+Num 2",
+      "name": "伤害倍率",
+      "shown_value": 2.0,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+Num 3",
+      "name": "防御倍率",
+      "shown_value": 2.0,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+Num 4",
+      "name": "气力消耗倍率",
+      "shown_value": 0.5,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+Num 5",
+      "name": "设置游戏速度",
+      "shown_value": 2.5,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Alt+Num 1",
+      "name": "编辑灵蕴",
+      "shown_value": 9999999,
+      "value_kind": "apply_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "button_label": "应用"
+    },
+    {
+      "key": "Alt+Num 2",
+      "name": "编辑点击物品数量",
+      "shown_value": 999,
+      "value_kind": "apply_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "button_label": "应用"
+    },
+    {
+      "key": "Alt+Num 3",
+      "name": "增加经验值",
+      "shown_value": 50000,
+      "value_kind": "apply_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "button_label": "应用"
+    },
+    {
+      "key": "Alt+Num 4",
+      "name": "编辑灵光点",
+      "shown_value": 999,
+      "value_kind": "apply_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "button_label": "应用"
+    },
+    {
+      "key": "Alt+Num 5",
+      "name": "设置玩家速度",
+      "shown_value": 2.0,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Alt+Num 6",
+      "name": "设置移动速度",
+      "shown_value": 2.0,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Alt+Num 7",
+      "name": "设置跳跃高度",
+      "shown_value": 2.0,
+      "value_kind": "toggle_with_multiplier",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F1",
+      "name": "编辑生命上限",
+      "shown_value": 1000,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F2",
+      "name": "编辑法力上限",
+      "shown_value": 1000,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F3",
+      "name": "编辑气力上限",
+      "shown_value": 1000,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F4",
+      "name": "编辑攻击",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F5",
+      "name": "编辑防御",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F6",
+      "name": "编辑气力恢复",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F7",
+      "name": "编辑暴击率",
+      "shown_value": 100,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F8",
+      "name": "增加暴击伤害",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F9",
+      "name": "编辑伤害加成",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Shift+F10",
+      "name": "编辑伤害减免",
+      "shown_value": 50,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": true,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+F1",
+      "name": "编辑寒冻耐性",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+F2",
+      "name": "编辑火焚耐性",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+F3",
+      "name": "编辑毒伤耐性",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    },
+    {
+      "key": "Ctrl+F4",
+      "name": "编辑雷蛰耐性",
+      "shown_value": 999,
+      "value_kind": "toggle_with_numeric_value",
+      "tooltip_marker": false,
+      "tooltip_text": null,
+      "enabled_shown": false
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+[01:44:07.013] GlossTrainer test host starting; renderer=DX11, automated=true
+[01:44:07.015] ASI path: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v034-dx11-required-retry-light-0/artifact/BlackMythWukong.asi
+[01:44:07.018] Output directory: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v034-dx11-required-retry-light-0
+[01:44:07.030] Created ownerless 1280x720 main candidate and hidden owned auxiliary window.
+[01:44:07.035] Calling InitializeASI before creating any real DXGI swapchain.
+[01:44:07.226] InitializeASI returned; calling it a second time to smoke-test idempotency.
+[01:44:07.229] Second InitializeASI call returned; graphics hooks should now be installed once.
+[01:44:07.484] D3D11 device ready; feature level=45312
+[01:44:07.576] Created first hidden auxiliary DX11 swapchain; it is not the render target.
+[01:44:07.598] Main test window visibility=1, foreground-target=0, focused-target=1; its swapchain is ready.
+[01:44:14.403] Automated legacy W keydown queued before opening the menu (ok=1).
+[01:44:14.503] Host WndProc observed the legacy W key held before the menu key.
+[01:44:14.616] Saved GPU backbuffer screenshot: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v034-dx11-required-retry-light-0\GlossTrainer.Host-baseline.bmp
+[01:44:14.803] Automated menu key show queued as window messages (VK=45, ok=1).
+[01:44:14.808] Message pump received configured menu key down; foreground-target=1, focused-target=1.
+[01:44:15.103] Legacy held-key release on menu open: 1.
+[01:44:15.104] Automated later legacy W keyup queued after the synthetic release check (ok=1).
+[01:44:15.303] Host WndProc remained released after the later W keyup: 1.
+[01:44:15.616] Saved GPU backbuffer screenshot: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v034-dx11-required-retry-light-0\GlossTrainer.Host-open.bmp
+[01:44:15.622] Menu show visual delta from baseline: 652732 pixels.
+[01:44:15.623] Main swapchain selection verified: the menu was read from the visible ownerless swapchain.
+[01:44:16.404] Automated menu key hide queued as window messages (VK=45, ok=1).
+[01:44:16.407] Message pump received configured menu key down; foreground-target=1, focused-target=1.
+[01:44:17.015] Saved GPU backbuffer screenshot: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v034-dx11-required-retry-light-0\GlossTrainer.Host-hidden.bmp
+[01:44:17.026] Menu hide visual delta: open-to-hidden=652732, baseline-to-hidden=0 pixels.
+[01:44:17.803] Automated client resize to 1440x810 requested.
+[01:44:17.807] Main swapchain resized to 1440x810.
+[01:44:18.804] Automated minimize requested.
+[01:44:18.813] Main window entered minimized state.
+[01:44:19.805] Automated restore requested.
+[01:44:19.821] Main window restored and drawable.
+[01:44:20.603] Automated menu key show after restore queued as window messages (VK=45, ok=1).
+[01:44:20.608] Message pump received configured menu key down; foreground-target=1, focused-target=1.
+[01:44:21.418] Saved GPU backbuffer screenshot: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v034-dx11-required-retry-light-0\GlossTrainer.Host-restored.bmp
+[01:44:22.608] Automated result: PASS; frames=3300, resize=1, minimized=1, restored=1, showVerified=1, hideVerified=1, mainSwapchainSelected=1, heldKeyDown=1, heldKeyReleasedOnShow=1, laterKeyUp=1, screenshots=4
+[01:44:22.644] Leaving ASI loaded until process exit (hot unload is unsupported).

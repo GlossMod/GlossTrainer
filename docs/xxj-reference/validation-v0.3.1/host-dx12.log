@@ -1,0 +1,39 @@
+[22:54:05.962] GlossTrainer test host starting; renderer=DX12, automated=true
+[22:54:05.965] ASI path: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v031-items/artifact/BlackMythWukong.asi
+[22:54:05.967] Output directory: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v031-items
+[22:54:05.981] Created ownerless 1280x720 main candidate and hidden owned auxiliary window.
+[22:54:05.986] Calling InitializeASI before creating any real DXGI swapchain.
+[22:54:06.184] InitializeASI returned; calling it a second time to smoke-test idempotency.
+[22:54:06.186] Second InitializeASI call returned; graphics hooks should now be installed once.
+[22:54:06.564] Created hidden owned auxiliary DX12 swapchain on the unrelated direct queue.
+[22:54:06.566] Created the unrelated direct queue and auxiliary chain before the main queue.
+[22:54:06.594] Main DX12 swapchain uses a separate direct queue created after the unrelated queue.
+[22:54:06.618] Main test window visibility=1, foreground-target=0, focused-target=1; its swapchain is ready.
+[22:54:13.428] Automated legacy W keydown queued before opening the menu (ok=1).
+[22:54:13.529] Host WndProc observed the legacy W key held before Insert.
+[22:54:13.634] Saved GPU backbuffer screenshot: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v031-items\GlossTrainer.Host-baseline.bmp
+[22:54:13.829] Automated Insert show queued as window messages (ok=1).
+[22:54:13.832] Message pump received Insert down; foreground-target=0, focused-target=1.
+[22:54:14.128] Legacy held-key release on menu open: 0.
+[22:54:14.130] Automated later legacy W keyup queued after the synthetic release check (ok=1).
+[22:54:14.133] Legacy held-key release on menu open: 1.
+[22:54:14.134] Automated later legacy W keyup queued after the synthetic release check (ok=1).
+[22:54:14.329] Host WndProc remained released after the later W keyup: 1.
+[22:54:14.635] Saved GPU backbuffer screenshot: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v031-items\GlossTrainer.Host-open.bmp
+[22:54:14.643] Insert show visual delta from baseline: 652732 pixels.
+[22:54:14.645] Main swapchain selection verified: the menu was read from the visible ownerless swapchain.
+[22:54:15.430] Automated Insert hide queued as window messages (ok=1).
+[22:54:15.434] Message pump received Insert down; foreground-target=0, focused-target=1.
+[22:54:16.034] Saved GPU backbuffer screenshot: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v031-items\GlossTrainer.Host-hidden.bmp
+[22:54:16.050] Insert hide visual delta: open-to-hidden=652732, baseline-to-hidden=0 pixels.
+[22:54:16.829] Automated client resize to 1440x810 requested.
+[22:54:16.837] Main swapchain resized to 1440x810.
+[22:54:17.828] Automated minimize requested.
+[22:54:17.834] Main window entered minimized state.
+[22:54:18.827] Automated restore requested.
+[22:54:18.838] Main window restored and drawable.
+[22:54:19.628] Automated Insert show after restore queued as window messages (ok=1).
+[22:54:19.633] Message pump received Insert down; foreground-target=1, focused-target=1.
+[22:54:20.435] Saved GPU backbuffer screenshot: E:\GitHub\GlossMod\GlossTrainer\build\test-output\v031-items\GlossTrainer.Host-restored.bmp
+[22:54:21.629] Automated result: PASS; frames=3345, resize=1, minimized=1, restored=1, showVerified=1, hideVerified=1, mainSwapchainSelected=1, heldKeyDown=1, heldKeyReleasedOnShow=1, laterKeyUp=1, screenshots=4
+[22:54:21.664] Leaving ASI loaded until process exit (hot unload is unsupported).

@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "gameplay/state.hpp"
 #include <MinHook.h>
 #include <atomic>
 #include <format>
@@ -25,6 +26,7 @@ extern "C" __declspec(dllexport) void InitializeASI() {
             return;
         }
         gloss::Log("Early hooks installed; waiting for the game's swapchain");
+        gloss::gameplay::Initialize();
     } catch (const std::exception& error) {
         gloss::Log(std::format("Initialization failed: {}", error.what()));
     } catch (...) {

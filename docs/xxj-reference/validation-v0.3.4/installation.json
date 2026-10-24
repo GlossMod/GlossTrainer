@@ -1,0 +1,26 @@
+{
+  "version": "0.3.4",
+  "installedAt": "2026-10-25T01:51:25.3554438+08:00",
+  "buildSha256": "4D37DE1373AC7192422DF4E89714E9E2DBE7A2E7D4F4F863AAC9EACC2B126F90",
+  "installedSha256": "4D37DE1373AC7192422DF4E89714E9E2DBE7A2E7D4F4F863AAC9EACC2B126F90",
+  "configurationBefore": [
+    {
+      "Path": "E:\\steam\\steamapps\\common\\BlackMythWukong\\b1\\Binaries\\Win64\\scripts\\GlossTrainer\\ui.ini",
+      "Hash": "66BA4A08AD860E03BD32AE880135B8587E9FF2EC13095040A706258CD8FE9910"
+    },
+    {
+      "Path": "E:\\steam\\steamapps\\common\\BlackMythWukong\\b1\\Binaries\\Win64\\scripts\\GlossTrainer\\hotkeys.ini",
+      "Hash": "CDBE7F25434FE3B95C45FB7AEC1CF1DF14C50AFCB12B972D88C95B96E915DF06"
+    }
+  ],
+  "configurationAfter": [
+    {
+      "Path": "E:\\steam\\steamapps\\common\\BlackMythWukong\\b1\\Binaries\\Win64\\scripts\\GlossTrainer\\ui.ini",
+      "Hash": "66BA4A08AD860E03BD32AE880135B8587E9FF2EC13095040A706258CD8FE9910"
+    },
+    {
+      "Path": "E:\\steam\\steamapps\\common\\BlackMythWukong\\b1\\Binaries\\Win64\\scripts\\GlossTrainer\\hotkeys.ini",
+      "Hash": "CDBE7F25434FE3B95C45FB7AEC1CF1DF14C50AFCB12B972D88C95B96E915DF06"
+    }
+  ]
+}

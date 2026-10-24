@@ -1,51 +1,40 @@
 # GlossTrainer
 
-《黑神话：悟空》Windows x64 游戏内修改器框架。使用 C++20、Dear ImGui 1.92.9 和 MinHook 1.3.4，支持 DX11 / DX12 覆盖层，通过 [Ultimate ASI Loader v10.0.0](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v10.0.0) 自动加载。
+**By: 小莫**
 
-首版包含界面、输入接管、配置和日志；“修改功能”页是占位页，尚无游戏数值修改。菜单默认隐藏，进入游戏后按 **Insert** 打开或关闭。界面提供“概览 / 修改功能 / 设置”，支持简体中文、亮暗主题和界面缩放。关闭按钮隐藏菜单；游戏世界继续运行。
+GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个游戏的界面、功能适配与验证代码放在独立目录；公共构建、安装和发布工具保留在项目根目录。
 
-## 构建与安装
+使用 C++20、Dear ImGui 和 MinHook，提供支持亮色 / 暗色主题的中文界面、可自定义快捷键、配置持久化和日志。游戏接口与兼容范围以各模块文档为准。
 
-需要 Windows、Visual Studio 2022 C++ 桌面开发工具（含 Windows SDK）及 [xmake](https://xmake.io/)。在仓库根目录执行：
+## 游戏模块
 
-```powershell
-xmake f -p windows -a x64 -m release
-xmake
+| 模块 | 说明 |
+| --- | --- |
+| [BlackMythWukong](BlackMythWukong/readme.md) | 《黑神话：悟空》的功能、安装、使用及适配说明 |
 
-# 退出游戏后，构建并安装到实际游戏 EXE 所在目录。
-xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" --name=BlackMythWukong
+## 项目结构
 
-# 只预览游戏目录的安装；仍会先构建 ASI。
-xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" --name=BlackMythWukong --dry-run
-```
+- 游戏目录：源码、游戏适配及回归测试。
+- `Scripts/`：构建辅助、清单式安装 / 卸载、发行包生成和校验。
+- `.github/workflows/`：Windows x64 构建、回归与 GitHub Releases 发布。
+- `docs/`：架构、验证与维护文档。
+- `licenses/`：第三方依赖许可。
 
-调试版本使用 `xmake f -p windows -a x64 -m debug` 后执行 `xmake`。安装器不会创建不存在的游戏目录，必须找到该目录下的 `b1-Win64-Shipping.exe`，并验证 EXE、ASI、Loader 为 x64 PE。
+## 构建与发布
 
-安装器下载并核验固定版本 Loader，安装 `version.dll`、`version.ini` 和 `scripts\GlossTrainer.asi`，保留现有 `dwmapi.dll`、小地图和其他插件。重复安装仅更新清单记录且哈希仍匹配的文件；同名未知文件或外部改写文件会导致安装整体拒绝，错误信息会指出具体路径。不要直接覆盖其他插件的代理 DLL。
-
-## 使用与文件位置
-
-- **Insert**：切换菜单；设置页切换亮暗主题和缩放，窗口位置自动保存。
-- 菜单打开时接管键鼠、释放鼠标限位；关闭菜单或游戏失焦时恢复输入。支持 Alt+Tab 和窗口尺寸变化。
-- 配置：游戏 EXE 目录下的 `scripts\GlossTrainer\ui.ini`。
-- 运行日志：`scripts\GlossTrainer\logs\trainer.log`，超过 2 MiB 后轮换为 `trainer.previous.log`。
-- 安装清单：`scripts\GlossTrainer\install-manifest.json`。卸载后配置和日志保留。
-- 不提供运行中卸载；更新或卸载前需正常退出游戏。
+需要 Windows、Visual Studio 2022 C++ 桌面工具、Windows SDK 及 [xmake](https://xmake.io/)。在仓库根目录配置，再构建相应模块：
 
 ```powershell
-# 卸载前预览
-xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" --name=BlackMythWukong --uninstall --dry-run
-
-# 卸载清单记录且未被改写的文件，不构建项目
-xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" --name=BlackMythWukong --uninstall
+xmake f -y -p windows -a x64 -m release
+xmake build <模块名>
 ```
 
-直接安装已有 ASI、缓存目录、冲突排查和验证方法见 [安装说明](docs/install.md)。
+输出位于 `build/release/`；Debug 使用 `-m debug`。安装方式与依赖见各模块文档。
 
-## 验证范围
+正式 `vX.Y.Z` 标签触发 Debug / Release 构建、回归、打包和 Releases 发布；手动运行 workflow 仅构建验证。流程、版本规则和本地打包方式见 [发布说明](docs/releasing.md)。
 
-DX11 / DX12 测试宿主用于验证实际 MinHook 链路、交换链和尺寸变化，不代表真实游戏验收。真实游戏还需检查 Loader 自动加载、Insert、中文、亮暗主题、输入恢复、最小化、退出及现有插件共存。游戏启动参数可分别使用 `-dx11`、`-dx12`；若当前游戏拒绝某模式，应记录该限制，只报告实际完成的游戏内验证。
+更新检查只使用公开 GitHub Releases，不自动下载安装。成功确认有新版后要求玩家自行下载；检查失败不限制使用，仅显示“检查更新失败”。
 
-界面原型使用 `custom-imagegen` 的 `gpt-image-2.5` 生成，随后按原型实现；构建和验证结果以任务实际记录为准，本 README 不代替验收记录。
+[下载最新发行版](https://github.com/GlossMod/GlossTrainer/releases/latest) · [源码](https://github.com/GlossMod/GlossTrainer)
 
-本机实际结果和未完成项目见 [验证记录](docs/verification.md)，模块及 Hook 生命周期见 [架构说明](docs/architecture.md)。第三方许可保存在 `licenses/`；分发 ASI 时应同时保留这些许可。Loader 由安装器从固定官方发布下载。
+第三方许可位于 [licenses](licenses/)，分发时请保留。各模块的运行要求、使用说明和验证范围以模块 README 为准。

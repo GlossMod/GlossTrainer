@@ -1,0 +1,46 @@
+2026-10-25 00:43:56.570 [65052] GlossTrainer 0.3.3 initializing; process 51000
+2026-10-25 00:43:56.572 [65052] Initializing MinHook
+2026-10-25 00:43:56.573 [65052] Installing input hooks
+2026-10-25 00:43:56.575 [65052] Input hook ClipCursor: resolving target
+2026-10-25 00:43:56.576 [65052] Input hook ClipCursor: MH_CreateHook begin
+2026-10-25 00:43:56.577 [65052] Input hook ClipCursor: MH_CreateHook returned MH_OK
+2026-10-25 00:43:56.578 [65052] Input hook ClipCursor: MH_QueueEnableHook begin
+2026-10-25 00:43:56.579 [65052] Input hook ClipCursor: MH_QueueEnableHook returned MH_OK
+2026-10-25 00:43:56.580 [65052] Input hook SetCursorPos: resolving target
+2026-10-25 00:43:56.580 [65052] Input hook SetCursorPos: MH_CreateHook begin
+2026-10-25 00:43:56.582 [65052] Input hook SetCursorPos: MH_CreateHook returned MH_OK
+2026-10-25 00:43:56.583 [65052] Input hook SetCursorPos: MH_QueueEnableHook begin
+2026-10-25 00:43:56.584 [65052] Input hook SetCursorPos: MH_QueueEnableHook returned MH_OK
+2026-10-25 00:43:56.584 [65052] Input hook GetRawInputData: resolving target
+2026-10-25 00:43:56.585 [65052] Input hook GetRawInputData: MH_CreateHook begin
+2026-10-25 00:43:56.586 [65052] Input hook GetRawInputData: MH_CreateHook returned MH_OK
+2026-10-25 00:43:56.587 [65052] Input hook GetRawInputData: MH_QueueEnableHook begin
+2026-10-25 00:43:56.588 [65052] Input hook GetRawInputData: MH_QueueEnableHook returned MH_OK
+2026-10-25 00:43:56.589 [65052] Input hooks: MH_ApplyQueued begin
+2026-10-25 00:43:56.669 [65052] Input hooks: MH_ApplyQueued returned MH_OK
+2026-10-25 00:43:56.670 [65052] Installing graphics hooks
+2026-10-25 00:43:56.671 [65052] Graphics initialization: loading dxgi.dll
+2026-10-25 00:43:56.672 [65052] Graphics initialization: dxgi.dll loaded
+2026-10-25 00:43:56.673 [65052] Graphics initialization: loading d3d11.dll
+2026-10-25 00:43:56.675 [65052] Graphics initialization: d3d11.dll loaded
+2026-10-25 00:43:56.676 [65052] Graphics initialization: creating CreateDXGIFactory hook
+2026-10-25 00:43:56.678 [65052] Graphics initialization: creating CreateDXGIFactory1 hook
+2026-10-25 00:43:56.678 [65052] Graphics initialization: creating CreateDXGIFactory2 hook
+2026-10-25 00:43:56.679 [65052] Graphics initialization: creating D3D11CreateDeviceAndSwapChain hook
+2026-10-25 00:43:56.680 [65052] Graphics initialization: applying discovery hooks
+2026-10-25 00:43:56.764 [65052] Graphics initialization: discovery hooks applied
+2026-10-25 00:43:56.766 [65052] Graphics initialization: factory and device bootstrap probes skipped
+2026-10-25 00:43:56.767 [65052] Graphics DX11/DX12 discovery hooks installed
+2026-10-25 00:43:56.768 [65052] Early hooks installed; waiting for the game's swapchain
+2026-10-25 00:43:56.774 [63160] Gameplay disabled: executable is not b1-Win64-Shipping.exe
+2026-10-25 00:43:57.198 [65052] Graphics swap chain captured
+2026-10-25 00:43:57.236 [65052] Graphics swap chain captured
+2026-10-25 00:43:57.444 [65052] Game window input attached; the configured menu hotkey toggles the menu
+2026-10-25 00:43:57.445 [65052] ImGui initialized with Simplified Chinese UI
+2026-10-25 00:43:57.453 [65052] DX12 renderer initialized with verified swap-chain command queue
+2026-10-25 00:44:04.625 [65052] Menu opened
+2026-10-25 00:44:06.228 [65052] Menu hidden
+2026-10-25 00:44:07.633 [65052] DX12 renderer initialized with verified swap-chain command queue
+2026-10-25 00:44:10.426 [65052] Menu opened
+2026-10-25 00:44:10.969 [65052] Menu hotkey: success: 菜单快捷键已保存
+2026-10-25 00:44:12.440 [65052] Menu hidden

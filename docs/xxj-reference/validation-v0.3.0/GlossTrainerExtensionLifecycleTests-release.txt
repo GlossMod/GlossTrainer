@@ -1,0 +1,12 @@
+PASS component replacement restores all live baselines
+PASS camera replacement and latest engine baseline restoration
+PASS same pawn with replacement controller cancels stale work
+PASS invalid session cancels queued actions and restores owned effects
+PASS failed world restoration retries and preserves pre-existing pause
+PASS UMG top-level discovery, new roots, and existing hidden/collapsed roots
+PASS UMG restores the latest game visibility and preserves layout collapse
+PASS UMG destroyed roots and same-address serial replacement reject stale restoration
+PASS UMG accepted close retries failed live roots without rehiding restored roots
+PASS UMG scene transition and pawn loss restore old live roots on retry
+PASS free camera retains original identity and closes without a pawn
+GlossTrainer extension lifecycle tests passed (0 failures)

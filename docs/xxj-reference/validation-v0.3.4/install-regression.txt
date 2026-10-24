@@ -1,0 +1,19 @@
+PASS: nonexistent game path is rejected
+PASS: missing game executable is rejected
+PASS: non-DLL artifact is rejected
+PASS: DryRun previews without game writes
+PASS: WhatIf previews without game writes
+PASS: unknown version.dll is protected
+PASS: unknown version.ini is protected
+PASS: unknown scripts\GlossTrainer.asi is protected
+PASS: corrupt cache is rejected
+PASS: running game process blocks install
+PASS: clean install downloads or validates fixed Loader
+PASS: repeat installation updates owned files
+PASS: missing owned file is repaired
+PASS: external modification blocks update
+PASS: external modification blocks uninstall
+PASS: uninstall preview preserves owned files
+PASS: manifest uninstall removes owned files
+PASS: repeat uninstall is a no-op
+Deployment fixture tests passed: 18 cases. No real game installation or ASI loading was performed.

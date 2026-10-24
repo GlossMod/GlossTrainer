@@ -1,0 +1,100 @@
+{
+  "scope": "read-only static inspection; neither trainer nor extracted DLL was executed",
+  "source_trainer": {
+    "path": "data/flyy/extracted/Black Myth Wukong v1.0-v1.0.20 Plus 44 Trainer.exe",
+    "sha256": "E81321810A9F5058ED73EDCE827453442D603CA89A2DE4939CE55B83E7D7FF63"
+  },
+  "resource": {
+    "resource_path": ["REMOTE", 250, 1033],
+    "resource_rva": "0x0017F3D8",
+    "trainer_file_offset": "0x0017A7D8",
+    "length_bytes": 142848,
+    "extracted_path": "data/flyy/analysis/resources/REMOTE-250.dll",
+    "sha256": "BE24440E4BD3C07729E931533B9B097DF945F57B876C28C0D8E0BBB743645324"
+  },
+  "pe": {
+    "type": "DLL",
+    "machine": "0x8664 (AMD64)",
+    "optional_magic": "0x020B (PE32+)",
+    "preferred_image_base": "0x0000000180000000",
+    "pe_timestamp": "0x6608FE30",
+    "timestamp_as_reported_by_dumpbin": "2024-03-31 14:09:52",
+    "section_count": 7,
+    "sections": [".text", ".rdata", ".data", ".pdata", "_RDATA", ".rsrc", ".reloc"],
+    "clr_descriptor": "absent"
+  },
+  "exports": {
+    "internal_export_name": "TrSpeedHack_x64.dll",
+    "named_export_count": 0,
+    "ordinal_exports": [
+      {"ordinal": 1, "rva": "0x00002DF0"},
+      {"ordinal": 2, "rva": "0x00002C80"},
+      {"ordinal": 3, "rva": "0x00002B10"},
+      {"ordinal": 4, "rva": "0x00002F80"},
+      {"ordinal": 5, "rva": "0x00002FE0"}
+    ]
+  },
+  "direct_imports_relevant_to_timing_and_hooks": {
+    "KERNEL32.dll": [
+      "GetTickCount",
+      "QueryPerformanceCounter",
+      "GetProcAddress",
+      "VirtualAlloc",
+      "VirtualProtect",
+      "VirtualQuery",
+      "OpenThread",
+      "CreateToolhelp32Snapshot",
+      "Thread32First",
+      "Thread32Next",
+      "SuspendThread",
+      "ResumeThread",
+      "GetThreadContext",
+      "SetThreadContext",
+      "FlushInstructionCache"
+    ],
+    "WINMM.dll": ["timeGetTime"]
+  },
+  "static_strings": {
+    "trainer_ascii": [
+      {"offset": "0x0010E8A6", "text": "QueryPerformanceCounter"},
+      {"offset": "0x0018F5E8", "text": "GetTickCount64"},
+      {"offset": "0x00196DF0", "text": "RtlQueryPerformanceCounter"},
+      {"offset": "0x00199304", "text": "TrSpeedHack_x64.dll"},
+      {"offset": "0x001114C8", "text": ".?AVTrRemote@@"},
+      {"offset": "0x001114E8", "text": ".?AVTrSpeedHack@@"},
+      {"offset": "0x000EE810", "encoding": "UTF-16LE", "text": "Unable to start a remote thread, Error Code: "}
+    ],
+    "trainer_utf16le": [
+      {"offset": "0x000F0878", "text": "REMOTE"},
+      {"offset": "0x000F0888", "text": "TrSpeedHack"},
+      {"offset": "0x000F3006", "text": "Ctrl+Num 5 - Set Game Speed"},
+      {"offset": "0x0019C964", "text": "Trainer Speedhack Library"},
+      {"offset": "0x0019CA80", "text": "TrSpeedHack.dll"}
+    ],
+    "embedded_dll_ascii": [
+      {"offset": "0x00014E10", "text": "GetTickCount64"},
+      {"offset": "0x0001C5F0", "text": "timeGetTime"},
+      {"offset": "0x0001C618", "text": "RtlQueryPerformanceCounter"},
+      {"offset": "0x0001EB2C", "text": "TrSpeedHack_x64.dll"},
+      {"offset": "0x0001EF82", "text": "Sleep"},
+      {"offset": "0x0001F03C", "text": "GetTickCount"},
+      {"offset": "0x0001F04C", "text": "QueryPerformanceCounter"}
+    ],
+    "embedded_dll_utf16le": [
+      {"offset": "0x0002218C", "text": "Trainer Speedhack Library"},
+      {"offset": "0x00022210", "text": "TrSpeedHack"},
+      {"offset": "0x000222A8", "text": "TrSpeedHack.dll"}
+    ],
+    "searched_but_not_found": ["SetSpeed", "Set Speed", "SpeedHackSetSpeed"]
+  },
+  "interpretation": {
+    "facts": [
+      "The custom REMOTE/250/1033 resource is a valid x64 PE DLL whose export directory identifies it as TrSpeedHack_x64.dll.",
+      "The DLL directly imports QueryPerformanceCounter, GetTickCount, and timeGetTime, and contains strings for GetTickCount64 and RtlQueryPerformanceCounter.",
+      "The DLL imports thread enumeration/suspend/context APIs and executable-memory APIs; it exposes five ordinal-only exports with no named export symbols.",
+      "The trainer contains a Ctrl+Num 5 - Set Game Speed label, RTTI names TrRemote and TrSpeedHack, the TrSpeedHack DLL name, and a remote-thread error string."
+    ],
+    "inference": "The global game-speed feature is likely provided by this embedded timing-hook library, separately from the script-local speed_f/player speed scripts. Timing API names and thread/context/memory imports are consistent with a speedhack implementation. The trainer/library call convention and which ordinal changes the multiplier are unresolved; no SetSpeed-named export or string was found.",
+    "limitations": "Static imports and strings do not prove runtime behavior, the hooked call sites, or the multiplier protocol. No trainer or payload was executed."
+  }
+}
