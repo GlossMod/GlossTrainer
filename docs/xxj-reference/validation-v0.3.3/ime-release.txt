@@ -1,8 +1,0 @@
-SKIP candidate-form readback: this IMM context/layout does not expose ImmGetCandidateWindow
-SKIP composition-form readback: this IMM context/layout does not expose ImmGetCompositionWindow
-PASS default HIMC, cross-thread request, repeated focus and hide restore
-PASS NULL original HIMC is restored exactly after focus loss and detach
-PASS independent pre-associated HIMC is preserved
-PASS NOLEGACY keyboard registration restores conditionally and preserves external changes
-PASS WM_IME_COMPOSITION takes one default path; synthetic WM_CHAR reaches ImGui once
-GlossTrainer IME integration tests passed

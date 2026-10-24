@@ -1,3 +1,0 @@
-GlossTrainer extension tests passed
-
-EXIT_CODE=0

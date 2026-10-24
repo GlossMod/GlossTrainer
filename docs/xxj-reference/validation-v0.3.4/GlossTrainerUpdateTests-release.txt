@@ -1,3 +1,0 @@
-PASS: version ordering, stable release validation, trusted URLs, bounded JSON, failed retry recovery
-
-EXIT_CODE=0

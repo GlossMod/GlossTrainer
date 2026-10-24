@@ -1,3 +1,0 @@
-GlossTrainer gameplay unit tests passed
-
-EXIT_CODE=0

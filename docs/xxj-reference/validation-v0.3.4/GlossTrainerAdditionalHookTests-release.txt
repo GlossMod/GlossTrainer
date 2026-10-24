@@ -1,3 +1,0 @@
-PASS additional gameplay hook policy (0 failure(s))
-
-EXIT_CODE=0
