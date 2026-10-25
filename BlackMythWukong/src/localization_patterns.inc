@@ -1,0 +1,11 @@
+// Fully anchored dynamic messages. Numbered captures retain their original content.
+{"{0} 个地标", "{0} landmarks"},
+{"{0} 项功能目录", "{0} trainer features"},
+{"技能 {0}", "Skill {0}"},
+{"已找到 {0} 个场景对象", "Found {0} scene objects"},
+{"已从游戏资源注册表找到 {0} 个 Tamer 资源；特殊/程序生成形态覆盖尚未确认{1}", "Found {0} Tamer assets in the game's Asset Registry; coverage of special/procedural forms is unconfirmed{1}"},
+{"游戏拒绝技能 {0}；检查当前状态、目标和冷却", "The game rejected skill {0}; check the current state, target, and cooldown"},
+{"快捷键已被「{0}」使用", "This hotkey is already used by \"{0}\""},
+{"该组合键已被「{0}」使用", "This key combination is already used by \"{0}\""},
+{"变身角色技能 {0}", "Transformation skill {0}"},
+{"已恢复悟空：{0}", "Wukong restored: {0}"},

@@ -6,7 +6,11 @@
 
 传送地标按 17 个场景分组，支持逐组或全部展开 / 折叠；搜索会展开匹配组，清空搜索后恢复原折叠状态。
 
+“变身”页提供角色搜索、分类、支持状态、技能槽编辑和恢复悟空入口。参考 Mod 的名称和资源路径仅作为目录线索；实际目录覆盖、原生接口要求和逐角色验证范围见 [变身实现记录](../docs/transformation.md)。角色的“未验证”状态不能视为稳定可玩承诺。
+
 文本输入控件支持中文输入法：窗口线程管理菜单专用输入法上下文，候选位置跟随输入光标，关闭菜单或失焦后恢复原关联。搜狗输入法的实际候选选词需在更新后由玩家确认；自动回归范围见验证记录。
+
+界面支持简体中文和 English，默认跟随游戏文本语言。“设置 → 语言”可选择“跟随游戏 / 简体中文 / English”，切换立即生效，偏好保存在 `scripts\GlossTrainer\language.ini`。设置页显示检测到的游戏语言及来源；暂时无法读取游戏语言时，明确显示使用系统语言临时回退。玩家自定义技能名和书签名保持原样。物品长篇说明目前保留原文，详细范围见[语言功能说明](../docs/localization.md)。
 
 功能快捷键初始全部未绑定。菜单内点击功能行的快捷键按钮可录制；Esc 取消，Backspace 或 Delete 清除；冲突绑定会被拒绝。界面开关默认 **Insert**，可在“设置 → 快捷键”点击“修改”录制按键或 Ctrl / Shift / Alt 组合键，支持恢复默认，不能留空。菜单键始终可用，独立于功能快捷键总开关；当前菜单组合和 **Ctrl+Shift+Home** 不能再分配给功能。两类绑定保存在 `scripts\GlossTrainer\hotkeys.ini`，主题、缩放和窗口位置保存在 `scripts\GlossTrainer\ui.ini`。
 
@@ -58,6 +62,7 @@ xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" 
 - “设置游戏速度”使用进程内 QPC 计时缩放，会影响同进程使用该时钟的世界逻辑、界面动画及其他组件。
 - 菜单打开时接管键鼠、释放鼠标限位；关闭菜单或游戏失焦时恢复输入。支持 Alt+Tab 和窗口尺寸变化。
 - 配置：游戏 EXE 目录下的 `scripts\GlossTrainer\ui.ini`（主题、缩放、窗口位置）与 `scripts\GlossTrainer\hotkeys.ini`（功能快捷键和 `[Menu]` 的 `Toggle=虚拟键码,修饰键掩码`）。
+- 变身技能配置：`scripts\GlossTrainer\transformation-bindings.cfg`，按角色稳定标识和实际技能 ID 保存自定义名称及按键。角色检查后显示完整技能列表，可搜索、选填名称、录制单键或 Ctrl/Shift/Alt 组合键，再点“保存技能配置”；名称留空使用原名。旧 `transformation-slots.cfg` 保留游戏动作/手柄映射。“试招”需关闭菜单并返回游戏才施放，30 秒未执行则取消。
 - 运行日志：`scripts\GlossTrainer\logs\trainer.log`，超过 2 MiB 后轮换为 `trainer.previous.log`。
 - 安装清单：`scripts\GlossTrainer\install-manifest.json`。卸载后配置和日志保留。
 - 不提供运行中卸载；更新或卸载前需正常退出游戏。
@@ -77,6 +82,16 @@ xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" 
 ```powershell
 xmake build GlossTrainerGameplayTests
 .\build\release\GlossTrainerGameplayTests.exe
+xmake build GlossTrainerTransformationTests GlossTrainerEngineBridgeTests GlossTrainerExtensionLifecycleTests
+.\build\release\GlossTrainerTransformationTests.exe
+.\build\release\GlossTrainerEngineBridgeTests.exe
+.\build\release\GlossTrainerExtensionLifecycleTests.exe
+xmake build GlossTrainerTransformationNativeTests GlossTrainerTransformationRuntimeTests
+.\build\release\GlossTrainerTransformationNativeTests.exe
+.\build\release\GlossTrainerTransformationRuntimeTests.exe
+xmake build GlossTrainerTransformationBindingTests GlossTrainerTransformationHotkeyTests
+.\build\release\GlossTrainerTransformationBindingTests.exe
+.\build\release\GlossTrainerTransformationHotkeyTests.exe
 xmake build GlossTrainerImeTests
 .\build\release\GlossTrainerImeTests.exe
 xmake build GlossTrainerHost

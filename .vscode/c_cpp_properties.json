@@ -1,0 +1,11 @@
+{
+    "configurations": [
+        {
+            "name": "Windows x64",
+            "compileCommands": "${workspaceFolder}/.vscode/compile_commands.json",
+            "intelliSenseMode": "windows-msvc-x64",
+            "cppStandard": "c++20"
+        }
+    ],
+    "version": 4
+}

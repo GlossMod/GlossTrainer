@@ -2,8 +2,11 @@
 #include "midhook.hpp"
 #include "../runtime.hpp"
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cmath>
 #include <format>
+#include <limits>
 #include <set>
 
 namespace gloss::gameplay::engine
@@ -76,6 +79,16 @@ namespace gloss::gameplay::engine
             void (*weakSet)(WeakObject *, void *);
             void *(*weakGet)(WeakObject *);
             std::int32_t (*weakValid)(WeakObject *, std::int32_t, std::int32_t);
+            void *(*structType)(void *);
+            void (*initializeValue)(void *, void *);
+            void (*destroyValue)(void *, void *);
+            void (*copyValue)(void *, void *, void *);
+            void (*nameFromString)(NameValue *, ScriptArray *, std::int32_t);
+            void (*nameToString)(NameValue *, ScriptArray *);
+            int (*structureStorageSize)(void *);
+            void *(*cppStructOps)(void *);
+            int (*cppStructSize)(void *);
+            std::int32_t (*exportText)(void *, ScriptArray *, void *, void *, void *, std::int32_t, void *);
         } api{};
         std::atomic_bool ready{};
         std::uint64_t frameHandle{};
@@ -84,7 +97,7 @@ namespace gloss::gameplay::engine
             switch (type)
             {
             case Type::Object:
-                return 0x4000000ull;
+                return 0x10000ull; // Hard UObject pointer, never a weak/soft reference.
             case Type::Int:
                 return 0x80ull;
             case Type::Float:
@@ -94,13 +107,23 @@ namespace gloss::gameplay::engine
             case Type::Bool:
                 return 0x20000ull;
             case Type::Vector:
+            case Type::Rotator:
+            case Type::Transform:
                 return 0x100000ull;
             case Type::String:
                 return 0x4000ull;
             case Type::ObjectArray:
+            case Type::IntArray:
+            case Type::StructArray:
                 return 0x200000ull;
             case Type::Enum:
                 return 0x1000000000000ull;
+            case Type::Name:
+                return 0x2000ull;
+            case Type::Interface:
+                return 0x1000ull;
+            case Type::Byte:
+                return 0x40ull;
             }
             return 0;
         }
@@ -111,16 +134,33 @@ namespace gloss::gameplay::engine
                    Safe(api.valid, valid, reinterpret_cast<void *>(object)) && valid == 1 &&
                    Safe(api.pendingKill, dead, reinterpret_cast<void *>(object)) && !dead;
         }
+        bool ReadWide(ScriptArray value, std::wstring &result, int limit = 131072)
+        {
+            result.clear();
+            if (value.num == 0)
+                return value.capacity >= 0;
+            if (!value.data || value.num < 1 || value.num > limit || value.capacity < value.num)
+                return false;
+            result.resize(value.num);
+            if (!ReadMemory(reinterpret_cast<std::uintptr_t>(value.data), result.data(), result.size() * 2) || result.back())
+            {
+                result.clear();
+                return false;
+            }
+            result.pop_back();
+            return true;
+        }
         std::wstring Wide(ScriptArray value)
         {
-            if (!value.data || value.num < 1 || value.num > 4096 || value.capacity < value.num)
-                return {};
-            std::wstring result(value.num, L'\0');
-            if (!ReadMemory(reinterpret_cast<std::uintptr_t>(value.data), result.data(), result.size() * 2) || result.back())
-                return {};
-            result.pop_back();
+            std::wstring result;
+            ReadWide(value, result, 4096);
             return result;
         }
+        struct EngineString
+        {
+            ScriptArray value{};
+            ~EngineString() { SafeVoid(api.destroy, &value); }
+        };
         std::string Utf8(std::wstring_view value)
         {
             const auto count = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
@@ -128,6 +168,248 @@ namespace gloss::gameplay::engine
             if (count)
                 WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), count, nullptr, nullptr);
             return result;
+        }
+        struct ReflectedProperty
+        {
+            void *ptr{};
+            int offset{}, size{};
+            std::uint64_t flags{};
+        };
+        bool Describe(void *field, int containerSize, bool parameter, ReflectedProperty &property)
+        {
+            int dim{};
+            property.ptr = field;
+            return field && Safe(api.flags, property.flags, field) &&
+                   Safe(parameter ? api.offset : api.internalOffset, property.offset, field) &&
+                   Safe(api.element, property.size, field) && Safe(api.dim, dim, field) && dim == 1 &&
+                   property.offset >= 0 && property.offset <= containerSize && property.size > 0 && property.size <= containerSize - property.offset;
+        }
+        bool FieldName(void *field, std::string &name)
+        {
+            EngineString text;
+            std::wstring wide;
+            if (!SafeVoid(api.name, field, &text.value) || !ReadWide(text.value, wide, 4096))
+                return false;
+            name = Utf8(wide);
+            return !name.empty();
+        }
+        bool HasCast(void *property, std::uint64_t flag)
+        {
+            std::int32_t result{};
+            return flag && Safe(api.cast, result, property, flag) && result == 1;
+        }
+        bool FindField(void *structure, int containerSize, std::string_view name, ReflectedProperty &result)
+        {
+            if (name.empty() || name.size() > 256)
+                return false;
+            for (int depth = 0; structure && depth < 64; ++depth)
+            {
+                void *field{};
+                if (!Safe(api.children, field, structure))
+                    return false;
+                for (int count = 0; field && count < 4096; ++count)
+                {
+                    std::string key;
+                    if (!FieldName(field, key))
+                        return false;
+                    if (key == name)
+                        return Describe(field, containerSize, false, result);
+                    void *next{};
+                    if (!Safe(api.next, next, field))
+                        return false;
+                    field = next;
+                }
+                if (field)
+                    return false;
+                void *parent{};
+                if (!Safe(api.super, parent, structure) || parent == structure)
+                    return false;
+                structure = parent;
+            }
+            return false;
+        }
+        bool StructStorageSize(void *structure, int &size)
+        {
+            // Native structs can contain storage that is not a UPROPERTY.
+            // Mirror NativeReflection.GetStructSize instead of using the last
+            // reflected property's end as the array stride.
+            void *ops{};
+            return api.structureStorageSize && api.cppStructOps && api.cppStructSize && Safe(api.cppStructOps, ops, structure) &&
+                   (ops ? Safe(api.cppStructSize, size, ops) : Safe(api.structureStorageSize, size, structure));
+        }
+        bool StructIdentity(void *property, std::wstring_view path, int expectedSize, void *&structure)
+        {
+            int size{};
+            const auto expected = Find(path);
+            return api.structType && expected && HasCast(property, 0x100000ull) && Safe(api.structType, structure, property) &&
+                   structure == reinterpret_cast<void *>(expected) && StructStorageSize(structure, size) && size == expectedSize;
+        }
+        bool DoubleFields(void *structure, int size, std::span<const char *const> names)
+        {
+            for (std::size_t i = 0; i < names.size(); ++i)
+            {
+                ReflectedProperty property;
+                if (!FindField(structure, size, names[i], property) || property.offset != static_cast<int>(i * sizeof(double)) ||
+                    property.size != sizeof(double) || !HasCast(property.ptr, CastFlag(Type::Double)))
+                    return false;
+            }
+            return true;
+        }
+        bool KnownStruct(void *property, Type type)
+        {
+            void *structure{};
+            static constexpr const char *vectorNames[]{"X", "Y", "Z"};
+            static constexpr const char *rotatorNames[]{"Pitch", "Yaw", "Roll"};
+            static constexpr const char *quatNames[]{"X", "Y", "Z", "W"};
+            if (type == Type::Vector)
+                return StructIdentity(property, L"/Script/CoreUObject.Vector", sizeof(extensions::Vec3), structure) &&
+                       DoubleFields(structure, sizeof(extensions::Vec3), vectorNames);
+            if (type == Type::Rotator)
+                return StructIdentity(property, L"/Script/CoreUObject.Rotator", sizeof(Rotator), structure) &&
+                       DoubleFields(structure, sizeof(Rotator), rotatorNames);
+            if (type != Type::Transform || !StructIdentity(property, L"/Script/CoreUObject.Transform", sizeof(Transform), structure))
+                return false;
+            ReflectedProperty rotation, translation, scale;
+            void *quat{};
+            return FindField(structure, sizeof(Transform), "Rotation", rotation) && rotation.offset == offsetof(Transform, rotation) && rotation.size == 32 &&
+                   StructIdentity(rotation.ptr, L"/Script/CoreUObject.Quat", 32, quat) && DoubleFields(quat, 32, quatNames) &&
+                   FindField(structure, sizeof(Transform), "Translation", translation) && translation.offset == offsetof(Transform, translation) &&
+                   translation.size == sizeof(extensions::Vec3) && KnownStruct(translation.ptr, Type::Vector) &&
+                   FindField(structure, sizeof(Transform), "Scale3D", scale) && scale.offset == offsetof(Transform, scale) &&
+                   scale.size == sizeof(extensions::Vec3) && KnownStruct(scale.ptr, Type::Vector);
+        }
+        bool IsArray(Type type) { return type == Type::ObjectArray || type == Type::IntArray || type == Type::StructArray; }
+        bool IsDynamic(Type type) { return type == Type::String || IsArray(type); }
+        std::size_t FixedSize(Type type)
+        {
+            switch (type)
+            {
+            case Type::Object: return sizeof(std::uintptr_t);
+            case Type::Int: case Type::Float: case Type::Bool: return 4;
+            case Type::Double: return 8;
+            case Type::Vector: return sizeof(extensions::Vec3);
+            case Type::Rotator: return sizeof(Rotator);
+            case Type::Transform: return sizeof(Transform);
+            case Type::Name: return sizeof(NameValue);
+            case Type::Interface: return sizeof(ScriptInterface);
+            case Type::Enum: case Type::Byte: return 1;
+            default: return sizeof(ScriptArray);
+            }
+        }
+        bool ValidateValue(const ReflectedProperty &property, const Arg &arg, bool nested = false)
+        {
+            if (!HasCast(property.ptr, CastFlag(arg.type)))
+                return false;
+            if (IsArray(arg.type))
+            {
+                if (nested || !arg.output || property.size != sizeof(ScriptArray))
+                    return false;
+                void *inner{};
+                int size{}, dim{};
+                if (!Safe(api.inner, inner, property.ptr) || !inner || !Safe(api.element, size, inner) || !Safe(api.dim, dim, inner) || dim != 1)
+                    return false;
+                if (arg.type == Type::ObjectArray || arg.type == Type::IntArray)
+                    return size == (arg.type == Type::ObjectArray ? 8 : 4) && HasCast(inner, CastFlag(arg.type == Type::ObjectArray ? Type::Object : Type::Int));
+                if (!api.initializeValue || !api.destroyValue || !api.structType || arg.structPath.empty() || arg.fields.empty() || arg.fields.size() > 32 || size < 1 || size > 65536)
+                    return false;
+                void *structure{};
+                if (!StructIdentity(inner, arg.structPath, size, structure))
+                    return false;
+                std::set<std::string> names;
+                for (const auto &field : arg.fields)
+                {
+                    ReflectedProperty reflected;
+                    if (!field.name || !names.insert(field.name).second || !FindField(structure, size, field.name, reflected) || !ValidateValue(reflected, field, true))
+                        return false;
+                }
+                return true;
+            }
+            if (arg.type == Type::Bool)
+                return (property.size == 1 || property.size == 4) && arg.bytes.size() == 4;
+            if (property.size != FixedSize(arg.type))
+                return false;
+            if (arg.type == Type::String)
+                return arg.text.size() < 131071 && arg.text.find(L'\0') == std::wstring::npos;
+            if (arg.bytes.size() != FixedSize(arg.type))
+                return false;
+            if (arg.type == Type::Name)
+                return api.nameFromString && api.nameToString && arg.text.size() < 1024 && arg.text.find(L'\0') == std::wstring::npos;
+            if (arg.type == Type::Vector || arg.type == Type::Rotator || arg.type == Type::Transform)
+            {
+                if (property.offset % (arg.type == Type::Transform ? 16 : 8) || !KnownStruct(property.ptr, arg.type))
+                    return false;
+                for (std::size_t offset = 0; offset < arg.bytes.size(); offset += sizeof(double))
+                {
+                    double value{};
+                    std::memcpy(&value, arg.bytes.data() + offset, sizeof(value));
+                    if (!std::isfinite(value))
+                        return false;
+                }
+            }
+            return true;
+        }
+        bool DecodeValue(const ReflectedProperty &property, const void *address, Arg &arg)
+        {
+            if (arg.type == Type::String)
+            {
+                ScriptArray value{};
+                return ReadMemory(reinterpret_cast<std::uintptr_t>(address), &value, sizeof(value)) && ReadWide(value, arg.text);
+            }
+            if (arg.type == Type::Name)
+            {
+                NameValue value{};
+                EngineString text;
+                return ReadMemory(reinterpret_cast<std::uintptr_t>(address), &value, sizeof(value)) && value.comparisonIndex >= 0 && value.number >= 0 &&
+                       SafeVoid(api.nameToString, &value, &text.value) && ReadWide(text.value, arg.text, 1024) &&
+                       ReadMemory(reinterpret_cast<std::uintptr_t>(address), arg.bytes.data(), arg.bytes.size());
+            }
+            if (IsArray(arg.type))
+            {
+                ScriptArray array{};
+                void *inner{};
+                int element{};
+                if (!ReadMemory(reinterpret_cast<std::uintptr_t>(address), &array, sizeof(array)) || array.num < 0 || array.num > 131072 ||
+                    array.capacity < array.num || (array.num && !array.data) || !Safe(api.inner, inner, property.ptr) || !inner || !Safe(api.element, element, inner) || element < 1 || element > 65536 ||
+                    static_cast<std::size_t>(array.num) * element > 64u * 1024u * 1024u)
+                    return false;
+                const auto storage = static_cast<std::size_t>(array.num) * element;
+                if (storage > (std::numeric_limits<std::uintptr_t>::max)() - reinterpret_cast<std::uintptr_t>(array.data))
+                    return false;
+                if (arg.type != Type::StructArray)
+                {
+                    arg.bytes.resize(static_cast<std::size_t>(array.num) * element);
+                    return arg.bytes.empty() || ReadMemory(reinterpret_cast<std::uintptr_t>(array.data), arg.bytes.data(), arg.bytes.size());
+                }
+                void *structure{};
+                if (!StructIdentity(inner, arg.structPath, element, structure))
+                    return false;
+                std::vector<ReflectedProperty> fields(arg.fields.size());
+                for (std::size_t i = 0; i < fields.size(); ++i)
+                    if (!FindField(structure, element, arg.fields[i].name, fields[i]))
+                        return false;
+                arg.records.clear();
+                arg.records.reserve(array.num);
+                for (int index = 0; index < array.num; ++index)
+                {
+                    auto record = arg.fields;
+                    const auto base = reinterpret_cast<std::uintptr_t>(array.data) + static_cast<std::size_t>(index) * element;
+                    for (std::size_t i = 0; i < fields.size(); ++i)
+                        if (!DecodeValue(fields[i], reinterpret_cast<void *>(base + fields[i].offset), record[i]))
+                            return false;
+                    arg.records.push_back(std::move(record));
+                }
+                return true;
+            }
+            if (arg.type == Type::Bool)
+            {
+                std::int32_t value{};
+                if (!Safe(api.getBool, value, property.ptr, const_cast<void *>(address)))
+                    return false;
+                arg.bytes.resize(sizeof(value));
+                std::memcpy(arg.bytes.data(), &value, sizeof(value));
+                return true;
+            }
+            return ReadMemory(reinterpret_cast<std::uintptr_t>(address), arg.bytes.data(), arg.bytes.size());
         }
         bool IsObject(std::uintptr_t object, const wchar_t *type) noexcept
         {
@@ -276,6 +558,16 @@ namespace gloss::gameplay::engine
         optional(api.weakSet, "Export_FWeakObjectPtr_SetUObject");
         optional(api.weakGet, "Export_FWeakObjectPtr_Get");
         optional(api.weakValid, "Export_FWeakObjectPtr_IsValid");
+        optional(api.structType, "Export_FStructProperty_Get_Struct");
+        optional(api.initializeValue, "Export_FProperty_InitializeValue");
+        optional(api.destroyValue, "Export_FProperty_DestroyValue");
+        optional(api.copyValue, "Export_FProperty_CopySingleValue");
+        optional(api.nameFromString, "Export_FName_FromString");
+        optional(api.nameToString, "Export_FName_ToString");
+        optional(api.structureStorageSize, "Export_UStruct_GetStructureSize");
+        optional(api.cppStructOps, "Export_UScriptStruct_GetCppStructOps");
+        optional(api.cppStructSize, "Export_ICppStructOps_GetSize");
+        optional(api.exportText, "Export_FProperty_ExportText_Direct");
         ready.store(complete, std::memory_order_release);
         Log(std::format("Engine bridge: {} validated registrations; bindings {}", found.size(), complete ? "ready" : "unavailable"));
         return complete;
@@ -294,15 +586,14 @@ namespace gloss::gameplay::engine
     bool IsActor(std::uintptr_t object) noexcept { return IsObject(object, L"/Script/Engine.Actor"); }
     std::uintptr_t Find(std::wstring_view path)
     {
-        if (!IsGameThread() || path.empty() || path.size() > 512)
+        if (!IsGameThread() || path.empty() || path.size() > 512 || path.find(L'\0') != std::wstring_view::npos)
             return 0;
-        ScriptArray name{};
+        EngineString name;
         const std::wstring text(path);
-        if (!SafeVoid(api.string, text.c_str(), &name))
+        if (!SafeVoid(api.string, text.c_str(), &name.value))
             return 0;
         void *result{};
-        Safe(api.find, result, nullptr, nullptr, &name, 0);
-        SafeVoid(api.destroy, &name);
+        Safe(api.find, result, nullptr, nullptr, &name.value, 0);
         return reinterpret_cast<std::uintptr_t>(result);
     }
     std::uintptr_t Construct(std::uintptr_t unrealClass, std::uintptr_t outer)
@@ -313,6 +604,47 @@ namespace gloss::gameplay::engine
         void *object{};
         return Safe(api.construct, object, reinterpret_cast<void *>(unrealClass), reinterpret_cast<void *>(outer), &name, 0u, 0, nullptr, 0, nullptr) ? reinterpret_cast<std::uintptr_t>(object) : 0;
     }
+    std::uintptr_t DefaultObject(std::uintptr_t unrealClass)
+    {
+        void *object{};
+        if (!IsA(unrealClass, L"/Script/CoreUObject.Class") || !Safe(api.cdo, object, reinterpret_cast<void *>(unrealClass), 1))
+            return 0;
+        const auto address = reinterpret_cast<std::uintptr_t>(object);
+        return ValidObject(address) ? address : 0;
+    }
+    bool SoftClassPath(std::uintptr_t object, const char *name, std::wstring &path)
+    {
+        path.clear();
+        if (!ValidObject(object) || !name || !api.exportText)
+            return false;
+        void *cls{};
+        int size{};
+        ReflectedProperty property;
+        if (!Safe(api.objectClass, cls, reinterpret_cast<void *>(object)) || !cls || !Safe(api.structureSize, size, cls) || size < 8 || size > 1024 * 1024 ||
+            !FindField(cls, size, name, property) || !HasCast(property.ptr, 0x200000000ull))
+            return false;
+        EngineString exported;
+        std::int32_t accepted{};
+        std::wstring text;
+        if (!Safe(api.exportText, accepted, property.ptr, &exported.value, reinterpret_cast<void *>(object + property.offset), nullptr,
+                  reinterpret_cast<void *>(object), 0, nullptr) || accepted != 1 || !ReadWide(exported.value, text, 2048))
+            return false;
+        if (text.empty() || text == L"None")
+            return true;
+        // ExportText can emit either the object path or Class'object path'.
+        // Reject malformed or escaped exports rather than guessing a load path.
+        if (const auto quote = text.find(L'\''); quote != std::wstring::npos)
+        {
+            if (quote == 0 || text.back() != L'\'' || text.find(L'\'', quote + 1) != text.size() - 1)
+                return false;
+            text = text.substr(quote + 1, text.size() - quote - 2);
+        }
+        if (text.empty() || text.size() > 512 || text.front() != L'/' || text.find(L'.') == std::wstring::npos ||
+            text.find_first_of(L"\"'\\\r\n\t ") != std::wstring::npos || text.find(L'\0') != std::wstring::npos)
+            return false;
+        path = std::move(text);
+        return true;
+    }
     std::uintptr_t Load(std::wstring_view path, std::wstring_view unrealClass)
     {
         if (!IsGameThread())
@@ -320,15 +652,14 @@ namespace gloss::gameplay::engine
         if (const auto existing = Find(path))
             return existing;
         const auto cls = Find(unrealClass);
-        if (!cls || path.empty() || path.size() > 512)
+        if (!cls || path.empty() || path.size() > 512 || path.find(L'\0') != std::wstring_view::npos)
             return 0;
-        ScriptArray name{}, filename{};
+        EngineString name, filename;
         const std::wstring text(path);
         void *result{};
-        if (!SafeVoid(api.string, text.c_str(), &name))
+        if (!SafeVoid(api.string, text.c_str(), &name.value))
             return 0;
-        Safe(api.load, result, reinterpret_cast<void *>(cls), nullptr, &name, &filename, 0u, nullptr, 1);
-        SafeVoid(api.destroy, &name);
+        Safe(api.load, result, reinterpret_cast<void *>(cls), nullptr, &name.value, &filename.value, 0u, nullptr, 1);
         return reinterpret_cast<std::uintptr_t>(result);
     }
     std::uintptr_t World(std::uintptr_t object)
@@ -338,48 +669,62 @@ namespace gloss::gameplay::engine
     }
     bool ConsoleExists(std::wstring_view name)
     {
-        if (!IsGameThread() || name.empty() || name.size() > 128)
+        if (!IsGameThread() || name.empty() || name.size() > 128 || name.find(L'\0') != std::wstring_view::npos)
             return false;
-        ScriptArray text{};
+        EngineString text;
         void *manager{};
         void *object{};
         const std::wstring terminated(name);
-        if (!Safe(api.console, manager) || !manager || !SafeVoid(api.string, terminated.c_str(), &text))
+        if (!Safe(api.console, manager) || !manager || !SafeVoid(api.string, terminated.c_str(), &text.value))
             return false;
-        Safe(api.findConsole, object, manager, &text);
-        SafeVoid(api.destroy, &text);
+        Safe(api.findConsole, object, manager, &text.value);
         return object != nullptr;
     }
     CallResult ExecuteConsole(std::wstring_view command, std::uintptr_t world)
     {
-        if (!IsGameThread() || !ValidObject(world) || command.empty() || command.size() > 1024)
+        if (!IsGameThread() || !ValidObject(world) || command.empty() || command.size() > 1024 || command.find(L'\0') != std::wstring_view::npos)
             return {false, "控制台上下文无效"};
         const auto name = command.substr(0, command.find(L' '));
         if (!ConsoleExists(name))
             return {false, "游戏尚未注册此指令"};
         void *manager{};
         void *log{};
-        ScriptArray text{};
+        EngineString text;
         std::int32_t accepted{};
         const std::wstring terminated(command);
-        if (!Safe(api.console, manager) || !manager || !Safe(api.log, log) || !log || !SafeVoid(api.string, terminated.c_str(), &text))
+        if (!Safe(api.console, manager) || !manager || !Safe(api.log, log) || !log || !SafeVoid(api.string, terminated.c_str(), &text.value))
             return {false, "游戏控制台未就绪"};
-        const bool ok = Safe(api.executeConsole, accepted, manager, &text, log, reinterpret_cast<void *>(world));
-        SafeVoid(api.destroy, &text);
+        const bool ok = Safe(api.executeConsole, accepted, manager, &text.value, log, reinterpret_cast<void *>(world));
         return {ok && accepted == 1, ok && accepted == 1 ? "游戏指令已执行" : "游戏拒绝了此指令"};
     }
     std::string ObjectName(std::uintptr_t object)
     {
-        if (!IsActor(object))
+        if (!ValidObject(object))
             return {};
-        ScriptArray name{};
-        SafeVoid(api.objectName, reinterpret_cast<void *>(object), &name);
-        auto result = Utf8(Wide(name));
-        SafeVoid(api.destroy, &name);
-        return result;
+        EngineString name;
+        return SafeVoid(api.objectName, reinterpret_cast<void *>(object), &name.value) ? Utf8(Wide(name.value)) : std::string{};
     }
     CallResult Call(std::wstring_view path, std::span<Arg> args, std::uintptr_t instance)
     {
+        struct OutputGuard
+        {
+            std::span<Arg> args;
+            bool committed{};
+            ~OutputGuard()
+            {
+                if (!committed)
+                    for (auto &arg : args)
+                        if (arg.output)
+                        {
+                            arg.text.clear();
+                            arg.records.clear();
+                            if (IsArray(arg.type) || arg.type == Type::String)
+                                arg.bytes.clear();
+                            else
+                                std::fill(arg.bytes.begin(), arg.bytes.end(), std::byte{});
+                        }
+            }
+        } outputs{args};
         if (!IsGameThread())
             return {false, "操作必须在游戏线程执行"};
         if (instance && !ValidObject(instance))
@@ -399,29 +744,20 @@ namespace gloss::gameplay::engine
         std::uint16_t size{};
         if (!Safe(api.size, size, reinterpret_cast<void *>(fn)) || size > 16384 || (!size && !args.empty()))
             return {false, "接口参数大小无效"};
-        std::vector<std::uint64_t> storage((size + 7) / 8);
+        struct alignas(16) Block { std::byte bytes[16]{}; };
+        std::vector<Block> storage((size + 15) / 16);
         auto *buffer = reinterpret_cast<std::byte *>(storage.data());
-        struct Property
-        {
-            void *ptr;
-            int offset, size;
-            std::uint64_t flags;
-        };
-        std::unordered_map<std::string, Property> properties;
+        std::unordered_map<std::string, ReflectedProperty> properties;
         void *field{};
-        Safe(api.children, field, reinterpret_cast<void *>(fn));
+        if (!Safe(api.children, field, reinterpret_cast<void *>(fn)))
+            return {false, "反射参数读取失败"};
         for (int i = 0; field && i < 128; ++i)
         {
-            ScriptArray name{};
-            std::uint64_t flags{};
-            int offset{}, element{}, dim{};
-            const bool ok = SafeVoid(api.name, field, &name) && Safe(api.flags, flags, field) && Safe(api.offset, offset, field) &&
-                            Safe(api.element, element, field) && Safe(api.dim, dim, field);
-            auto key = Utf8(Wide(name));
-            SafeVoid(api.destroy, &name);
-            if (!ok || key.empty() || !(flags & 0x80) || offset < 0 || offset > size || element <= 0 || element > size - offset || dim != 1 || properties.contains(key))
+            ReflectedProperty property;
+            std::string key;
+            if (!FieldName(field, key) || !Describe(field, size, true, property) || !(property.flags & 0x80) || properties.contains(key))
                 return {false, "反射参数结构不匹配"};
-            properties.emplace(key, Property{field, offset, element, flags});
+            properties.emplace(std::move(key), property);
             void *next{};
             if (!Safe(api.next, next, field))
                 return {false, "反射参数读取失败"};
@@ -435,90 +771,107 @@ namespace gloss::gameplay::engine
         {
             if (arg.type == Type::Object && !arg.output && arg.Get<std::uintptr_t>() && !ValidObject(arg.Get<std::uintptr_t>()))
                 return {false, "参数对象已经失效"};
+            if (!arg.name)
+                return {false, "接口参数名不匹配"};
             const auto it = properties.find(arg.name);
             if (it == properties.end() || !supplied.insert(arg.name).second)
                 return {false, "接口参数名不匹配"};
             const auto &p = it->second;
-            const std::uint64_t castFlag = CastFlag(arg.type);
-            std::int32_t matches{};
-            if (!Safe(api.cast, matches, p.ptr, castFlag) || matches != 1)
-                return {false, "接口参数类型不匹配"};
-            if (arg.type == Type::ObjectArray)
-            {
-                void *inner{};
-                int element{}, dim{};
-                if (!Safe(api.inner, inner, p.ptr) || !inner || !Safe(api.cast, matches, inner, CastFlag(Type::Object)) || matches != 1 ||
-                    !Safe(api.element, element, inner) || element != 8 || !Safe(api.dim, dim, inner) || dim != 1)
-                    return {false, "接口数组元素类型不匹配"};
-            }
-            if (arg.output != bool(p.flags & (0x100 | 0x400)))
+            // Const references can carry OutParm in native metadata, but must
+            // never be treated as writable output arguments.
+            const bool output = (p.flags & 0x400) || ((p.flags & 0x100) && !(p.flags & 0x2));
+            if (arg.output != output)
                 return {false, "接口参数方向不匹配"};
-            const auto expected = arg.type == Type::String || arg.type == Type::ObjectArray ? 16u : arg.bytes.size();
-            if (arg.type == Type::Bool)
-            {
-                if (p.size != 1 && p.size != 4)
-                    return {false, "布尔参数布局不匹配"};
-            }
-            else if (p.size != expected)
-                return {false, "接口参数大小不匹配"};
+            if (!ValidateValue(p, arg))
+                return {false, "接口参数类型或布局不匹配"};
         }
-        std::vector<ScriptArray *> arrays;
+        struct DynamicValues
+        {
+            std::vector<std::pair<void *, void *>> values;
+            bool Clear()
+            {
+                bool result = true;
+                for (auto it = values.rbegin(); it != values.rend(); ++it)
+                    result = (api.destroyValue ? SafeVoid(api.destroyValue, it->first, it->second) : SafeVoid(api.destroy, static_cast<ScriptArray *>(it->second))) && result;
+                values.clear();
+                return result;
+            }
+            ~DynamicValues() { Clear(); }
+        } dynamic;
+        dynamic.values.reserve(args.size());
         bool ok = true;
+        CallState state = CallState::NotCalled;
         for (auto &arg : args)
         {
             const auto &p = properties.at(arg.name);
             auto *address = buffer + p.offset;
-            if (arg.type == Type::String || arg.type == Type::ObjectArray)
+            if (IsDynamic(arg.type))
             {
-                arrays.push_back(reinterpret_cast<ScriptArray *>(address));
-                if (arg.type == Type::String)
-                    ok = SafeVoid(api.string, arg.text.c_str(), arrays.back()) && ok;
+                dynamic.values.emplace_back(p.ptr, address);
+                if (api.initializeValue)
+                    ok = SafeVoid(api.initializeValue, p.ptr, address) && ok;
+                if (ok && arg.type == Type::String && !arg.output)
+                    ok = SafeVoid(api.string, arg.text.c_str(), reinterpret_cast<ScriptArray *>(address));
+            }
+            else if (arg.type == Type::Name && !arg.output)
+            {
+                EngineString text;
+                ok = SafeVoid(api.string, arg.text.c_str(), &text.value) &&
+                     SafeVoid(api.nameFromString, reinterpret_cast<NameValue *>(address), &text.value, 1) && ok;
             }
             else if (arg.type == Type::Bool)
                 ok = SafeVoid(api.setBool, p.ptr, address, arg.Get<std::int32_t>()) && ok;
-            else if (!arg.output)
+            else
                 std::memcpy(address, arg.bytes.data(), arg.bytes.size());
+            if (!ok)
+                break;
         }
         if (ok)
+        {
+            state = CallState::Indeterminate;
             ok = SafeVoid(api.event, reinterpret_cast<void *>(instance), reinterpret_cast<void *>(fn), buffer);
+            if (ok)
+                state = CallState::Completed;
+        }
         if (ok)
             for (auto &arg : args)
                 if (arg.output)
                 {
                     const auto &p = properties.at(arg.name);
-                    auto *address = buffer + p.offset;
-                    if (arg.type == Type::ObjectArray)
+                    if (!DecodeValue(p, buffer + p.offset, arg))
                     {
-                        const auto array = *reinterpret_cast<ScriptArray *>(address);
-                        if (array.num < 0 || array.num > 32768 || array.capacity < array.num)
-                        {
-                            ok = false;
-                            break;
-                        }
-                        arg.bytes.resize(static_cast<std::size_t>(array.num) * 8);
-                        if (!arg.bytes.empty() && !ReadMemory(reinterpret_cast<std::uintptr_t>(array.data), arg.bytes.data(), arg.bytes.size()))
-                        {
-                            ok = false;
-                            break;
-                        }
+                        ok = false;
+                        break;
                     }
-                    else if (arg.type == Type::Bool)
-                    {
-                        std::int32_t v{};
-                        ok = Safe(api.getBool, v, p.ptr, address) && ok;
-                        arg.bytes.resize(sizeof(v));
-                        std::memcpy(arg.bytes.data(), &v, sizeof(v));
-                    }
-                    else
-                        std::memcpy(arg.bytes.data(), address, arg.bytes.size());
                 }
-        for (auto *array : arrays)
-            SafeVoid(api.destroy, array);
-        return {ok, ok ? "游戏接口已执行" : "游戏接口调用失败"};
+        ok = dynamic.Clear() && ok;
+        outputs.committed = ok;
+        return {ok, ok ? "游戏接口已执行" : "游戏接口调用失败", state};
     }
     bool Property(std::uintptr_t object, Arg &value, bool write)
     {
-        if (!ValidObject(object) || value.type == Type::String || value.type == Type::ObjectArray)
+        return PropertyPath(object, {}, value, write);
+    }
+    bool CopyStructProperty(std::uintptr_t source, std::uintptr_t destination, const char *name)
+    {
+        if (!name || !api.copyValue || !api.structType || !ValidObject(source) || !ValidObject(destination))
+            return false;
+        void *sourceClass{}, *destinationClass{}, *structure{};
+        int sourceSize{}, destinationSize{}, storageSize{};
+        ReflectedProperty from, to;
+        if (!Safe(api.objectClass, sourceClass, reinterpret_cast<void *>(source)) || !sourceClass ||
+            !Safe(api.objectClass, destinationClass, reinterpret_cast<void *>(destination)) || !destinationClass ||
+            !Safe(api.structureSize, sourceSize, sourceClass) || !Safe(api.structureSize, destinationSize, destinationClass) ||
+            sourceSize < 8 || destinationSize < 8 || sourceSize > 1024 * 1024 || destinationSize > 1024 * 1024 ||
+            !FindField(sourceClass, sourceSize, name, from) || !FindField(destinationClass, destinationSize, name, to) ||
+            from.ptr != to.ptr || from.size != to.size || !HasCast(from.ptr, 0x100000ull) ||
+            !Safe(api.structType, structure, from.ptr) || !structure || !StructStorageSize(structure, storageSize) || storageSize != from.size)
+            return false;
+        return source == destination || SafeVoid(api.copyValue, from.ptr, reinterpret_cast<void *>(destination + to.offset), reinterpret_cast<void *>(source + from.offset));
+    }
+    bool PropertyPath(std::uintptr_t object, std::span<const std::string_view> path, Arg &value, bool write)
+    {
+        if (!ValidObject(object) || !value.name || path.size() > 16 || (write && IsArray(value.type)))
             return false;
         void *cls{};
         if (!Safe(api.objectClass, cls, reinterpret_cast<void *>(object)))
@@ -526,53 +879,45 @@ namespace gloss::gameplay::engine
         int size{};
         if (!cls || !Safe(api.structureSize, size, cls) || size < 8 || size > 1024 * 1024)
             return false;
-        for (int depth = 0; cls && depth < 64; ++depth)
+        auto address = object;
+        for (const auto name : path)
         {
-            void *field{};
-            if (!Safe(api.children, field, cls))
+            ReflectedProperty property;
+            void *nested{};
+            int nestedSize{};
+            if (!api.structType || !FindField(cls, size, name, property) || !HasCast(property.ptr, 0x100000ull) ||
+                !Safe(api.structType, nested, property.ptr) || !nested || !StructStorageSize(nested, nestedSize) ||
+                nestedSize != property.size || nestedSize < 1 || nestedSize > 65536)
                 return false;
-            for (int n = 0; field && n < 4096; ++n)
-            {
-                ScriptArray name{};
-                if (!SafeVoid(api.name, field, &name))
-                    return false;
-                const auto key = Utf8(Wide(name));
-                SafeVoid(api.destroy, &name);
-                if (key == value.name)
-                {
-                    int offset{}, element{}, dim{};
-                    std::int32_t matches{};
-                    if (!Safe(api.internalOffset, offset, field) || !Safe(api.element, element, field) || !Safe(api.dim, dim, field) ||
-                        !Safe(api.cast, matches, field, CastFlag(value.type)) || matches != 1 || dim != 1 || offset < 0 || offset > size || element <= 0 || element > size - offset)
-                        return false;
-                    auto *address = reinterpret_cast<void *>(object + offset);
-                    if (value.type == Type::Bool)
-                    {
-                        if (element != 1 && element != 4)
-                            return false;
-                        if (write)
-                            return SafeVoid(api.setBool, field, address, value.Get<std::int32_t>());
-                        std::int32_t v{};
-                        if (!Safe(api.getBool, v, field, address))
-                            return false;
-                        value = Arg::Data(value.name, Type::Bool, v);
-                        return true;
-                    }
-                    if (element != value.bytes.size())
-                        return false;
-                    return write ? WriteMemory(object + offset, value.bytes.data(), value.bytes.size()) : ReadMemory(object + offset, value.bytes.data(), value.bytes.size());
-                }
-                void *next{};
-                if (!Safe(api.next, next, field))
-                    return false;
-                field = next;
-            }
-            void *parent{};
-            if (!Safe(api.super, parent, cls))
-                return false;
-            cls = parent;
+            address += property.offset;
+            cls = nested;
+            size = nestedSize;
         }
-        return false;
+        ReflectedProperty property;
+        if (!FindField(cls, size, value.name, property) || !ValidateValue(property, value))
+            return false;
+        address += property.offset;
+        if (!write)
+            return DecodeValue(property, reinterpret_cast<void *>(address), value);
+        if (value.type == Type::Object && value.Get<std::uintptr_t>() && !ValidObject(value.Get<std::uintptr_t>()))
+            return false;
+        if (value.type == Type::Bool)
+            return SafeVoid(api.setBool, property.ptr, reinterpret_cast<void *>(address), value.Get<std::int32_t>());
+        if (value.type == Type::Name)
+        {
+            EngineString text;
+            NameValue name{};
+            return SafeVoid(api.string, value.text.c_str(), &text.value) && SafeVoid(api.nameFromString, &name, &text.value, 1) &&
+                   WriteMemory(address, &name, sizeof(name));
+        }
+        if (value.type == Type::String)
+        {
+            if (!api.copyValue)
+                return false;
+            EngineString text;
+            return SafeVoid(api.string, value.text.c_str(), &text.value) && SafeVoid(api.copyValue, property.ptr, reinterpret_cast<void *>(address), &text.value);
+        }
+        return WriteMemory(address, value.bytes.data(), value.bytes.size());
     }
     bool IsA(std::uintptr_t object, const wchar_t *unrealClass) noexcept { return IsObject(object, unrealClass); }
     bool WeakReady() { return Ready() && api.weakSet && api.weakGet && api.weakValid; }
@@ -593,5 +938,16 @@ namespace gloss::gameplay::engine
             return 0;
         const auto address = reinterpret_cast<std::uintptr_t>(object);
         return ValidObject(address) ? address : 0;
+    }
+    bool WeakLifetimeCurrent(WeakObject weak)
+    {
+        if (!WeakReady() || !IsGameThread() || weak.index < 0 || weak.serial <= 0)
+            return false;
+        std::int32_t valid{};
+        // Native_FWeakObjectPtr.Del_IsValid(ref instance, csbool
+        // evenIfPendingKill, csbool threadsafeTest). The thread-safe test
+        // checks the slot/serial without turning a dying UObject into a usable
+        // pointer. Scoped cleanup separately checks its captured identities.
+        return Safe(api.weakValid, valid, &weak, 1, 1) && valid == 1;
     }
 }

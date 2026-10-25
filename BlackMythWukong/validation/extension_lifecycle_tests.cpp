@@ -63,6 +63,9 @@ namespace fixture
     bool weakReady{};
     bool updateBlocked{};
     std::uint64_t updateGeneration{};
+    bool transformationExclusive{};
+    bool transformationControlsAvailable{};
+    int transformationTicks{};
     int widgetDiscoveries{}, invalidWidgetCalls{};
     ULONGLONG now{};
     float dilation{};
@@ -140,6 +143,9 @@ namespace fixture
         ex::lastUpdateRestoreAttempt = 0;
         updateBlocked = false;
         updateGeneration = 0;
+        transformationExclusive = false;
+        transformationControlsAvailable = false;
+        transformationTicks = 0;
         ex::recoveries.clear();
         ex::recovering = false;
         ex::states.clear();
@@ -254,6 +260,77 @@ namespace fixture
         CHECK(ex::ChangeItem(0, 1, false).success);
         Frame();
         CHECK(gmCalls == 1);
+    }
+
+    void TransformationExclusivitySuspendsConflictsAndRestoresThem()
+    {
+        Reset();
+        Toggle(Id::HidePlayer, true);
+        Toggle(Id::NoGravity, true);
+        Toggle(Id::FreezeWorld, true);
+        Toggle(Id::PauseBackground, true);
+        CHECK(Get<std::int32_t>(Pawn, "bHidden"));
+        CHECK(Get<float>(Movement, "GravityScale") == 0.f);
+        CHECK(paused);
+
+        transformationExclusive = true;
+        Frame();
+        CHECK(transformationTicks > 0);
+        CHECK(transformationControlsAvailable);
+        CHECK(!ex::Query(Id::HidePlayer).enabled);
+        CHECK(!ex::Query(Id::NoGravity).enabled);
+        CHECK(!Get<std::int32_t>(Pawn, "bHidden"));
+        CHECK(Get<float>(Movement, "GravityScale") == 1.f);
+        CHECK(!paused);
+        CHECK(!ex::SetEnabled(Id::HidePlayer, true, 0).success);
+
+        transformationExclusive = false;
+        Frame();
+        CHECK(ex::Query(Id::HidePlayer).enabled);
+        CHECK(ex::Query(Id::NoGravity).enabled);
+        CHECK(Get<std::int32_t>(Pawn, "bHidden"));
+        CHECK(Get<float>(Movement, "GravityScale") == 0.f);
+        CHECK(paused);
+    }
+
+    void TransformationCancelsAlreadyQueuedConflictingEnable()
+    {
+        Reset();
+        CHECK(ex::SetEnabled(Id::NoGravity, true, 0).success);
+        CHECK(ex::GetStatus().pending);
+        CHECK(!ex::Query(Id::NoGravity).enabled);
+
+        // The queued request has not touched the game yet. If transformation
+        // becomes exclusive before the game-thread frame drains it, reject it.
+        transformationExclusive = true;
+        Frame();
+        CHECK(transformationTicks > 0);
+        CHECK(!ex::GetStatus().pending);
+        CHECK(!ex::Query(Id::NoGravity).enabled);
+        CHECK(Get<float>(Movement, "GravityScale") == 1.f);
+        CHECK(!completed.empty());
+        if (!completed.empty())
+        {
+            CHECK(completed.back().first == Id::NoGravity);
+            CHECK(!completed.back().second.success);
+        }
+
+        transformationExclusive = false;
+        Frame();
+        CHECK(!ex::Query(Id::NoGravity).enabled);
+        CHECK(Get<float>(Movement, "GravityScale") == 1.f);
+
+        transformationExclusive = true;
+        CHECK(ex::Queue([]
+                        {
+                            ++gmCalls;
+                            return gloss::features::Result{true, "restoration action"};
+                        },
+                        Id::HidePlayer, false, true)
+                  .success);
+        Frame();
+        CHECK(!ex::GetStatus().pending);
+        CHECK(gmCalls == 1); // Restoration work is allowed during exclusive control.
     }
 
     void UpdateBarrierCancelsQueuedEnableAcrossFailedRetry()
@@ -968,6 +1045,21 @@ namespace gloss::gameplay::extra
     void PermitRemoval(int, int) {}
     features::Result SetCycle(int) { return {true, "queued"}; }
 }
+namespace gloss::gameplay::transformation
+{
+    void Initialize() {}
+    void Tick(std::uintptr_t, std::uintptr_t, std::uintptr_t, std::uint64_t, bool controlsAvailable)
+    {
+        ++fixture::transformationTicks;
+        fixture::transformationControlsAvailable = controlsAvailable;
+    }
+    void ContextLost() {}
+    bool NeedsExclusiveControl() { return fixture::transformationExclusive; }
+}
+namespace gloss::gameplay::game_language
+{
+    void Tick() {}
+}
 namespace gloss::gameplay::console
 {
     void Initialize() {}
@@ -1007,6 +1099,8 @@ namespace gloss
 
 int main()
 {
+    fixture::TransformationExclusivitySuspendsConflictsAndRestoresThem();
+    fixture::TransformationCancelsAlreadyQueuedConflictingEnable();
     fixture::UpdateBarrierRestoresMultipleSwitchesAndCancelsOldAction();
     fixture::UpdateBarrierCancelsQueuedEnableAcrossFailedRetry();
     fixture::UpdateBarrierAllowsQueuedDisable();

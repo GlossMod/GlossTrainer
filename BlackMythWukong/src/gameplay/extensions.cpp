@@ -4,6 +4,8 @@
 #include "aot.hpp"
 #include "console_bridge.hpp"
 #include "additional_hooks.hpp"
+#include "transformation.hpp"
+#include "game_language.hpp"
 #include "../runtime.hpp"
 #include <algorithm>
 #include <array>
@@ -55,6 +57,19 @@ namespace gloss::gameplay::extensions
         ULONGLONG captureAt{}, lastProbe{};
         thread_local bool inFrame{};
         bool spaceDown{};
+        struct SuspendedControl
+        {
+            Id id;
+            double value;
+        };
+        std::vector<SuspendedControl> transformSuspended;
+        ULONGLONG lastTransformResume{};
+        bool TransformationConflict(Id id)
+        {
+            return id == Id::FreeCamera || id == Id::FixedCameraDistance || id == Id::HidePlayer ||
+                   id == Id::NoGravity || id == Id::ContinuousJump || id == Id::SummonCloud ||
+                   id == Id::FreezeWorld || id == Id::PauseBackground;
+        }
         struct Recovery
         {
             std::uintptr_t world;
@@ -619,6 +634,55 @@ namespace gloss::gameplay::extensions
                 return {true, "已关闭，正在恢复界面"};
             return {ok, ok ? (enabled ? "已启用" : "已关闭并恢复") : "游戏接口未完成操作"};
         }
+        bool SuspendForTransformation()
+        {
+            std::vector<SuspendedControl> active;
+            {
+                std::lock_guard lock(mutex);
+                for (std::size_t i = First; i < controls.size(); ++i)
+                    if (controls[i].enabled && TransformationConflict(static_cast<Id>(i)))
+                        active.push_back({static_cast<Id>(i), controls[i].value});
+            }
+            bool ready = true;
+            for (const auto &control : active)
+            {
+                const auto result = Toggle(control.id, false, control.value);
+                if (result.success)
+                {
+                    if (std::none_of(transformSuspended.begin(), transformSuspended.end(), [&](const auto &entry) { return entry.id == control.id; }))
+                        transformSuspended.push_back(control);
+                    std::lock_guard lock(mutex);
+                    controls[static_cast<std::size_t>(control.id)].message = "变身期间暂挂，退出后恢复";
+                }
+                else
+                    ready = false;
+            }
+            return ready;
+        }
+        void ResumeAfterTransformation()
+        {
+            if (features::UpdateRequired())
+            {
+                transformSuspended.clear();
+                return;
+            }
+            const auto now = GetTickCount64();
+            if (lastTransformResume && now - lastTransformResume < 250)
+                return;
+            lastTransformResume = now;
+            for (auto it = transformSuspended.begin(); it != transformSuspended.end();)
+            {
+                const auto result = Toggle(it->id, true, it->value);
+                {
+                    std::lock_guard lock(mutex);
+                    controls[static_cast<std::size_t>(it->id)].message = result.success ? "变身结束，已恢复" : "等待恢复变身前设置";
+                }
+                if (result.success)
+                    it = transformSuspended.erase(it);
+                else
+                    ++it;
+            }
+        }
         bool HasUpdateRestores()
         {
             return std::any_of(updateRestores.begin(), updateRestores.end(), [](bool pending)
@@ -814,6 +878,8 @@ namespace gloss::gameplay::extensions
         }
         void LoseSession(const char *reason)
         {
+            transformation::ContextLost();
+            transformSuspended.clear();
             CancelPending(reason);
             if (!player && !worldContext)
                 return;
@@ -869,6 +935,7 @@ namespace gloss::gameplay::extensions
             } exit;
             try
             {
+                game_language::Tick();
                 RefreshUpdateBarrier();
                 RecoverGlobals();
                 const auto now = GetTickCount64();
@@ -932,6 +999,8 @@ namespace gloss::gameplay::extensions
                 }
                 if (player != actual || worldContext != world || controller != nextController)
                 {
+                    transformation::ContextLost();
+                    transformSuspended.clear();
                     CancelPending("角色或场景已经变化，操作已取消");
                     RestoreSession();
                     player = actual;
@@ -959,6 +1028,11 @@ namespace gloss::gameplay::extensions
                     Probe();
                 }
                 RestoreForUpdate();
+                const bool exclusive = transformation::NeedsExclusiveControl();
+                const bool controlsAvailable = !exclusive || SuspendForTransformation();
+                transformation::Tick(player, controller, worldContext, generation, controlsAvailable);
+                if (!transformation::NeedsExclusiveControl() && !transformSuspended.empty())
+                    ResumeAfterTransformation();
                 std::optional<Request> work;
                 {
                     std::lock_guard lock(mutex);
@@ -970,8 +1044,11 @@ namespace gloss::gameplay::extensions
                 }
                 if (work)
                 {
-                    const bool allowed = work->restoring || (!features::UpdateRequired() && work->updateGeneration == features::UpdateGeneration());
-                    const auto result = allowed && now - work->at < 30000 && work->generation == generation ? work->execute() : features::Result{false, "请求已过期、需要更新或游戏场景已变化"};
+                    const bool transformBlocked = !work->restoring && transformation::NeedsExclusiveControl() &&
+                        (!work->feature || TransformationConflict(*work->feature));
+                    const bool allowed = !transformBlocked && (work->restoring || (!features::UpdateRequired() && work->updateGeneration == features::UpdateGeneration()));
+                    const auto result = allowed && now - work->at < 30000 && work->generation == generation ? work->execute() :
+                        features::Result{false, transformBlocked ? "变身已开始，此操作已取消，请先恢复悟空" : "请求已过期、需要更新或游戏场景已变化"};
                     Log("Extension action: " + result.message);
                     if (work->feature)
                         features::CompleteAction(*work->feature, result);
@@ -1027,6 +1104,8 @@ namespace gloss::gameplay::extensions
         }
         features::Result Queue(std::function<features::Result()> execute, std::optional<Id> id = {}, bool resetPosition = false, bool restoring = false)
         {
+            if (!restoring && transformation::NeedsExclusiveControl() && (!id || TransformationConflict(*id)))
+                return {false, "请先恢复悟空，再进行此操作"};
             std::lock_guard lock(mutex);
             const auto updateGeneration = features::UpdateGeneration();
             if (!restoring && (features::UpdateRequired() || updateGeneration != observedUpdateGeneration || HasUpdateRestores()))
@@ -1212,6 +1291,7 @@ namespace gloss::gameplay::extensions
         aot::Initialize(GetModuleHandleW(nullptr));
         console::Initialize();
         extra::Initialize();
+        transformation::Initialize();
     }
     void CapturePlayer(std::uintptr_t object) noexcept
     {
@@ -1234,6 +1314,8 @@ namespace gloss::gameplay::extensions
     }
     features::Result SetEnabled(Id id, bool enabled, double value)
     {
+        if (TransformationConflict(id) && transformation::NeedsExclusiveControl())
+            return {false, "此功能在变身期间暂挂，退出后自动恢复"};
         if (!std::isfinite(value))
             return {false, "参数无效"};
         if (enabled && Query(id).availability != features::Availability::Ready)

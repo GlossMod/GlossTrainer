@@ -1,7 +1,8 @@
 
 # Xmake cache
 .xmake
-.vscode
+.vscode/*
+!.vscode/c_cpp_properties.json
 build
 tmp/
 
@@ -14,3 +15,4 @@ data
 
 docs/*-reference
 tools
+tmp

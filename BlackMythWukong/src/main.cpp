@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "localization.hpp"
 #include "gameplay/state.hpp"
 #include <MinHook.h>
 #include <atomic>
@@ -11,6 +12,7 @@ extern "C" __declspec(dllexport) void InitializeASI()
         return;
     try
     {
+        gloss::localization::Initialize();
         gloss::Log(std::format("GlossTrainer {} initializing; process {}", gloss::Version, GetCurrentProcessId()));
         gloss::Log("Initializing MinHook");
         const auto status = MH_Initialize();

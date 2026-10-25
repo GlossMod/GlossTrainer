@@ -128,6 +128,13 @@ namespace gloss::features
         bool capturingMenu{};
         Result menuHotkeyResult{true, {}};
         std::recursive_mutex hotkeyFileMutex;
+        std::function<std::string(unsigned, unsigned)> externalHotkeyConflict;
+        std::string ExternalHotkeyConflict(unsigned key, unsigned modifiers)
+        {
+            std::function<std::string(unsigned, unsigned)> probe;
+            { std::lock_guard lock(modelMutex); probe = externalHotkeyConflict; }
+            return key && probe ? probe(key, modifiers) : std::string{};
+        }
         std::string HotkeyLabel(unsigned key, unsigned modifiers)
         {
             if (!key)
@@ -520,6 +527,8 @@ namespace gloss::features
         }
         if (!conflict.empty())
             return Record(id, {false, "快捷键已被「" + conflict + "」使用"});
+        if (auto external = ExternalHotkeyConflict(key, modifiers); !external.empty())
+            return Record(id, {false, "快捷键已被「" + external + "」使用"});
         try
         {
             std::filesystem::create_directories(DataDirectory());
@@ -589,6 +598,8 @@ namespace gloss::features
         }
         if (!conflict.empty())
             return RecordMenuHotkey({false, "快捷键已被「" + conflict + "」使用"});
+        if (auto external = ExternalHotkeyConflict(key, modifiers); !external.empty())
+            return RecordMenuHotkey({false, "快捷键已被「" + external + "」使用"});
         try
         {
             std::filesystem::create_directories(DataDirectory());
@@ -628,6 +639,26 @@ namespace gloss::features
     {
         std::lock_guard lock(modelMutex);
         return key && menuBinding == std::pair{key, modifiers};
+    }
+    Result CheckHotkeyConflict(unsigned key, unsigned modifiers)
+    {
+        if (!Bindable(key, modifiers)) return {false, "此按键或组合键由系统保留"};
+        if (!key) return {true, {}};
+        std::lock_guard lock(modelMutex);
+        if (menuBinding == std::pair{key, modifiers}) return {false, "该组合键已被界面开关使用"};
+        for (std::size_t i = 0; i < Count; ++i)
+            if (bindings[i] == std::pair{key, modifiers}) return {false, "该组合键已被「" + std::string(definitions[i].name) + "」使用"};
+        return {true, {}};
+    }
+    void RegisterHotkeyConflictProbe(std::function<std::string(unsigned, unsigned)> probe)
+    {
+        std::lock_guard lock(modelMutex);
+        externalHotkeyConflict = std::move(probe);
+    }
+    Result RunHotkeyTransaction(std::function<Result()> operation)
+    {
+        std::lock_guard lock(hotkeyFileMutex);
+        return operation();
     }
     void CompleteAction(Id id, Result result) { Record(id, std::move(result)); }
 }

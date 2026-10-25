@@ -2,6 +2,7 @@
 #include "features.hpp"
 #include "update.hpp"
 #include "ime.hpp"
+#include "gameplay/transformation_hotkeys.hpp"
 #include <MinHook.h>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -280,20 +281,29 @@ namespace gloss::input
             // A key accepted by a recorder must not also trigger the newly assigned
             // menu chord or a feature during the same physical press.
             if (features::AnyHotkeyCapture())
+            {
+                gameplay::transformation::hotkeys::CancelCapture();
                 return features::HandleHotkey(key, modifiers) ? ShortcutAction::Consumed : ShortcutAction::None;
+            }
+            if (gameplay::transformation::hotkeys::AnyCapture())
+                return gameplay::transformation::hotkeys::HandleHotkey(key, modifiers) ? ShortcutAction::Consumed : ShortcutAction::None;
             if (features::IsMenuHotkey(key, modifiers))
                 return ShortcutAction::ToggleMenu;
             if (EditingText())
                 return ShortcutAction::None;
+            if (gameplay::transformation::hotkeys::HandleHotkey(key, modifiers))
+                return ShortcutAction::Consumed;
             return features::HandleHotkey(key, modifiers) ? ShortcutAction::Consumed : ShortcutAction::None;
         }
         bool MatchesLegacyShortcut(unsigned key)
         {
             const auto modifiers = HotkeyModifiers();
-            if (features::AnyHotkeyCapture() || features::IsMenuHotkey(key, modifiers))
+            if (features::AnyHotkeyCapture() || gameplay::transformation::hotkeys::AnyCapture() || features::IsMenuHotkey(key, modifiers))
                 return true;
             if (EditingText())
                 return false;
+            if (gameplay::transformation::hotkeys::IsHotkey(key, modifiers))
+                return true;
             if (key == VK_HOME && modifiers == (features::Ctrl | features::Shift))
                 return true;
             if (!features::HotkeysEnabled() && !update::Required())
@@ -533,6 +543,7 @@ namespace gloss::input
                     std::lock_guard lock(OverlayMutex());
                     overlay::OnFocusLost();
                 }
+                gameplay::transformation::hotkeys::CancelCapture();
                 capture = false;
                 SyncCursor(state);
             }

@@ -2,6 +2,60 @@
 
 最近更新：2026-10-25。Windows 11 x64、Visual Studio 2022、RTX 5080，游戏 Steam build 21393610。
 
+## 变身实验构建（2026-10-25，未安装）
+
+新增独立变身模块、游戏动作转接、角色目录和技能槽页面。当前只开放杨戬、大圣、狼侍卫三个实验性适配；没有任何角色被标记为已验证。参考表的 247 行合并为 246 条路径线索，运行时尝试合并 Asset Registry 资源；同资产的运行阶段/覆盖配置尚未完整枚举，目录始终提示覆盖不足。实现分析、REA 成员、程序集指纹和用户手测步骤见 [变身文档](transformation.md)，来源逐项清单见 [CSV](transformation-reference.csv)。
+
+UI 实现前使用 `custom-imagegen` / `gpt-image-2.5` 生成并查看了[亮暗原型](transformation-validation-20261025/prototype.png)。页面沿用现有主题，包含搜索、分类、支持状态、技能序列编辑和恢复悟空入口。本轮未运行新页面的 DX11/DX12 宿主及亮暗交互回归，原型图不是实际界面截图。
+
+| 验证 | 结果与证据 |
+| --- | --- |
+| x64 Debug / Release 全构建 | 均通过，无编译警告；[Debug](transformation-validation-20261025/build-debug.txt) / [Release](transformation-validation-20261025/build-release.txt) |
+| 11 组自动测试，两种配置 | 22 次执行全部 exit 0：[汇总](transformation-validation-20261025/results.json)。包含 Gameplay、Extension、AdditionalHook、AOT、ExtensionLifecycle、EngineBridge、Transformation、TransformationNative、TransformationRuntime、IME、Update |
+| 反射桥接与原生适配 mock | 类型/方向/布局、动态内存释放、结构体深拷、调用完成状态、作用域销毁隔离、输入释放和地址复用均通过；[桥接 Debug](transformation-validation-20261025/GlossTrainerEngineBridgeTests-debug.txt) / [Release](transformation-validation-20261025/GlossTrainerEngineBridgeTests-release.txt)，[Native Debug](transformation-validation-20261025/GlossTrainerTransformationNativeTests-debug.txt) / [Release](transformation-validation-20261025/GlossTrainerTransformationNativeTests-release.txt) |
+| 变身模型及实际后端 mock | 目录去重、实际技能 ID、预设缺项、连招末项、重复请求、加载失败/超时、部分激活回滚、恢复重试、免伤层计数与结果不明时停止重放、对象复用、菜单/失焦排队和切图取消通过；[模型 Debug](transformation-validation-20261025/GlossTrainerTransformationTests-debug.txt) / [Release](transformation-validation-20261025/GlossTrainerTransformationTests-release.txt)，[后端 Debug](transformation-validation-20261025/GlossTrainerTransformationRuntimeTests-debug.txt) / [Release](transformation-validation-20261025/GlossTrainerTransformationRuntimeTests-release.txt) |
+| 现有功能冲突恢复 | 隐藏玩家、无重力、世界冻结、后台暂停暂挂/恢复及已排队冲突取消通过；[生命周期 Debug](transformation-validation-20261025/GlossTrainerExtensionLifecycleTests-debug.txt) / [Release](transformation-validation-20261025/GlossTrainerExtensionLifecycleTests-release.txt) |
+| 目标 EXE 静态指纹 | 34/34 匹配；另核对 PendingKill 期间序列号校验路径，见[离线报告](transformation-validation-20261025/native-fingerprints.json)。这不证明钩子已在游戏运行或隔离完整 |
+| ASI 文件结构 | 两份均为 AMD64 PE32+ DLL，导出 InitializeASI；文件大小与 SHA-256 见[构建回执](transformation-validation-20261025/artifacts.json) |
+
+IME 候选窗、组合窗位置回读在两种配置下仍各有一项环境 SKIP；其余断言通过，不将这些跳过项视为真实输入法验收。原生适配及后端测试使用 mock，不等同于游戏角色测试。
+
+Release SHA-256：`0FC0A55D0C953CC9C0B2B22C3963065B050D6B16A7A1CF8F087A4EE6D406F1F0`。Debug SHA-256：`32E1CC5274637BAE37E3DEB1EDC87B1F89C8543DC4841F61CCDA6714BBCBA43B`。
+
+**本次实验 ASI 未安装，游戏实测由用户自行进行。** 本轮未重跑安装器回归。首批三角色的生成、移动、技能、受伤、死亡、恢复、改键/手柄、剧情隔离和异步清理均待实测；其他角色暂只开放目录/技能检查。这是首批通用链路实验构建，尚未完成完整角色目录及全部角色稳定可玩的验收。
+
+本地交付包为 `output/GlossTrainer-transformation-experimental-20261025.zip`，内含 Release ASI、安装脚本、许可、实现分析和测试说明；已逐一校验 ZIP 中 40 个有效载荷的大小与 SHA-256，见[打包回执](transformation-validation-20261025/package-receipt.json)。这是未提交工作区的实验包，源码显示版本仍为 0.3.4，不作为同名正式 Release 发布。
+
+## 逐技能名称与按键绑定扩展（2026-10-25，未安装）
+
+变身页按当前角色枚举结果逐技能列出实际技能 ID；每项支持可选 UTF-8 名称和单键/修饰键组合键，绑定按角色稳定 ID 与实际技能 ID 保存。配置检查拒绝未知新技能 ID、同角色重复组合键、无效按键和全局菜单/功能快捷键冲突；同角色已存但当前缺失的技能记录可原样保留。旧 8 槽继续服务于游戏原生动作映射，不再限制逐技能 UI。
+
+新增自动用例覆盖超过 8 个技能、按角色独立的技能快照与配置、真实 ID 校验、中文名与空名序列化、损坏配置解析不污染旧数据、精确修饰键匹配、菜单/功能双向冲突、按键录制、菜单/失焦取消、重复请求、缺失技能记录保留/清键和配置失败回滚。异步检查使用 `SkillsFor(id)` 按角色读取快照，切换角色保留各自草稿；失效按键可清除，不永久占用组合键。
+
+| 验证 | 结果与证据 |
+| --- | --- |
+| x64 Debug / Release 全构建 | 均通过，无编译警告；[Debug](transformation-skill-bindings-validation-20261025/build-debug.txt) / [Release](transformation-skill-bindings-validation-20261025/build-release.txt) |
+| 13 组自动测试，两种配置 | 26 次执行全部 exit 0，含新增 Binding / Hotkey 及实际后端 Runtime 测试；[汇总](transformation-skill-bindings-validation-20261025/results.json) |
+| 技能配置与录制 | 真实 ID、UTF-8、精确组合键、同角色冲突、跨角色隔离及损坏配置通过；[Binding](transformation-skill-bindings-validation-20261025/GlossTrainerTransformationBindingTests-release.txt) / [Hotkey](transformation-skill-bindings-validation-20261025/GlossTrainerTransformationHotkeyTests-release.txt) |
+| 生产后端 mock | 角色技能快照归属、>8 技能、失效记录清键、队列门控与保存失败回滚通过；[Runtime](transformation-skill-bindings-validation-20261025/GlossTrainerTransformationRuntimeTests-release.txt) |
+| DX11 亮暗 UI fixture | 均 PASS，3377 / 3380 帧；菜单开关、主交换链、按住键释放、尺寸与最小化恢复；[暗色日志](transformation-skill-bindings-validation-20261025/ui-dx11-dark-final/GlossTrainer.Host.log) / [亮色日志](transformation-skill-bindings-validation-20261025/ui-dx11-light/GlossTrainer.Host.log) |
+| DX12 亮暗 UI fixture | 均 PASS，3363 / 3364 帧，先创建无关队列/辅助链；[暗色日志](transformation-skill-bindings-validation-20261025/ui-dx12-dark/GlossTrainer.Host.log) / [亮色日志](transformation-skill-bindings-validation-20261025/ui-dx12-light/GlossTrainer.Host.log) |
+| 实际布局检查 | 查看了四组宿主 GPU 截图，完整列表使用 96 项合成技能，显示名称、组合键、滚动条、保存与恢复；[暗色](transformation-skill-bindings-validation-20261025/ui-dx12-dark/GlossTrainer.Host-open.png) / [亮色](transformation-skill-bindings-validation-20261025/ui-dx12-light/GlossTrainer.Host-open.png) |
+| UI 原型 | 实现前使用 custom-imagegen / model_providers.custom / gpt-image-2.5 生成并查看；[原型与完整提示词](transformation-skill-bindings-validation-20261025/prototype.md) |
+| ASI 文件检查 | Debug / Release 均为 AMD64 PE32+ DLL，导出 InitializeASI；大小、SHA-256 见[回执](transformation-skill-bindings-validation-20261025/artifacts.json) |
+
+IME 的候选窗/组合窗位置回读在两种配置下仍各有一项环境 SKIP，不作为真实输入法验收。首次运行 Runtime 测试时，测试读取配置的流未关闭，导致 Windows 文件句柄阻止重命名和替换；关闭测试流后重新执行全部测试通过。初次 DX11 暗色宿主因前台未满足而失败，记录保留在 `ui-dx11-dark`；随后仅在本地宿主夹具启动时先最小化/恢复自己的窗口，四组最终运行均通过。GPU 原始 BMP 已转为同名 PNG 保存。
+
+fixture 只替换游戏数据并选择变身页，沿用实际页面、输入路由和渲染器；不进入交付 ASI。录制/组合键由自动单元测试覆盖，宿主序列只验证窗口消息和图形路径，不证明真实 Raw/Legacy 双通道、游戏内按键、手柄或角色效果。**游戏实测由用户自行进行，本轮未安装或操控游戏；三个角色仍为实验性，已验证角色数仍为 0。**
+
+新测试包：`output/GlossTrainer-transformation-skill-bindings-20261025.zip`，保留此前八槽实验包。Release ASI SHA-256：`F80EE1653BB9A8E7D49EF2F44D6A343BD6A509E66FBC73411ED8D7096DD353D8`。已校验 ZIP 中的 manifest 有效载荷大小与 SHA-256，见[打包回执](transformation-skill-bindings-validation-20261025/package-receipt.json)。显示版本仍为 0.3.4，本包不作为正式 Release。
+
+## VS Code C/C++ 头文件路径修复（2026-10-25）
+
+截图中的 `C/C++(1696)` 来自编辑器未配置读取 xmake 编译数据库。已核对 MinHook 1.3.4 的 `MinHook.h` 和数据库内的包含目录均存在，补充 `.vscode/c_cpp_properties.json`，配置 Windows x64 / C++20 并引用 `${workspaceFolder}/.vscode/compile_commands.json`；Git 只保留通用配置，继续忽略含本机绝对路径的数据库。
+
+`xmake project -k compile_commands .vscode` 成功，数据库包含 55 条记录。VS Code 1.143.1 / C/C++ 1.35.4 重新打开 `midhook.cpp` 后，`#include <MinHook.h>` 无红线，状态栏显示“没有问题”和“IntelliSense: 就绪”，当前配置为 `Windows x64`。数据库重新生成期间输出过一次解析警告，生成完成后编辑器已恢复正常。此轮仅改编辑器配置和文档，未改 C++ 源码，未执行运行时回归。
+
 ## v0.3.4：目录清理、署名与 GitHub 正式版检查
 
 顶栏增加 `By: 小莫`。当前目录保留32个场景、284个地标和17个有地标的分组，删除明确测试、QA、录制和占位项；原始统计与推断边界保存在[目录记录](xxj-reference/catalog-data.md)。根README只描述项目，游戏说明迁到 `BlackMythWukong/readme.md`。
@@ -245,3 +299,26 @@ wukong_minimap.dll 63903ED2CA7DACD9516090141F7C5015AFB46D5B9AE9FC3A8A738B769EE04
 ```
 
 该轮未能完成游戏里的反复开关菜单、按住输入切换、最小化恢复、退出和插件功能共存验收；当时需先恢复游戏环境正常启动。该轮没有改动原有插件配置或游戏存档；后续已进入游戏的 v0.2.0 验证按本文开头的当前状态单独记录。
+
+## 中英文界面：2026-10-25
+
+新增简体中文 / English，默认跟随游戏文本语言；设置可改为固定语言并立即保存。1856 个精确翻译 key、10 个动态模板覆盖界面操作、功能说明、状态及目录短名；428 条唯一物品长描述仍保留原文。自定义技能名和书签名直接显示。运行时语言只从游戏线程获取，未检测到时设置页明确展示配置或系统临时回退来源。[实现与手测步骤](localization.md)。
+
+| 验证 | 结果与证据 |
+| --- | --- |
+| Debug / Release 全构建 | 均通过；[Debug](localization-validation-20261025/build-debug.txt) / [Release](localization-validation-20261025/build-release.txt) |
+| 15 组测试 × 两种配置 | 30 次执行 exit 0，[汇总](localization-validation-20261025/results.json)。含此前全部 13 组与 Localization / GameLanguage 两组 |
+| 语言保存及词典 | 默认跟随、文化优先级、手动覆盖、立即切换、保存后重读、失败回滚、坏配置、重复 key、printf/模板占位符、UI/feature 静态 key 覆盖；[Release](localization-validation-20261025/GlossTrainerLocalizationTests-release.txt) |
+| 游戏线程语言探测 mock | Language 优先、Culture 后备、非 ASCII 拒绝、5 秒限频、失败重试及非游戏线程门控；[Release](localization-validation-20261025/GlossTrainerGameLanguageTests-release.txt) |
+| DX11 / DX12 设置页 | 中文/英文 × 亮/暗共 8 场景通过；菜单显示/隐藏、按住键释放、主链选择、尺寸变化及最小化恢复。[汇总](localization-validation-20261025/ui-results.json) |
+| 英文功能及变身页 | 初次宿主运行通过；查看截图发现分类挤压和试招按钮截断，修正后两页另做最终宿主复测。[结果](localization-validation-20261025/ui-layout-final-results.json)，[功能](localization-validation-20261025/dx11-dark-en-features-final/GlossTrainer.Host-open.png) / [变身](localization-validation-20261025/dx12-light-en-transform-final/GlossTrainer.Host-open.png) |
+| 布局调整后复验 | Debug / Release ASI 重新构建，语言测试各再通过一次；[记录](localization-validation-20261025/post-layout-validation.json)。其他测试的代码和依赖未变 |
+| 静态接口证据 | REA 受程序集 64 MiB 表示预算限制；[REA 原始记录](localization-validation-20261025/rea-language-members.json)与[补充元数据/IL](localization-validation-20261025/game-language-static-evidence.json)明确身份、路径及 FString 输出，不能替代游戏调用验证 |
+| 原型 | UI 实现前使用 custom-imagegen / model_providers.custom / gpt-image-2.5 生成并查看；[图与完整提示词](localization-validation-20261025/prototype.md) |
+| 最终 ASI | Debug / Release 均为 AMD64 PE32+ DLL，导出 InitializeASI；[大小与 SHA-256](localization-validation-20261025/artifacts.json) |
+
+首轮测试曾发现一项测试负向期望写反、词典重复和 printf 检查差异，修正后完成上述全量及最终复测。IME 候选窗和组合窗位置回读在两种配置中仍各有一个环境 SKIP，其余断言通过，不将 SKIP 视为输入法验收。
+
+设置页实际截图：[中文暗色](localization-validation-20261025/dx11-dark-zh-CN-settings/GlossTrainer.Host-open.png)、[中文亮色](localization-validation-20261025/dx11-light-zh-CN-settings/GlossTrainer.Host-open.png)、[英文暗色](localization-validation-20261025/dx12-dark-en-settings/GlossTrainer.Host-open.png)、[英文亮色](localization-validation-20261025/dx12-light-en-settings/GlossTrainer.Host-open.png)。截图来自 GPU backbuffer 读回，BMP 转换为同名 PNG 保存。长名称列表项按列裁剪并可查看提示。视觉夹具使用合成角色/技能并模拟语言来源，不编入生产 ASI；宿主自己的启动最小化/恢复只用于取得前台，不操作游戏。
+
+本轮未安装到游戏，未运行游戏内测试；游戏实测由用户完成。测试不能证明真实游戏语言反射或角色可玩性。新包为 `output/GlossTrainer-localization-zh-en-20261025.zip`，保留此前两份变身测试包。界面版本仍为 0.3.4，以构建哈希区分；无提交、发布或安装。

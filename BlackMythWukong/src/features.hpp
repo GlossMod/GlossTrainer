@@ -195,6 +195,14 @@ namespace gloss::features
     bool CapturingMenuHotkey();
     Result GetMenuHotkeyResult();
     bool IsMenuHotkey(unsigned key, unsigned modifiers);
+    // Reports only the menu, feature and reserved global chords. Additional
+    // consumers can register a read-only probe so later global edits also refuse
+    // their saved chords without linking this model to gameplay modules.
+    Result CheckHotkeyConflict(unsigned key, unsigned modifiers);
+    void RegisterHotkeyConflictProbe(std::function<std::string(unsigned, unsigned)> probe);
+    // Serializes a dependent consumer's validation + commit with edits to global
+    // bindings. Acquire this before the consumer's model mutex.
+    Result RunHotkeyTransaction(std::function<Result()> operation);
     // Complete a previously accepted asynchronous action without invoking backend callbacks.
     void CompleteAction(Id id, Result result);
 }

@@ -4,12 +4,12 @@
 
 GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个游戏的界面、功能适配与验证代码放在独立目录；公共构建、安装和发布工具保留在项目根目录。
 
-使用 C++20、Dear ImGui 和 MinHook，提供支持亮色 / 暗色主题的中文界面、可自定义快捷键、配置持久化和日志。游戏接口与兼容范围以各模块文档为准。
+使用 C++20、Dear ImGui 和 MinHook，提供支持简体中文 / English 和亮色 / 暗色主题的界面、可自定义快捷键、配置持久化和日志。界面语言默认跟随游戏，可在设置中修改。游戏接口与兼容范围以各模块文档为准。
 
 ## 游戏模块
 
-| 模块 | 说明 |
-| --- | --- |
+| 模块                                         | 说明                                         |
+| -------------------------------------------- | -------------------------------------------- |
 | [BlackMythWukong](BlackMythWukong/readme.md) | 《黑神话：悟空》的功能、安装、使用及适配说明 |
 
 ## 项目结构
@@ -30,6 +30,14 @@ xmake build <模块名>
 ```
 
 输出位于 `build/release/`；Debug 使用 `-m debug`。安装方式与依赖见各模块文档。
+
+VS Code 的 C/C++ 扩展使用仓库内的 `.vscode/c_cpp_properties.json` 读取 xmake 编译参数。首次配置或切换构建模式、依赖后，在仓库根目录生成本机数据库：
+
+```powershell
+xmake project -k compile_commands .vscode
+```
+
+安装 XMake 扩展后，其默认设置会在 `xmake.lua` 变化时自动更新数据库，也可执行 `XMake: UpdateIntellisense` 手动更新。`compile_commands.json` 含本机路径，不提交到 Git。
 
 正式 `vX.Y.Z` 标签触发 Debug / Release 构建、回归、打包和 Releases 发布；手动运行 workflow 仅构建验证。流程、版本规则和本地打包方式见 [发布说明](docs/releasing.md)。
 
