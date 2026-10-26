@@ -333,3 +333,5 @@ wukong_minimap.dll 63903ED2CA7DACD9516090141F7C5015AFB46D5B9AE9FC3A8A738B769EE04
 - 首次联网下载 Loader、打包、逐项读取 ZIP 和五份完整许可检查均通过。[下载与打包日志](../output/release-package-20261026/download-smoke/package.log)、[独立结构检查](../output/release-package-20261026/download-smoke/download-check.json)。此包使用本机现有 ASI 验证打包，不作为正式游戏版本发布；清单 `sourceRevision` 为 null。
 
 GitHub 工作流使用根 `output/` 保存候选包与验证夹具，先打包下载固定 Loader，再在 PowerShell 5.1 / 7 中离线运行回归；正式 Release 仅上传 ZIP 与 `SHA256SUMS.txt`。本轮只更新发行流程和说明，不改动游戏功能、已发布标签或现有正式 Release，也未执行游戏内验证。
+
+GitHub 干净 checkout 的 [build-only 运行 40271944811](https://github.com/GlossMod/GlossTrainer/actions/runs/40271944811) 已成功，源提交为 `fb60aef81feadf5778b9790ee98b796531c60ec3`。Debug / Release 构建及全部验证程序、安装器、PowerShell 5.1 / 7 打包回归均通过。下载 CI 候选包后重新检查了精确四文件结构、逐项 SHA-256 / 大小、Loader 固定哈希和源码提交；ZIP SHA-256 为 `9a67d976f462b7c1e327e82f1a05f92b6195ae8996021a95402c0eb92f621633`。[CI 与候选包核验](../output/release-package-20261026/github-validation.json)、[最终作业状态](../output/release-package-20261026/github-jobs-final.json)。该运行未创建或覆盖正式 Release。
