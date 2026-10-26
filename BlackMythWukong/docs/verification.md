@@ -10,6 +10,10 @@
 
 界面结构和输入逻辑沿用下节已验证实现，本轮仅改变版本与发布文档；未重复游戏内验证。正式发布使用 GitHub 对已提交源码的干净构建及附件校验结果。
 
+源码提交 `d64dca8519dfe49ccaf1a4dd139465fd4d4b5634` 已推送，带注释标签 `BlackMythWukong/v1.0.0` 指向该提交。先执行的[手动候选构建](https://github.com/GlossMod/GlossTrainer/actions/runs/40387243366)成功，随后标签触发的[正式发布流程](https://github.com/GlossMod/GlossTrainer/actions/runs/40389056409)全部成功：云端 Debug / Release ASI 与 19 个验证目标构建及测试通过，安装夹具 18 项通过，PowerShell 5.1 / 7 的便携包回归各 29 项、游戏通道隔离回归各 29 项通过。[正式流程结果](../../output/release-1.0.0-20261027/formal-run-final.json)、[各任务结果](../../output/release-1.0.0-20261027/formal-jobs-final.json)、[完整日志](../../output/release-1.0.0-20261027/formal-run-logs.zip)。
+
+[GitHub Release](https://github.com/GlossMod/GlossTrainer/releases/tag/BlackMythWukong/v1.0.0) 已于北京时间 2026-10-27 03:48 发布，保持独立游戏通道，不争用仓库全局 Latest。公开附件仅为安装 ZIP 和 `SHA256SUMS.txt`；已完整下载两者，核对 GitHub 服务端摘要、文件大小、校验文件、正式候选清单及源提交。ZIP SHA-256 为 `9ac48931113b1c2437e2ee9795f9fe20033d51ef033b55e04c97e0a2e2afdd65`，包内精确包含 `version.dll`、`version.ini`、`scripts/GlossTrainer.asi`、中文 `README.md` 和英文 `readme_en.md`。逐项哈希、x64 架构、`InitializeASI` 导出、固定 Loader、配置、双语说明及完整许可证均通过；未携带用户配置或日志。[独立候选验收](../../output/release-1.0.0-20261027/formal-candidate-verification.json)、[公开附件核验](../../output/release-1.0.0-20261027/published-verification.json)、[包内核验](../../output/release-1.0.0-20261027/published-payload-verification.json)、[未登录公开可见性检查](../../output/release-1.0.0-20261027/public-visibility.json)。本次未安装游戏，发布验证不增加游戏内功能验收结论。
+
 ## 关于页面与双语发行说明（2026-10-27）
 
 新增“关于”导航，按现有亮暗主题显示版本信息和项目信息两张带内边距的卡片。当前版本来自 `Version`，最新版本复用本游戏更新检查结果，不把随包版本冒充在线最新版本；尚未获取结果时显示占位，失败时只显示“检查更新失败”，不限制使用。作者为小莫，主 LICENSE、源码、下载、赞助和委托制作入口均可点击，并在悬停时显示完整地址。保留工作区同时新增的下载地址，将卡片调整为六行，避免最后一行裁切。成功确认新版后，关于页和更新提示仍可访问，功能层的强制更新限制保持生效。
