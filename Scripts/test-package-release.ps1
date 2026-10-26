@@ -1,29 +1,48 @@
 [CmdletBinding()]
 param(
-    [string]$Artifact = (Join-Path $PSScriptRoot '..\build\release\BlackMythWukong.asi')
+    [string]$Artifact,
+    [string]$LoaderArchive,
+    [string]$OutputDirectory
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
+if ([string]::IsNullOrWhiteSpace($Artifact)) { $Artifact = Join-Path $PSScriptRoot '..\build\release\BlackMythWukong.asi' }
+if ([string]::IsNullOrWhiteSpace($LoaderArchive)) {
+    $LoaderArchive = Join-Path $PSScriptRoot ('..\output\release-package-' + (Get-Date -Format 'yyyyMMdd') + '\cache\Ultimate-ASI-Loader_x64.zip')
+}
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path $PSScriptRoot ('..\output\release-package-' + (Get-Date -Format 'yyyyMMdd'))
+}
 $packager = Join-Path $PSScriptRoot 'package-release.ps1'
 $source = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $engine = Join-Path $PSHOME 'pwsh.exe'
 if (-not (Test-Path -LiteralPath $engine -PathType Leaf)) { $engine = Join-Path $PSHOME 'powershell.exe' }
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('GlossTrainer-package-test-' + [guid]::NewGuid().ToString('N'))
+$testRoot = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) ('tests-ps' + $PSVersionTable.PSVersion.Major + '-' + [guid]::NewGuid().ToString('N'))
 $fixture = Join-Path $testRoot 'source'
 $checks = 0
+$results = New-Object 'System.Collections.Generic.List[object]'
+$failure = $null
+$utf8 = New-Object Text.UTF8Encoding($false)
+$loaderPath = [IO.Path]::GetFullPath($LoaderArchive)
+$loaderSha256 = '3d5f2f2a47f456db878d17c1b135b0eae3209a7d8dabb0ff3f84e1b008c4f3a7'
 
 function Assert-Condition([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "ASSERTION FAILED: $Message" }
 }
-function Pass([string]$Message) { $script:checks++; Write-Host "PASS: $Message" }
+function Pass([string]$Message) {
+    $script:checks++
+    $results.Add([ordered]@{ check = $script:checks; name = $Message; passed = $true })
+    Write-Host "PASS: $Message"
+}
 function Bytes-Sha256([byte[]]$Bytes) {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return [BitConverter]::ToString($sha.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant() }
     finally { $sha.Dispose() }
 }
-function Invoke-Packager([string]$Name, [string[]]$Arguments, [int]$ExpectedExit = 0) {
+function Invoke-Packager([string]$Name, [string[]]$Arguments, [int]$ExpectedExit = 0, [string]$ExpectedMessage, [switch]$UseCache) {
+    if (-not $UseCache -and '-LoaderArchive' -notin $Arguments) { $Arguments += @('-LoaderArchive', $loaderPath) }
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -31,43 +50,16 @@ function Invoke-Packager([string]$Name, [string[]]$Arguments, [int]$ExpectedExit
         $actualExit = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $previousPreference }
-    if ($actualExit -ne $ExpectedExit) { throw "$Name expected exit $ExpectedExit, got $actualExit.`n$($output -join [Environment]::NewLine)" }
+    $outputText = $output -join [Environment]::NewLine
+    $logPath = Join-Path $testRoot (('{0:D2}-' -f ($script:checks + 1)) + ($Name -replace '[^a-zA-Z0-9-]+', '-') + '.log')
+    [IO.File]::WriteAllText($logPath, $outputText + "`n", $utf8)
+    if ($actualExit -ne $ExpectedExit) { throw "$Name expected exit $ExpectedExit, got $actualExit.`n$outputText" }
+    if ($ExpectedMessage) { Assert-Condition ($outputText.Contains($ExpectedMessage)) "$Name did not fail for the expected reason: $outputText" }
     Pass $Name
 }
-
-try {
-    $artifactPath = [IO.Path]::GetFullPath($Artifact)
-    Assert-Condition (Test-Path -LiteralPath $artifactPath -PathType Leaf) "Build a Release ASI before running package tests: $artifactPath"
-    New-Item -ItemType Directory -Path $fixture | Out-Null
-    foreach ($relative in @('BlackMythWukong\src\runtime.hpp', 'BlackMythWukong\readme.md', 'Scripts\install.ps1', 'docs\install.md', 'licenses\imgui.txt', 'licenses\minhook.txt', 'licenses\nlohmann_json.txt')) {
-        $target = Join-Path $fixture $relative
-        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $source $relative) -Destination $target
-    }
-    [IO.File]::WriteAllText((Join-Path $fixture 'README.md'), 'ROOT README MUST NOT SHIP')
-    $readmeFixture = Join-Path $fixture 'BlackMythWukong\readme.md'
-    [IO.File]::AppendAllText($readmeFixture, "`nGAME README RELEASE FIXTURE`n[Installer](../Scripts/install.ps1)`n[Install](../docs/install.md#details)`n[Source only](../docs/gameplay.md)`n[License](../licenses/imgui.txt)`n[License directory](../licenses/)`n[External](https://example.com/document)`n")
-    # These files represent local settings and reference artifacts. The package
-    # must use its explicit allowlist rather than copying a source directory.
-    foreach ($relative in @('data\reference.exe', 'data\reference.rar', 'Saved\save.sav', 'scripts\GlossTrainer\ui.ini', 'scripts\GlossTrainer\hotkeys.ini')) {
-        $target = Join-Path $fixture $relative
-        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-        [IO.File]::WriteAllText($target, 'MUST NOT SHIP')
-    }
-    $version = [regex]::Match([IO.File]::ReadAllText((Join-Path $fixture 'BlackMythWukong\src\runtime.hpp')), 'Version\[\]\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
-    Assert-Condition (-not [string]::IsNullOrEmpty($version)) 'Fixture source version missing'
-    $tag = 'v' + $version
-    $outputDirectory = Join-Path $testRoot 'release'
-    $common = @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', $outputDirectory, '-Tag', $tag, '-SourceRevision', ('1' * 40))
-    Invoke-Packager 'valid x64 ASI with InitializeASI produces a release' $common
-    $zipPath = Join-Path $outputDirectory "GlossTrainer-BlackMythWukong-$tag-win64.zip"
-    $initialHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $sums = [IO.File]::ReadAllText((Join-Path $outputDirectory 'SHA256SUMS.txt'))
-    Assert-Condition ($sums -ceq "$initialHash  $([IO.Path]::GetFileName($zipPath))`n") 'External SHA256SUMS is incomplete or incorrect'
-    Pass 'external checksum identifies the complete ZIP'
-
-    $archiveStream = [IO.File]::OpenRead($zipPath)
-    $archive = New-Object IO.Compression.ZipArchive($archiveStream, [IO.Compression.ZipArchiveMode]::Read, $false)
+function Read-Zip([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $archive = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Read, $false)
     try {
         $contents = @{}
         foreach ($entry in $archive.Entries) {
@@ -78,63 +70,135 @@ try {
             try { $entryStream.CopyTo($buffer); $contents[$entry.FullName] = $buffer.ToArray() }
             finally { $entryStream.Dispose(); $buffer.Dispose() }
         }
+        return $contents
     }
-    finally { $archive.Dispose(); $archiveStream.Dispose() }
-    $expected = @('scripts/GlossTrainer.asi', 'Scripts/install.ps1', 'README.md', 'docs/install.md', 'licenses/imgui.txt', 'licenses/minhook.txt', 'licenses/nlohmann_json.txt', 'release-manifest.json')
+    finally { $archive.Dispose(); $stream.Dispose() }
+}
+
+try {
+    New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+    $artifactSourcePath = [IO.Path]::GetFullPath($Artifact)
+    Assert-Condition (Test-Path -LiteralPath $artifactSourcePath -PathType Leaf) "Build a Release ASI before running package tests: $artifactSourcePath"
+    # Another local task may rebuild the same output while tests are running.
+    # Use one immutable snapshot throughout this run, including failure fixtures.
+    $artifactPath = Join-Path $testRoot 'input.asi'
+    [IO.File]::WriteAllBytes($artifactPath, [IO.File]::ReadAllBytes($artifactSourcePath))
+    Assert-Condition (Test-Path -LiteralPath $loaderPath -PathType Leaf) "Offline tests require a pinned official Loader ZIP. Pass -LoaderArchive with its cached path: $loaderPath"
+    Assert-Condition ((Get-FileHash -LiteralPath $loaderPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $loaderSha256) 'Offline Loader archive does not match the pinned SHA-256'
+    Pass 'offline Loader fixture matches the pinned official x64 release'
+    $fixtureInputs = @('BlackMythWukong\src\runtime.hpp', 'BlackMythWukong\release-readme.md', 'LICENSE')
+    $fixtureInputs += @(Get-ChildItem -LiteralPath (Join-Path $source 'licenses') -File | ForEach-Object { 'licenses\' + $_.Name })
+    foreach ($relative in $fixtureInputs) {
+        $target = Join-Path $fixture $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $source $relative) -Destination $target
+    }
+    [IO.File]::WriteAllText((Join-Path $fixture 'README.md'), 'ROOT README MUST NOT SHIP')
+    [IO.File]::AppendAllText((Join-Path $fixture 'BlackMythWukong\release-readme.md'), "`nRELEASE README FIXTURE`n", $utf8)
+    # No fixtures access a game, download data, or write outside output/.
+    foreach ($relative in @('data\reference.exe', 'data\reference.rar', 'Saved\save.sav', 'scripts\GlossTrainer\ui.ini', 'scripts\GlossTrainer\hotkeys.ini', 'scripts\GlossTrainer\trainer.ini', 'Scripts\install.ps1', 'docs\install.md')) {
+        $target = Join-Path $fixture $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        [IO.File]::WriteAllText($target, 'MUST NOT SHIP')
+    }
+    $version = [regex]::Match([IO.File]::ReadAllText((Join-Path $fixture 'BlackMythWukong\src\runtime.hpp')), 'Version\[\]\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
+    Assert-Condition (-not [string]::IsNullOrEmpty($version)) 'Fixture source version missing'
+    $tag = 'v' + $version
+    $releaseDirectory = Join-Path $testRoot 'release'
+    $common = @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', $releaseDirectory, '-Tag', $tag, '-SourceRevision', ('1' * 40))
+    Invoke-Packager 'valid x64 ASI and verified Loader produce a portable release' $common
+    $zipPath = Join-Path $releaseDirectory "GlossTrainer-BlackMythWukong-$tag-win64.zip"
+    $initialHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-Condition ([IO.File]::ReadAllText((Join-Path $releaseDirectory 'SHA256SUMS.txt')) -ceq "$initialHash  $([IO.Path]::GetFileName($zipPath))`n") 'External SHA256SUMS is incomplete or incorrect'
+    Pass 'external checksum identifies the complete ZIP'
+
+    $contents = Read-Zip $zipPath
+    $expected = @('version.dll', 'version.ini', 'README.md', 'scripts/GlossTrainer.asi')
     Assert-Condition ($contents.Count -eq $expected.Count) 'ZIP contains files outside the explicit release allowlist'
     foreach ($path in $expected) { Assert-Condition ($contents.ContainsKey($path)) "Release file is missing: $path" }
-    Pass 'only ASI, installer, user documentation, licenses and manifest are included'
+    Assert-Condition (@($contents.Keys | Where-Object { $_ -match '\.asi$' }).Count -eq 1) 'ASI appears more than once'
+    Assert-Condition ((Bytes-Sha256 $contents['scripts/GlossTrainer.asi']) -ceq (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()) 'Packaged ASI differs from the verified input'
+    Pass 'ZIP contains exactly Loader INI README and a single scripts ASI'
+    $officialLoaderContents = Read-Zip $loaderPath
+    Assert-Condition ($officialLoaderContents.Count -eq 1 -and $officialLoaderContents.ContainsKey('dinput8.dll')) 'Official Loader layout differs'
+    Assert-Condition ((Bytes-Sha256 $contents['version.dll']) -ceq (Bytes-Sha256 $officialLoaderContents['dinput8.dll'])) 'Loader differs from the verified official ZIP'
+    Pass 'official dinput8 DLL is renamed to version DLL without modification'
+    $expectedIni = "[GlobalSets]`r`nDontLoadFromDllMain=1`r`nLoadPlugins=1`r`nLoadFromScriptsOnly=1`r`nDebugLog=1`r`n"
+    Assert-Condition ([Text.Encoding]::ASCII.GetString($contents['version.ini']) -ceq $expectedIni) 'Loader configuration differs'
+    Assert-Condition ([IO.File]::ReadAllText((Join-Path $source 'Scripts\install.ps1')).Contains($expectedIni.Replace("`r`n", '`r`n'))) 'Installer configuration changed without updating release settings'
+    Pass 'Loader uses deferred InitializeASI loading from scripts with logging'
+
     $packagedReadme = [Text.Encoding]::UTF8.GetString($contents['README.md'])
-    foreach ($expectedText in @('GAME README RELEASE FIXTURE', '[Installer](Scripts/install.ps1)', '[Install](docs/install.md#details)', "[Source only](https://github.com/GlossMod/GlossTrainer/blob/$tag/docs/gameplay.md)", '[License](licenses/imgui.txt)', '[License directory](licenses/)', '[External](https://example.com/document)')) {
-        Assert-Condition ($packagedReadme.Contains($expectedText)) "Game README source or relocated link differs: $expectedText"
+    foreach ($expectedText in @('RELEASE README FIXTURE', "GlossTrainer v$version", '## licenses', 'By: ', 'version.dll', 'scripts', 'GlossTrainer.asi')) {
+        Assert-Condition ($packagedReadme.Contains($expectedText)) "Release README required text missing: $expectedText"
     }
-    Assert-Condition (-not $packagedReadme.Contains('ROOT README MUST NOT SHIP')) 'Root project README was shipped instead of the game README'
-    Pass 'game README is relocated with working package and versioned source links'
-    $manifest = [Text.Encoding]::UTF8.GetString($contents['release-manifest.json']) | ConvertFrom-Json
-    Assert-Condition ($manifest.schemaVersion -eq 1 -and $manifest.project -ceq 'GlossTrainer' -and
+    # Code points keep this script ASCII-compatible with Windows PowerShell 5.1.
+    foreach ($codepoints in @(
+        @(0x9ed1, 0x795e, 0x8bdd, 0xff1a, 0x609f, 0x7a7a, 0x5185, 0x7f6e, 0x4fee, 0x6539, 0x5668),
+        @(0x5b89, 0x88c5, 0x65b9, 0x6cd5), @(0x5305, 0x542b, 0x529f, 0x80fd), @(0x7f72, 0x540d), @(0x5c0f, 0x83ab)
+    )) {
+        $text = -join @($codepoints | ForEach-Object { [char]$_ })
+        Assert-Condition ($packagedReadme.Contains($text)) "User-facing README section or attribution missing: $text"
+    }
+    Assert-Condition (-not $packagedReadme.Contains('ROOT README MUST NOT SHIP') -and $packagedReadme -notmatch '\{\{[A-Z_]+\}\}') 'Wrong README or unresolved placeholder shipped'
+    foreach ($relative in @('LICENSE') + @($fixtureInputs | Where-Object { $_ -like 'licenses\*.txt' })) {
+        $license = [IO.File]::ReadAllText((Join-Path $fixture $relative))
+        Assert-Condition ($license.Length -gt 0 -and $packagedReadme.Contains($license)) "Full license text missing: $relative"
+    }
+    Pass 'README contains requested sections version attribution and all complete licenses'
+
+    $manifestPath = Join-Path $releaseDirectory 'release-manifest.json'
+    Assert-Condition (-not $contents.ContainsKey('release-manifest.json')) 'Audit manifest leaked into the install ZIP'
+    $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
+    Assert-Condition ($manifest.schemaVersion -eq 2 -and $manifest.project -ceq 'GlossTrainer' -and
         $manifest.game -ceq 'BlackMythWukong' -and $manifest.version -ceq $version -and
         $manifest.tag -ceq $tag -and $manifest.architecture -ceq 'x64' -and
         $manifest.entryPoint -ceq 'InitializeASI' -and $manifest.sourceRevision -ceq ('1' * 40)) 'Manifest metadata differs'
+    Assert-Condition ($manifest.archive.name -ceq [IO.Path]::GetFileName($zipPath) -and $manifest.archive.sha256 -ceq $initialHash -and $manifest.archive.size -eq (Get-Item -LiteralPath $zipPath).Length) 'Manifest archive receipt differs'
+    Assert-Condition ($manifest.loader.version -ceq '10.0.0' -and $manifest.loader.archiveSha256 -ceq $loaderSha256 -and
+        $manifest.loader.archiveUrl -ceq 'https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v10.0.0/Ultimate-ASI-Loader_x64.zip' -and
+        $manifest.loader.archiveEntry -ceq 'dinput8.dll' -and $manifest.loader.installedAs -ceq 'version.dll') 'Manifest pinned Loader provenance differs'
     $manifestPaths = @{}
     foreach ($file in $manifest.files) {
         Assert-Condition (-not $manifestPaths.ContainsKey($file.path)) 'Manifest contains duplicate files'
         $manifestPaths[$file.path] = $true
-        Assert-Condition ($file.path -cne 'release-manifest.json' -and $contents.ContainsKey($file.path)) 'Manifest references an unexpected file'
+        Assert-Condition ($contents.ContainsKey($file.path)) 'Manifest references an unexpected file'
         Assert-Condition ($file.size -eq $contents[$file.path].LongLength -and $file.sha256 -ceq (Bytes-Sha256 $contents[$file.path])) "Manifest hash/size differs: $($file.path)"
     }
-    Assert-Condition ($manifestPaths.Count -eq $contents.Count - 1) 'Manifest omits package payloads'
-    Pass 'manifest covers every payload exactly once with version, size and SHA-256'
+    Assert-Condition ($manifestPaths.Count -eq $contents.Count) 'Manifest omits payloads'
+    Pass 'external manifest records every payload archive checksum source and pinned Loader'
 
+    $cleanInstallation = Join-Path $testRoot 'clean-installation'
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $cleanInstallation
+    foreach ($path in $expected) { Assert-Condition (Test-Path -LiteralPath (Join-Path $cleanInstallation $path) -PathType Leaf) "Clean extraction missing $path" }
+    Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $cleanInstallation 'scripts\GlossTrainer'))) 'Clean extraction creates default user configuration'
+    Assert-Condition (@(Get-ChildItem -LiteralPath $cleanInstallation -Filter '*.asi' -File).Count -eq 0) 'Loader root contains a duplicate ASI'
+    Pass 'clean extraction supplies the automatic loading layout without an installer'
     $existingInstallation = Join-Path $testRoot 'existing-installation'
     $configurationDirectory = Join-Path $existingInstallation 'scripts\GlossTrainer'
     New-Item -ItemType Directory -Path $configurationDirectory -Force | Out-Null
-    foreach ($configuration in @('ui.ini', 'hotkeys.ini')) {
-        [IO.File]::WriteAllText((Join-Path $configurationDirectory $configuration), "existing-$configuration")
+    foreach ($configuration in @('ui.ini', 'hotkeys.ini', 'trainer.ini')) { [IO.File]::WriteAllText((Join-Path $configurationDirectory $configuration), "existing-$configuration") }
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $existingInstallation -Force
+    foreach ($configuration in @('ui.ini', 'hotkeys.ini', 'trainer.ini')) {
+        Assert-Condition ([IO.File]::ReadAllText((Join-Path $configurationDirectory $configuration)) -ceq "existing-$configuration") 'ZIP extraction overwrote settings'
     }
-    foreach ($path in $contents.Keys) {
-        $target = Join-Path $existingInstallation $path
-        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-        [IO.File]::WriteAllBytes($target, $contents[$path])
-    }
-    foreach ($configuration in @('ui.ini', 'hotkeys.ini')) {
-        Assert-Condition ([IO.File]::ReadAllText((Join-Path $configurationDirectory $configuration)) -ceq "existing-$configuration") 'Extracting the package overwrote existing settings'
-    }
-    Assert-Condition (@($contents.Keys | Where-Object { $_ -match '\.(ini|log|sav|rar|exe)$' }).Count -eq 0) 'Package contains configuration, logs, saves, reference executables or archives'
-    Pass 'package extraction preserves existing configuration and ships no defaults or local data'
-
+    Pass 'updating from the ZIP preserves existing user configuration'
+    $initialManifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
     Invoke-Packager 'unchanged inputs produce the same ZIP again' $common
-    Assert-Condition ((Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $initialHash) 'Repeated package content is not deterministic'
-    Pass 'repeat packaging is byte-for-byte deterministic'
-    Invoke-Packager 'mismatching tag is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-tag'), '-Tag', 'v999.999.999') 1
-    Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot 'bad-tag'))) 'Rejected tag created an output directory'
+    Assert-Condition ((Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $initialHash -and
+        (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ceq $initialManifestHash) 'Repeated ZIP or manifest is not deterministic'
+    Pass 'repeat packaging is byte-for-byte deterministic including the audit manifest'
+    Invoke-Packager 'mismatching tag is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-tag'), '-Tag', 'v999.999.999') 1 'does not match source version'
+    Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot 'bad-tag'))) 'Rejected tag created output'
+
     $original = [IO.File]::ReadAllBytes($artifactPath)
     $pe = [BitConverter]::ToUInt32($original, 0x3c)
-    foreach ($failureCase in @('x86', 'no-export-directory', 'missing-initialize-asi')) {
+    foreach ($failureCase in @('x86', 'no-export-directory', 'missing-initialize-asi', 'not-dll')) {
         $invalid = [byte[]]$original.Clone()
-        if ($failureCase -eq 'x86') { $invalid[$pe + 4] = 0x4c; $invalid[$pe + 5] = 0x01 }
-        elseif ($failureCase -eq 'no-export-directory') {
-            [Array]::Clear($invalid, $pe + 24 + 112, 8)
-        } else {
+        if ($failureCase -eq 'x86') { $invalid[$pe + 4] = 0x4c; $invalid[$pe + 5] = 0x01; $diagnostic = 'ASI must be Windows x64.' }
+        elseif ($failureCase -eq 'no-export-directory') { [Array]::Clear($invalid, $pe + 24 + 112, 8); $diagnostic = 'ASI has no export directory.' }
+        elseif ($failureCase -eq 'not-dll') { $invalid[$pe + 23] = $invalid[$pe + 23] -band 0xdf; $diagnostic = 'ASI must contain valid PE32+ DLL headers.' }
+        else {
             $ascii = [Text.Encoding]::ASCII.GetString($invalid)
             $position = $ascii.IndexOf('InitializeASI', [StringComparison]::Ordinal)
             Assert-Condition ($position -ge 0) 'Fixture InitializeASI string missing'
@@ -142,20 +206,58 @@ try {
                 $invalid[$position] = [byte][char]'X'
                 $position = $ascii.IndexOf('InitializeASI', $position + 1, [StringComparison]::Ordinal)
             }
+            $diagnostic = 'ASI does not export InitializeASI.'
         }
         $invalidPath = Join-Path $testRoot ($failureCase + '.asi')
         [IO.File]::WriteAllBytes($invalidPath, $invalid)
-        Invoke-Packager "$failureCase artifact is rejected" @('-Artifact', $invalidPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot $failureCase)) 1
+        Invoke-Packager "$failureCase ASI is rejected" @('-Artifact', $invalidPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot $failureCase)) 1 $diagnostic
     }
-    Write-Host "GlossTrainer release package tests passed ($checks checks). No game files were accessed."
+
+    $corruptLoader = Join-Path $testRoot 'corrupt-loader.zip'
+    $corruptBytes = [IO.File]::ReadAllBytes($loaderPath)
+    $corruptBytes[0] = $corruptBytes[0] -bxor 1
+    [IO.File]::WriteAllBytes($corruptLoader, $corruptBytes)
+    Invoke-Packager 'corrupt supplied Loader is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-loader'), '-LoaderArchive', $corruptLoader) 1 'Supplied Loader archive SHA-256 mismatch.'
+    Assert-Condition (@(Get-ChildItem -LiteralPath (Join-Path $testRoot 'bad-loader') -Filter '*.zip' -File).Count -eq 0) 'Corrupt Loader produced an install ZIP'
+    $cacheOutput = Join-Path $testRoot 'cache-release'
+    $cacheDirectory = Join-Path $cacheOutput 'cache\Ultimate-ASI-Loader\v10.0.0'
+    New-Item -ItemType Directory -Path $cacheDirectory -Force | Out-Null
+    $cacheArchive = Join-Path $cacheDirectory 'Ultimate-ASI-Loader_x64.zip'
+    Copy-Item -LiteralPath $loaderPath -Destination $cacheArchive
+    $cacheArguments = @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', $cacheOutput)
+    Invoke-Packager 'cached official Loader supports fully offline packaging' $cacheArguments -UseCache
+    $cacheZip = Join-Path $cacheOutput "GlossTrainer-BlackMythWukong-$tag-win64.zip"
+    $cacheZipHash = (Get-FileHash -LiteralPath $cacheZip -Algorithm SHA256).Hash
+    Copy-Item -LiteralPath $corruptLoader -Destination $cacheArchive -Force
+    Invoke-Packager 'cached Loader is rehashed and corruption is rejected' $cacheArguments 1 'Cached Loader archive SHA-256 mismatch:' -UseCache
+    Assert-Condition ((Get-FileHash -LiteralPath $cacheZip -Algorithm SHA256).Hash -ceq $cacheZipHash) 'Corrupt cache replaced the previous valid package'
+
+    # The fixed SHA rejects x86 replacement archives before extraction. Exercise
+    # the PE guard independently without weakening production archive validation.
+    $tokens = $null; $parseErrors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile($packager, [ref]$tokens, [ref]$parseErrors)
+    Assert-Condition ($parseErrors.Count -eq 0) 'Packager has parser errors'
+    $validator = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Assert-X64Dll' }, $true)
+    Assert-Condition ($null -ne $validator) 'Loader architecture validator missing'
+    . ([scriptblock]::Create($validator.Extent.Text))
+    Assert-X64Dll $contents['version.dll']
+    $invalidLoader = [byte[]]$contents['version.dll'].Clone()
+    $loaderPe = [BitConverter]::ToUInt32($invalidLoader, 0x3c)
+    $invalidLoader[$loaderPe + 4] = 0x4c; $invalidLoader[$loaderPe + 5] = 0x01
+    $rejected = $false
+    try { Assert-X64Dll $invalidLoader } catch { $rejected = $_.Exception.Message -ceq 'Loader must be a Windows x64 PE32+ DLL.' }
+    Assert-Condition $rejected 'Loader PE validator accepted x86'
+    Pass 'Loader PE validator independently rejects an x86 DLL'
+    Move-Item -LiteralPath (Join-Path $fixture 'licenses\ultimate_asi_loader.txt') -Destination (Join-Path $testRoot 'loader-license.missing')
+    Invoke-Packager 'missing Loader redistribution license is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'missing-license')) 1 'Required license is missing: ultimate_asi_loader.txt'
+    Write-Host "GlossTrainer portable release tests passed ($checks checks). Evidence: $testRoot"
 }
+catch { $failure = $_.Exception.Message; throw }
 finally {
     if (Test-Path -LiteralPath $testRoot -PathType Container) {
-        $resolved = [IO.Path]::GetFullPath($testRoot)
-        $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
-        if ($resolved.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -and
-            [IO.Path]::GetFileName($resolved).StartsWith('GlossTrainer-package-test-')) {
-            Remove-Item -LiteralPath $resolved -Recurse -Force
-        }
+        $report = [ordered]@{ passed = ($null -eq $failure); checks = $checks; powerShell = $PSVersionTable.PSVersion.ToString(); artifact = $Artifact; loaderArchive = $loaderPath; failure = $failure; results = @($results.ToArray()) }
+        $snapshot = Join-Path $testRoot 'input.asi'
+        if (Test-Path -LiteralPath $snapshot -PathType Leaf) { $report.artifactSha256 = (Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash.ToLowerInvariant() }
+        [IO.File]::WriteAllText((Join-Path $testRoot 'results.json'), ($report | ConvertTo-Json -Depth 6) + "`n", $utf8)
     }
 }

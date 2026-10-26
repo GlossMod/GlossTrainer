@@ -25,19 +25,41 @@ Release 附件为：
 - `GlossTrainer-BlackMythWukong-vX.Y.Z-win64.zip`
 - `SHA256SUMS.txt`，记录该 ZIP 的 SHA-256。
 
-ZIP 使用明确文件清单，包含 `scripts/GlossTrainer.asi`、`Scripts/install.ps1`、游戏 README、安装说明、依赖许可和 `release-manifest.json`。包内 `README.md` 来自 `BlackMythWukong/readme.md`；打包时将已包含文件的链接改为包内路径，其余源码文档链接指向本次标签的 GitHub 页面。根 README 仅描述整个项目，不进入游戏发布包。清单记录版本、源码提交、架构以及每个有效载荷的路径、字节数和 SHA-256；清单自身由 ZIP 的外部校验和保护。打包前验证 PE32+ x64 DLL 和本地 `InitializeASI` 导出。文件顺序及 ZIP 时间固定，相同输入重复打包得到相同字节内容。
+ZIP 使用明确文件清单，结构为：
 
-包中不放默认 `ui.ini` / `hotkeys.ini`、日志、存档、开发机安装清单、参考 EXE / RAR 或 Loader DLL。配置由运行时创建，解压包不会覆盖已有配置；安装器也保留配置。Loader 由现有安装器从固定官方 Release 下载并验证。安装和更新必须先正常退出游戏，解压包后按包内安装说明使用 `Scripts/install.ps1`。
+```text
+version.dll
+version.ini
+scripts/
+  GlossTrainer.asi
+README.md
+```
+
+ASI 只放一份，位于 `scripts/GlossTrainer.asi`；`version.ini` 使用 `[GlobalSets]`，固定 `DontLoadFromDllMain=1`、`LoadPlugins=1`、`LoadFromScriptsOnly=1`、`DebugLog=1`。发行包已包含 Loader，玩家退出游戏后将 DLL、INI 和 scripts 文件夹复制到实际 `b1/Binaries/Win64` 即可，无需另行下载安装器。README 说明安装、更新、卸载和配置位置。
+
+包内 `README.md` 来自专用模板 [BlackMythWukong/release-readme.md](../BlackMythWukong/release-readme.md)，标题为“黑神话：悟空内置修改器”，包含“安装方法 / 包含功能 / 署名 / licenses”。打包时替换 `{{VERSION}}`，将根 `LICENSE` 与 `licenses/*.txt` 的完整内容写入 `{{LICENSES}}`。开发用游戏 README 和项目根 README 不进入发行包。
+
+打包器只接受 [Ultimate ASI Loader v10.0.0 x64 官方归档](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v10.0.0/Ultimate-ASI-Loader_x64.zip)，固定 SHA-256 为 `3d5f2f2a47f456db878d17c1b135b0eae3209a7d8dabb0ff3f84e1b008c4f3a7`。该归档实际包含 `dinput8.dll`，验证后以 `version.dll` 放入包中，不读取开发机游戏目录的 DLL。下载缓存位于打包输出目录；`-LoaderArchive` 可指定已下载的归档以便离线打包，但不能覆盖预期 SHA-256。Loader 与 ASI 均验证 PE32+ x64 DLL，ASI 还须有本地 `InitializeASI` 导出。
+
+包中不放默认 `ui.ini` / `hotkeys.ini`、日志、存档、开发机安装清单、参考 EXE / RAR、安装脚本或额外许可目录。配置由运行时创建，复制新版包不会覆盖已有配置。根 `LICENSE` 和依赖许可完整内嵌在 README 中，源码入口也保留在 licenses 栏目。
+
+`release-manifest.json` 仅作为 ZIP 外的审计文件保存到 `output/`，记录版本、源码提交、架构、Loader 来源以及有效载荷的字节数和 SHA-256，不进入 ZIP 或正式 Release 附件。ZIP 文件顺序及时间固定，相同输入重复打包得到相同字节内容。
 
 本地构建完成后，可单独验证及打包；两个命令均不会访问游戏目录、推送 Git 或创建 GitHub Release：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-package-release.ps1 `
-  -Artifact .\build\release\BlackMythWukong.asi
-
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\package-release.ps1 `
-  -Artifact .\build\release\BlackMythWukong.asi -OutputDirectory .\dist -Tag v0.3.4
+  -Artifact .\build\release\BlackMythWukong.asi `
+  -OutputDirectory .\output\release-package -Tag v0.3.4
+
+# 回归使用上一步核验过的归档离线运行，不再下载。
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-package-release.ps1 `
+  -Artifact .\build\release\BlackMythWukong.asi `
+  -LoaderArchive .\output\release-package\cache\Ultimate-ASI-Loader\v10.0.0\Ultimate-ASI-Loader_x64.zip `
+  -OutputDirectory .\output\release-package-validation
 ```
+
+日志、清单、缓存、测试夹具和生成包均写入根 `output/`，不写入 `docs/`。CI 使用同样的目录约定，将 ZIP、校验和及外部清单保存为 `release-candidate`；正式发布只上传 ZIP 和 `SHA256SUMS.txt`。
 
 CI 还传入完整 `-SourceRevision`；未提供时本地包的该字段为 `null`，不推断未提交源码来自某个提交。版本取自源码；维护者应始终对本次构建的 ASI 打包，不能拿旧二进制搭配新源码发布。
 

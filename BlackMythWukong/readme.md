@@ -21,17 +21,13 @@ v0.3.4 清理了测试、录制和占位传送目录，新增 GitHub 正式版�
 
 ## 下载发行包安装
 
-从 [GitHub Releases](https://github.com/GlossMod/GlossTrainer/releases/latest) 下载最新 `GlossTrainer-BlackMythWukong-vX.Y.Z-win64.zip`，可使用同页 `SHA256SUMS.txt` 核对文件。解压后正常退出游戏，在解压目录执行：
+发行打包流程生成 `GlossTrainer-BlackMythWukong-vX.Y.Z-win64.zip`，包含根目录的 `version.dll`、`version.ini`、`README.md` 和 `scripts\GlossTrainer.asi`。下载入口为 [GitHub Releases](https://github.com/GlossMod/GlossTrainer/releases/latest)，可使用同页 `SHA256SUMS.txt` 核对文件；已发布的历史版本以各自包内说明为准。
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\install.ps1 -Artifact .\scripts\GlossTrainer.asi -ExeDir "E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64"
-```
+对于上述复制安装包，正常退出游戏后，将 `version.dll`、`version.ini` 和 `scripts` 文件夹整体复制到实际 `b1\Binaries\Win64`，与 `b1-Win64-Shipping.exe` 同级。包内已有经过固定 SHA-256 校验的 Ultimate ASI Loader v10.0.0 x64，安装时无需联网。未知来源的同名 DLL / INI 应先核对归属；保留 `dwmapi.dll` 和其他插件。默认按 Insert 打开菜单，配置和日志在首次运行时自动创建，包内不放用户配置。
 
-Steam 安装位置不同请更改 `-ExeDir`。安装器从官方来源下载并校验固定 Loader，配置和日志保留。卸载可在同目录执行：
+更新前退出游戏，再复制新版文件。卸载时移除 `scripts\GlossTrainer.asi`；确认 `version.dll`、`version.ini` 仅供本修改器使用后再移除。按需保留 `scripts\GlossTrainer` 配置和日志，不要删除整个 scripts 目录。此方式不创建安装器清单；源码安装器的清单式安装和卸载见下一节。
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\install.ps1 -Uninstall -ExeDir "E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64"
-```
+玩家版说明模板见 [release-readme.md](release-readme.md)，包含修改器名称、安装方法、功能、署名及完整许可证；打包规则见 [发布说明](../docs/releasing.md)。
 
 ## 从源码构建与安装
 
@@ -106,4 +102,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-install.p
 
 界面原型使用 `custom-imagegen` 的 `gpt-image-2.5` 生成，随后按原型实现；构建和验证结果以任务实际记录为准，本 README 不代替验收记录。
 
-模块及 Hook 生命周期见 [架构说明](../docs/architecture.md)，参考包研究依据见 [静态分析](../docs/fling-reference/static-analysis.md) 和 [当前游戏映射](../docs/fling-reference/game-mapping.md)。第三方许可保存在 [licenses](../licenses/)；分发 ASI 时应同时保留这些许可。Loader 由安装器从固定官方发布下载。
+模块及 Hook 生命周期见 [架构说明](../docs/architecture.md)，参考包研究依据见 [静态分析](../docs/fling-reference/static-analysis.md) 和 [当前游戏映射](../docs/fling-reference/game-mapping.md)。第三方许可保存在 [licenses](../licenses/)；发行包 README 内嵌项目与依赖的完整许可。Loader 由打包器或源码安装器从固定官方发布下载并校验，复制安装包已包含 Loader。

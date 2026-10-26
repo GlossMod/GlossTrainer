@@ -322,3 +322,14 @@ wukong_minimap.dll 63903ED2CA7DACD9516090141F7C5015AFB46D5B9AE9FC3A8A738B769EE04
 设置页实际截图：[中文暗色](localization-validation-20261025/dx11-dark-zh-CN-settings/GlossTrainer.Host-open.png)、[中文亮色](localization-validation-20261025/dx11-light-zh-CN-settings/GlossTrainer.Host-open.png)、[英文暗色](localization-validation-20261025/dx12-dark-en-settings/GlossTrainer.Host-open.png)、[英文亮色](localization-validation-20261025/dx12-light-en-settings/GlossTrainer.Host-open.png)。截图来自 GPU backbuffer 读回，BMP 转换为同名 PNG 保存。长名称列表项按列裁剪并可查看提示。视觉夹具使用合成角色/技能并模拟语言来源，不编入生产 ASI；宿主自己的启动最小化/恢复只用于取得前台，不操作游戏。
 
 本轮未安装到游戏，未运行游戏内测试；游戏实测由用户完成。测试不能证明真实游戏语言反射或角色可玩性。新包为 `output/GlossTrainer-localization-zh-en-20261025.zip`，保留此前两份变身测试包。界面版本仍为 0.3.4，以构建哈希区分；无提交、发布或安装。
+
+## GitHub 复制安装包：2026-10-26
+
+发行打包器改为精确四文件清单：根目录 `version.dll`、`version.ini`、`README.md`，以及唯一的 `scripts/GlossTrainer.asi`。包内不含安装脚本、审计清单或用户配置；退出游戏后复制到游戏 Win64 目录即可安装。独立的玩家版 README 模板包含“黑神话：悟空内置修改器”、安装方法、功能、署名 `By: 小莫` 和 licenses；根 GPL v3 及四份第三方许可全文内嵌，外部审计清单只供本地和 CI 候选包使用。
+
+- Loader 取自固定官方 v10.0.0 x64 ZIP，固定 SHA-256 验证成功。归档实际仅含 x64 `dinput8.dll`，原字节重命名为 `version.dll`；DLL SHA-256 为 `900fa114af8317bfe22015ca77becc1afa9853831213ff17a5e03e0f45d58937`。[来源、PE 与许可审计](../output/release-package-20261026/loader-audit.json)。
+- PowerShell 7.6.5 与 Windows PowerShell 5.1 各通过 22 项最终回归，覆盖精确文件结构、真实 Loader、INI、完整许可、导出和架构拒绝路径、损坏归档与缓存、重复打包字节一致、解压后自动加载路径及配置保留。[汇总与精确脚本哈希](../output/release-package-20261026/results.json)。测试启动时复制 ASI 快照，防止其他任务重建影响结果。
+- Windows PowerShell 5.1 默认参数回归也通过 22 项；同时修复参数默认表达式中路径上下文缺失的问题。[默认参数回归](../output/release-package-20261026/defaults-smoke/tests-ps5-f071f1cf16f14e1abb1034b4d697088f/results.json)。
+- 首次联网下载 Loader、打包、逐项读取 ZIP 和五份完整许可检查均通过。[下载与打包日志](../output/release-package-20261026/download-smoke/package.log)、[独立结构检查](../output/release-package-20261026/download-smoke/download-check.json)。此包使用本机现有 ASI 验证打包，不作为正式游戏版本发布；清单 `sourceRevision` 为 null。
+
+GitHub 工作流使用根 `output/` 保存候选包与验证夹具，先打包下载固定 Loader，再在 PowerShell 5.1 / 7 中离线运行回归；正式 Release 仅上传 ZIP 与 `SHA256SUMS.txt`。本轮只更新发行流程和说明，不改动游戏功能、已发布标签或现有正式 Release，也未执行游戏内验证。

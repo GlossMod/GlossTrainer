@@ -1,15 +1,23 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Artifact,
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\dist'),
-    [string]$SourceRoot = (Join-Path $PSScriptRoot '..'),
+    [string]$OutputDirectory,
+    [string]$SourceRoot,
     [string]$Tag,
-    [string]$SourceRevision
+    [string]$SourceRevision,
+    [string]$LoaderArchive
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
+if ([string]::IsNullOrWhiteSpace($SourceRoot)) { $SourceRoot = Join-Path $PSScriptRoot '..' }
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path $PSScriptRoot ('..\output\release-package-' + (Get-Date -Format 'yyyyMMdd') + '\release')
+}
+$loaderVersion = '10.0.0'
+$loaderArchiveSha256 = '3d5f2f2a47f456db878d17c1b135b0eae3209a7d8dabb0ff3f84e1b008c4f3a7'
+$loaderArchiveUrl = 'https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v10.0.0/Ultimate-ASI-Loader_x64.zip'
 
 function Get-BytesSha256([byte[]]$Bytes) {
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -21,6 +29,60 @@ function Assert-RegularFile([string]$Path) {
     if (((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "Release inputs must not be symbolic links: $Path"
     }
+}
+function Assert-RegularDirectory([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Container) -or
+        (((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "A regular directory is required: $Path"
+    }
+}
+function Assert-X64Dll([byte[]]$Bytes) {
+    if ($Bytes.LongLength -lt 64 -or [BitConverter]::ToUInt16($Bytes, 0) -ne 0x5a4d) { throw 'Loader is not a PE file.' }
+    $pe = [uint64][BitConverter]::ToUInt32($Bytes, 0x3c)
+    if ($pe -lt 64 -or $pe + 24 -gt $Bytes.LongLength -or [BitConverter]::ToUInt32($Bytes, [int]$pe) -ne 0x4550) {
+        throw 'Loader has an invalid PE header.'
+    }
+    $sectionCount = [BitConverter]::ToUInt16($Bytes, [int]$pe + 6)
+    $optionalSize = [BitConverter]::ToUInt16($Bytes, [int]$pe + 20)
+    if ([BitConverter]::ToUInt16($Bytes, [int]$pe + 4) -ne 0x8664 -or
+        ([BitConverter]::ToUInt16($Bytes, [int]$pe + 22) -band 0x2000) -eq 0 -or
+        $sectionCount -eq 0 -or $sectionCount -gt 96 -or $optionalSize -lt 112 -or
+        $pe + 24 + $optionalSize + [uint64]$sectionCount * 40 -gt $Bytes.LongLength -or
+        [BitConverter]::ToUInt16($Bytes, [int]$pe + 24) -ne 0x20b) {
+        throw 'Loader must be a Windows x64 PE32+ DLL.'
+    }
+}
+function Get-VerifiedLoaderArchive([string]$ExplicitPath, [string]$Directory) {
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        $archivePath = [IO.Path]::GetFullPath($ExplicitPath)
+        Assert-RegularFile $archivePath
+        if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $loaderArchiveSha256) {
+            throw 'Supplied Loader archive SHA-256 mismatch.'
+        }
+        return $archivePath
+    }
+    $archivePath = Join-Path $Directory 'Ultimate-ASI-Loader_x64.zip'
+    if (Test-Path -LiteralPath $Directory) { Assert-RegularDirectory $Directory }
+    else { New-Item -ItemType Directory -Path $Directory -Force | Out-Null }
+    if (Test-Path -LiteralPath $archivePath) {
+        Assert-RegularFile $archivePath
+        if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $loaderArchiveSha256) {
+            throw "Cached Loader archive SHA-256 mismatch: $archivePath"
+        }
+        return $archivePath
+    }
+    $partial = Join-Path $Directory ([guid]::NewGuid().ToString('N') + '.download')
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Write-Host "Downloading Ultimate ASI Loader v$loaderVersion x64..."
+        Invoke-WebRequest -Uri $loaderArchiveUrl -OutFile $partial -UseBasicParsing
+        if ((Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant() -cne $loaderArchiveSha256) {
+            throw 'Downloaded Loader archive SHA-256 mismatch.'
+        }
+        Move-Item -LiteralPath $partial -Destination $archivePath
+        return $archivePath
+    }
+    finally { if (Test-Path -LiteralPath $partial -PathType Leaf) { Remove-Item -LiteralPath $partial -Force } }
 }
 function Resolve-PeRva([uint64]$Rva, [uint64]$Width, $Sections, [uint64]$FileLength, [uint64]$HeadersSize) {
     if ($Rva -lt $HeadersSize -and $Rva + $Width -le $HeadersSize -and $Rva + $Width -le $FileLength) { return [long]$Rva }
@@ -121,90 +183,72 @@ if ($Tag -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$' -or $Tag -cne $expectedTag) {
 }
 if ($SourceRevision -and $SourceRevision -notmatch '^[0-9a-fA-F]{40}$') { throw 'SourceRevision must be a full Git commit SHA.' }
 
-$payload = New-Object 'System.Collections.Generic.List[object]'
-function Add-PayloadFile([string]$RelativePath, [string]$InputPath) {
-    Assert-RegularFile $InputPath
-    $payload.Add([pscustomobject]@{ path = $RelativePath; bytes = [IO.File]::ReadAllBytes($InputPath) })
-}
 $artifactBytes = [IO.File]::ReadAllBytes($artifactPath)
 Assert-Asi $artifactBytes
-$payload.Add([pscustomobject]@{ path = 'scripts/GlossTrainer.asi'; bytes = $artifactBytes })
-Add-PayloadFile 'Scripts/install.ps1' (Join-Path $source 'Scripts\install.ps1')
-Add-PayloadFile 'docs/install.md' (Join-Path $source 'docs\install.md')
 $licenseRoot = Join-Path $source 'licenses'
-if (-not (Test-Path -LiteralPath $licenseRoot -PathType Container) -or
-    (((Get-Item -LiteralPath $licenseRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-    throw 'A regular licenses directory is required.'
-}
+Assert-RegularDirectory $licenseRoot
 $licenseFiles = @(Get-ChildItem -LiteralPath $licenseRoot -File -Force | Sort-Object Name)
 if ($licenseFiles.Count -eq 0) { throw 'Dependency licenses are missing.' }
+$projectLicense = Join-Path $source 'LICENSE'
+Assert-RegularFile $projectLicense
+$licenses = New-Object Text.StringBuilder
+[void]$licenses.Append("### GlossTrainer (LICENSE)`n`n``````text`n")
+[void]$licenses.Append([IO.File]::ReadAllText($projectLicense))
+[void]$licenses.Append("`n```````n`n")
 foreach ($license in $licenseFiles) {
     if ($license.Extension -cne '.txt') { throw "Unexpected license input: $($license.Name)" }
-    Add-PayloadFile ('licenses/' + $license.Name) $license.FullName
+    Assert-RegularFile $license.FullName
+    [void]$licenses.Append("### $($license.Name)`n`n``````text`n")
+    [void]$licenses.Append([IO.File]::ReadAllText($license.FullName))
+    [void]$licenses.Append("`n```````n`n")
 }
-foreach ($requiredLicense in @('licenses/imgui.txt', 'licenses/minhook.txt', 'licenses/nlohmann_json.txt')) {
-    if ($requiredLicense -cnotin @($payload | ForEach-Object { $_.path })) { throw "Required license is missing: $requiredLicense" }
+foreach ($requiredLicense in @('imgui.txt', 'minhook.txt', 'nlohmann_json.txt', 'ultimate_asi_loader.txt')) {
+    if ($requiredLicense -cnotin @($licenseFiles | ForEach-Object { $_.Name })) { throw "Required license is missing: $requiredLicense" }
 }
-$readmeFile = Join-Path $source 'BlackMythWukong\readme.md'
+$readmeFile = Join-Path $source 'BlackMythWukong\release-readme.md'
 Assert-RegularFile $readmeFile
-$readmeTargets = @{'BlackMythWukong/readme.md' = 'README.md'; 'licenses/' = 'licenses/'}
-foreach ($file in $payload) { $readmeTargets[$file.path] = $file.path }
-$sourcePrefix = $source.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-$readmeDirectory = [IO.Path]::GetDirectoryName($readmeFile)
-# The game README moves one directory up in the ZIP. Keep packaged links local
-# and point source-only documentation at the exact release tag instead.
-$readme = [regex]::Replace([IO.File]::ReadAllText($readmeFile), '(?<prefix>\]\(\s*)(?<target><[^>\r\n]+>|[^\s\)]+)', [Text.RegularExpressions.MatchEvaluator]{ param($match)
-    $target = $match.Groups['target'].Value
-    $angled = $target.StartsWith('<')
-    if ($angled) { $target = $target.Substring(1, $target.Length - 2) }
-    if ($target -match '^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|/|#)') { return $match.Value }
-    $parts = [regex]::Match($target, '^(?<path>[^?#]*)(?<suffix>.*)$')
-    $relative = [Uri]::UnescapeDataString($parts.Groups['path'].Value).Replace('/', [IO.Path]::DirectorySeparatorChar)
-    $resolved = [IO.Path]::GetFullPath((Join-Path $readmeDirectory $relative))
-    if (-not $resolved.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "README link leaves the source tree: $target" }
-    $repositoryPath = $resolved.Substring($sourcePrefix.Length).Replace('\', '/')
-    if ($readmeTargets.ContainsKey($repositoryPath)) { $rewritten = $readmeTargets[$repositoryPath] }
-    elseif ($readmeTargets.ContainsKey($repositoryPath.TrimEnd('/') + '/')) { $rewritten = $readmeTargets[$repositoryPath.TrimEnd('/') + '/'] }
-    else {
-        $kind = if (Test-Path -LiteralPath $resolved -PathType Container) { 'tree' } else { 'blob' }
-        $escapedPath = ($repositoryPath.Split('/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/'
-        $rewritten = "https://github.com/GlossMod/GlossTrainer/$kind/$Tag/$escapedPath"
-    }
-    $rewritten += $parts.Groups['suffix'].Value
-    if ($angled) { $rewritten = '<' + $rewritten + '>' }
-    return $match.Groups['prefix'].Value + $rewritten
-})
+$readme = [IO.File]::ReadAllText($readmeFile)
+if ([regex]::Matches($readme, '\{\{VERSION\}\}').Count -eq 0 -or [regex]::Matches($readme, '\{\{LICENSES\}\}').Count -ne 1) {
+    throw 'Release README requires VERSION and exactly one LICENSES placeholder.'
+}
+$readme = $readme.Replace('{{VERSION}}', $version).Replace('{{LICENSES}}', $licenses.ToString())
+if ($readme -match '\{\{[A-Z_]+\}\}') { throw 'Release README has unresolved placeholders.' }
 $utf8 = New-Object Text.UTF8Encoding($false)
-$payload.Add([pscustomobject]@{ path = 'README.md'; bytes = $utf8.GetBytes($readme) })
-$files = @($payload | Sort-Object path | ForEach-Object {
+if (Test-Path -LiteralPath $destination) { Assert-RegularDirectory $destination }
+else { New-Item -ItemType Directory -Path $destination -Force | Out-Null }
+$verifiedLoaderArchive = Get-VerifiedLoaderArchive $LoaderArchive (Join-Path $destination 'cache\Ultimate-ASI-Loader\v10.0.0')
+$loaderStream = [IO.File]::OpenRead($verifiedLoaderArchive)
+$loaderZip = New-Object IO.Compression.ZipArchive($loaderStream, [IO.Compression.ZipArchiveMode]::Read, $false)
+try {
+    # The pinned official ZIP contains only dinput8.dll. The loader also supports
+    # version.dll; renaming it matches install.ps1 and the game's direct import.
+    if ($loaderZip.Entries.Count -ne 1 -or $loaderZip.Entries[0].FullName -cne 'dinput8.dll') {
+        throw 'Pinned Loader archive has an unexpected layout.'
+    }
+    $loaderEntryStream = $loaderZip.Entries[0].Open()
+    $loaderBuffer = New-Object IO.MemoryStream
+    try { $loaderEntryStream.CopyTo($loaderBuffer); $loaderBytes = $loaderBuffer.ToArray() }
+    finally { $loaderEntryStream.Dispose(); $loaderBuffer.Dispose() }
+}
+finally { $loaderZip.Dispose(); $loaderStream.Dispose() }
+Assert-X64Dll $loaderBytes
+$loaderIni = "[GlobalSets]`r`nDontLoadFromDllMain=1`r`nLoadPlugins=1`r`nLoadFromScriptsOnly=1`r`nDebugLog=1`r`n"
+$payload = @(
+    [pscustomobject]@{ path = 'README.md'; bytes = $utf8.GetBytes($readme) }
+    [pscustomobject]@{ path = 'scripts/GlossTrainer.asi'; bytes = $artifactBytes }
+    [pscustomobject]@{ path = 'version.dll'; bytes = $loaderBytes }
+    [pscustomobject]@{ path = 'version.ini'; bytes = [Text.Encoding]::ASCII.GetBytes($loaderIni) }
+)
+$files = @($payload | ForEach-Object {
     [ordered]@{ path = $_.path; size = $_.bytes.LongLength; sha256 = (Get-BytesSha256 $_.bytes) }
 })
-$manifest = [ordered]@{
-    schemaVersion = 1
-    project = 'GlossTrainer'
-    game = 'BlackMythWukong'
-    version = $version
-    tag = $Tag
-    architecture = 'x64'
-    entryPoint = 'InitializeASI'
-    sourceRepository = 'https://github.com/GlossMod/GlossTrainer'
-    sourceRevision = $(if ($SourceRevision) { $SourceRevision.ToLowerInvariant() } else { $null })
-    configurationPolicy = 'User configuration is created at runtime and is never included in the release package.'
-    files = $files
-}
-$payload.Add([pscustomobject]@{ path = 'release-manifest.json'; bytes = $utf8.GetBytes(($manifest | ConvertTo-Json -Depth 6) + "`n") })
-
-if (Test-Path -LiteralPath $destination) {
-    if (-not (Test-Path -LiteralPath $destination -PathType Container) -or
-        (((Get-Item -LiteralPath $destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-        throw 'OutputDirectory must be a regular directory.'
-    }
-} else { New-Item -ItemType Directory -Path $destination -Force | Out-Null }
 $archiveName = "GlossTrainer-BlackMythWukong-$Tag-win64.zip"
 $archivePath = Join-Path $destination $archiveName
+$manifestPath = Join-Path $destination 'release-manifest.json'
 $partial = Join-Path $destination ([guid]::NewGuid().ToString('N') + '.zip.partial')
 $checksumPartial = Join-Path $destination ([guid]::NewGuid().ToString('N') + '.sha.partial')
-foreach ($outputPath in @($archivePath, (Join-Path $destination 'SHA256SUMS.txt'))) {
+$manifestPartial = Join-Path $destination ([guid]::NewGuid().ToString('N') + '.json.partial')
+foreach ($outputPath in @($archivePath, $manifestPath, (Join-Path $destination 'SHA256SUMS.txt'))) {
     if ((Test-Path -LiteralPath $outputPath) -and
         (((Get-Item -LiteralPath $outputPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
         throw "Refusing to replace an output symbolic link: $outputPath"
@@ -224,13 +268,37 @@ try {
     }
     finally { $archive.Dispose(); $stream.Dispose() }
     $archiveSha = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()
+    $manifest = [ordered]@{
+        schemaVersion = 2
+        project = 'GlossTrainer'
+        game = 'BlackMythWukong'
+        version = $version
+        tag = $Tag
+        architecture = 'x64'
+        entryPoint = 'InitializeASI'
+        sourceRepository = 'https://github.com/GlossMod/GlossTrainer'
+        sourceRevision = $(if ($SourceRevision) { $SourceRevision.ToLowerInvariant() } else { $null })
+        configurationPolicy = 'User configuration is created at runtime and is never included in the release package.'
+        loader = [ordered]@{
+            project = 'Ultimate ASI Loader'
+            version = $loaderVersion
+            archiveUrl = $loaderArchiveUrl
+            archiveSha256 = $loaderArchiveSha256
+            archiveEntry = 'dinput8.dll'
+            installedAs = 'version.dll'
+        }
+        archive = [ordered]@{ name = $archiveName; size = (Get-Item -LiteralPath $partial).Length; sha256 = $archiveSha }
+        files = $files
+    }
+    [IO.File]::WriteAllText($manifestPartial, ($manifest | ConvertTo-Json -Depth 6) + "`n", $utf8)
     [IO.File]::WriteAllText($checksumPartial, "$archiveSha  $archiveName`n", $utf8)
     Move-Item -LiteralPath $partial -Destination $archivePath -Force
+    Move-Item -LiteralPath $manifestPartial -Destination $manifestPath -Force
     Move-Item -LiteralPath $checksumPartial -Destination (Join-Path $destination 'SHA256SUMS.txt') -Force
-    [pscustomobject]@{ version = $version; archive = $archivePath; sha256 = $archiveSha; manifestFiles = $files.Count }
+    [pscustomobject]@{ version = $version; archive = $archivePath; sha256 = $archiveSha; manifest = $manifestPath; manifestFiles = $files.Count }
 }
 finally {
-    foreach ($temporary in @($partial, $checksumPartial)) {
+    foreach ($temporary in @($partial, $checksumPartial, $manifestPartial)) {
         if (Test-Path -LiteralPath $temporary -PathType Leaf) { Remove-Item -LiteralPath $temporary -Force }
     }
 }

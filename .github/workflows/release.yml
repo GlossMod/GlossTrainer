@@ -69,38 +69,44 @@ jobs:
           $testNames = @([regex]::Matches((Get-Content -LiteralPath BlackMythWukong/validation/xmake.lua -Raw), 'target\("([^"\r\n]+Tests)"\)') | ForEach-Object { $_.Groups[1].Value })
           if ($testNames.Count -eq 0 -or @($testNames | Sort-Object -Unique).Count -ne $testNames.Count) { throw 'Validation target inventory is empty or duplicated.' }
           $repository = $PWD.Path
-          $workingDirectory = Join-Path $env:RUNNER_TEMP ('GlossTrainer-validation-' + $env:BUILD_MODE)
+          $workingDirectory = Join-Path $repository ('output/validation-' + $env:BUILD_MODE)
           New-Item -ItemType Directory -Path $workingDirectory -Force | Out-Null
           Push-Location -LiteralPath $workingDirectory
           try {
             foreach ($testName in $testNames) {
               $testPath = Join-Path (Join-Path (Join-Path $repository build) $env:BUILD_MODE) ($testName + '.exe')
               if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) { throw "Validation executable is missing: $testPath" }
-              Write-Host "Running $testName ($env:BUILD_MODE) from an isolated temporary directory"
+              Write-Host "Running $testName ($env:BUILD_MODE) from an isolated output directory"
               & $testPath
               if ($LASTEXITCODE -ne 0) { throw "$testName failed with exit code $LASTEXITCODE." }
             }
           } finally { Pop-Location }
 
-      - name: Validate installer behavior with temporary fixtures
+      - name: Validate installer behavior with isolated fixtures
         if: matrix.mode == 'release'
         run: |
+          $fixtureRoot = Join-Path $PWD 'output/installer-fixtures'
+          New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+          $env:TEMP = $fixtureRoot
+          $env:TMP = $fixtureRoot
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./Scripts/test-install.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Installer regression failed.' }
-
-      - name: Test release packaging with temporary fixtures
-        if: matrix.mode == 'release'
-        run: |
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./Scripts/test-package-release.ps1 -Artifact ./build/release/BlackMythWukong.asi
-          if ($LASTEXITCODE -ne 0) { throw 'Release package regression failed.' }
 
       - name: Package verified Release ASI
         if: matrix.mode == 'release'
         env:
           SOURCE_REVISION: ${{ github.sha }}
         run: |
-          & ./Scripts/package-release.ps1 -Artifact ./build/release/BlackMythWukong.asi -OutputDirectory ./dist -Tag $env:RELEASE_TAG -SourceRevision $env:SOURCE_REVISION
+          & ./Scripts/package-release.ps1 -Artifact ./build/release/BlackMythWukong.asi -OutputDirectory ./output/release-package-ci -Tag $env:RELEASE_TAG -SourceRevision $env:SOURCE_REVISION
           if (-not $?) { throw 'Release packaging failed.' }
+
+      - name: Test portable packaging offline in PowerShell 5 and 7
+        if: matrix.mode == 'release'
+        run: |
+          foreach ($engine in @('powershell.exe', 'pwsh.exe')) {
+            & $engine -NoProfile -ExecutionPolicy Bypass -File ./Scripts/test-package-release.ps1 -Artifact ./build/release/BlackMythWukong.asi -LoaderArchive ./output/release-package-ci/cache/Ultimate-ASI-Loader/v10.0.0/Ultimate-ASI-Loader_x64.zip -OutputDirectory ./output/release-package-validation
+            if ($LASTEXITCODE -ne 0) { throw "Release package regression failed in $engine." }
+          }
 
       - name: Upload release candidate
         if: matrix.mode == 'release'
@@ -108,8 +114,9 @@ jobs:
         with:
           name: release-candidate
           path: |
-            dist/GlossTrainer-BlackMythWukong-*-win64.zip
-            dist/SHA256SUMS.txt
+            output/release-package-ci/GlossTrainer-BlackMythWukong-*-win64.zip
+            output/release-package-ci/SHA256SUMS.txt
+            output/release-package-ci/release-manifest.json
           if-no-files-found: error
           retention-days: 14
 
@@ -126,7 +133,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-candidate
-          path: dist
+          path: output/release-candidate
 
       - name: Verify archive checksum and publish
         env:
@@ -137,8 +144,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ($env:RELEASE_TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Only formal version tags can be published.' }
           $name = "GlossTrainer-BlackMythWukong-$env:RELEASE_TAG-win64.zip"
-          $zip = Join-Path $PWD (Join-Path dist $name)
-          $sums = Join-Path $PWD 'dist/SHA256SUMS.txt'
+          $zip = Join-Path $PWD (Join-Path 'output/release-candidate' $name)
+          $sums = Join-Path $PWD 'output/release-candidate/SHA256SUMS.txt'
           $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if ((Get-Content -LiteralPath $sums -Raw) -cne "$actual  $name`n") { throw 'Downloaded release candidate checksum differs.' }
           $arguments = @('release', 'create', $env:RELEASE_TAG, $zip, $sums, '--repo', $env:GH_REPO, '--verify-tag', '--title', "GlossTrainer $env:RELEASE_TAG", '--generate-notes', '--latest')
