@@ -16,6 +16,10 @@
 
 本地最终 Release ASI SHA-256：`8870FE619FBB540C53D7A0B00D9204D9917C6E6E0314B179A2C125E1524EF350`；[本地四文件包回执](../output/game-release-20261026/local-package-receipt.json)。正式附件以 GitHub 对已提交源码重新构建的结果为准。
 
+已推送发布源码 `7088e1ef5d9fde3f8ad032637d422c5eec74f369` 并发布 [BlackMythWukong/v0.3.5](https://github.com/GlossMod/GlossTrainer/releases/tag/BlackMythWukong/v0.3.5)。[手动构建 40335401496](https://github.com/GlossMod/GlossTrainer/actions/runs/40335401496) 与[正式发布 40336895929](https://github.com/GlossMod/GlossTrainer/actions/runs/40336895929) 均 success：两配置验证通过，正式任务的发布作业通过，手动任务的发布作业按设计 skipped。[正式运行结果](../output/game-release-20261026/cloud-release-final.json)、[完整日志](../output/game-release-20261026/cloud-release.log)。原 `v0.3.4` 与全局 Latest 保持原状，新的游戏通道没有覆盖它。
+
+正式包 ZIP SHA-256 为 `adff700a479373048aa316eb003c5db974338e377a299bed165f319c97239d5e`，ASI 为 `33cc72a4086e706a1926bf7637a871a32f8d47064f1f938102b0b6e6e5cfbc55`。完整下载正式 Actions 候选包，核对 game/tag/version/sourceRevision、ZIP 哈希及四个有效载荷的大小和 SHA-256；随后将该 ZIP 哈希与实际下载的 Release 校验文件、公开 Release API 的资产 digest 比对一致。[候选逐文件校验](../output/game-release-20261026/formal-candidate-verification.json)、[正式发布回执](../output/game-release-20261026/published-verification.json)、[公开发布元数据](../output/game-release-20261026/published-release-final.json)。本机直连 Release ZIP 多次连接重置，未完成该下载链路的独立整包回读；局部文件保留但不计为通过，以正式 CI 完整包及服务端资产摘要的一致性作为此次发布校验依据。本轮没有将正式包安装到正在使用的游戏目录。
+
 ## 动画资源缺失不再阻止移动（2026-10-26，AE533E96 已安装）
 
 用户完成 `80A1112D` 测试后确认：一些角色已经能移动并播放动画，过场恢复正常；缺少移动动画的角色反而无法移动，并明确举例红孩儿。本轮把过场结论记为用户实测反馈，不扩大为所有过场或全部角色验收。[用户测试日志摘要](../output/transformation-live-resume-20261026/mm-user-test-summary.md)、[原始快照](../output/transformation-live-resume-20261026/trainer-cinematic-mm-user-test.log)。
