@@ -112,6 +112,34 @@ namespace gloss::localization
             DeleteFileW(temporary.c_str());
             return false;
         }
+        std::string TranslateEnglish(std::string_view source, bool translateRecoveryReason = true)
+        {
+            const auto &dictionary = Dictionary();
+            if (const auto found = dictionary.find(source); found != dictionary.end()) return found->second;
+            // Chord modifiers are canonical English tokens; translate only the
+            // known mouse-button suffix, preserving user-provided names.
+            std::size_t chordPrefix{};
+            for (const auto modifier : {std::string_view("Ctrl+"), std::string_view("Shift+"), std::string_view("Alt+")})
+                if (source.substr(chordPrefix).starts_with(modifier)) chordPrefix += modifier.size();
+            if (chordPrefix)
+                for (const auto mouse : {"鼠标左键", "鼠标右键", "鼠标中键", "鼠标侧键 1", "鼠标侧键 2"})
+                    if (source.substr(chordPrefix) == mouse)
+                        return std::string(source.substr(0, chordPrefix)) + dictionary.at(mouse);
+            for (const auto &pattern : patterns)
+            {
+                if (!model::ValidTranslation(pattern.source, pattern.english)) continue;
+                if (auto captures = model::MatchTemplate(pattern.source, source))
+                {
+                    // This capture is an application-owned exit reason. Other
+                    // captures may contain player names and must stay verbatim.
+                    // Limit nesting to one level even for unexpected input.
+                    if (translateRecoveryReason && std::string_view(pattern.source) == "已恢复悟空：{0}" && !captures->empty())
+                        (*captures)[0] = TranslateEnglish((*captures)[0], false);
+                    if (const auto result = model::FormatTemplate(pattern.english, *captures)) return *result;
+                }
+            }
+            return std::string(source);
+        }
     }
     void Initialize()
     {
@@ -182,15 +210,6 @@ namespace gloss::localization
     std::string Translate(std::string_view chinese)
     {
         if (GetLanguage() == Language::Chinese) return std::string(chinese);
-        const auto &dictionary = Dictionary();
-        if (const auto found = dictionary.find(chinese); found != dictionary.end()) return found->second;
-        for (const auto &pattern : patterns)
-        {
-            if (!model::ValidTranslation(pattern.source, pattern.english)) continue;
-            if (const auto captures = model::MatchTemplate(pattern.source, chinese))
-                if (const auto result = model::FormatTemplate(pattern.english, *captures))
-                    return *result;
-        }
-        return std::string(chinese);
+        return TranslateEnglish(chinese);
     }
 }

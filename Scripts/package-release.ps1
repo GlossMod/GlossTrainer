@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Artifact,
+    [string]$Game = 'BlackMythWukong',
     [string]$OutputDirectory,
     [string]$SourceRoot,
     [string]$Tag,
@@ -12,9 +13,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) { $SourceRoot = Join-Path $PSScriptRoot '..' }
-if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $PSScriptRoot ('..\output\release-package-' + (Get-Date -Format 'yyyyMMdd') + '\release')
-}
 $loaderVersion = '10.0.0'
 $loaderArchiveSha256 = '3d5f2f2a47f456db878d17c1b135b0eae3209a7d8dabb0ff3f84e1b008c4f3a7'
 $loaderArchiveUrl = 'https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v10.0.0/Ultimate-ASI-Loader_x64.zip'
@@ -169,18 +167,13 @@ function Assert-Asi([byte[]]$Bytes) {
 
 $source = [IO.Path]::GetFullPath($SourceRoot)
 $artifactPath = [IO.Path]::GetFullPath($Artifact)
+$release = & (Join-Path $PSScriptRoot 'resolve-release.ps1') -Game $Game -Tag $Tag -SourceRoot $source
+Assert-RegularFile (Join-Path $source $release.versionFile)
+$version = $release.version
+$Tag = $release.tag
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Path $source $release.outputDirectory }
 $destination = [IO.Path]::GetFullPath($OutputDirectory)
-$versionFile = Join-Path $source 'BlackMythWukong\src\runtime.hpp'
-Assert-RegularFile $versionFile
 Assert-RegularFile $artifactPath
-$versionMatches = [regex]::Matches([IO.File]::ReadAllText($versionFile), 'inline\s+constexpr\s+char\s+Version\[\]\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*;')
-if ($versionMatches.Count -ne 1) { throw 'Exactly one formal source version is required in runtime.hpp.' }
-$version = $versionMatches[0].Groups[1].Value
-$expectedTag = 'v' + $version
-if ([string]::IsNullOrWhiteSpace($Tag)) { $Tag = $expectedTag }
-if ($Tag -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$' -or $Tag -cne $expectedTag) {
-    throw "Release tag '$Tag' does not match source version '$expectedTag'."
-}
 if ($SourceRevision -and $SourceRevision -notmatch '^[0-9a-fA-F]{40}$') { throw 'SourceRevision must be a full Git commit SHA.' }
 
 $artifactBytes = [IO.File]::ReadAllBytes($artifactPath)
@@ -205,7 +198,7 @@ foreach ($license in $licenseFiles) {
 foreach ($requiredLicense in @('imgui.txt', 'minhook.txt', 'nlohmann_json.txt', 'ultimate_asi_loader.txt')) {
     if ($requiredLicense -cnotin @($licenseFiles | ForEach-Object { $_.Name })) { throw "Required license is missing: $requiredLicense" }
 }
-$readmeFile = Join-Path $source 'BlackMythWukong\release-readme.md'
+$readmeFile = Join-Path $source $release.readme
 Assert-RegularFile $readmeFile
 $readme = [IO.File]::ReadAllText($readmeFile)
 if ([regex]::Matches($readme, '\{\{VERSION\}\}').Count -eq 0 -or [regex]::Matches($readme, '\{\{LICENSES\}\}').Count -ne 1) {
@@ -242,13 +235,13 @@ $payload = @(
 $files = @($payload | ForEach-Object {
     [ordered]@{ path = $_.path; size = $_.bytes.LongLength; sha256 = (Get-BytesSha256 $_.bytes) }
 })
-$archiveName = "GlossTrainer-BlackMythWukong-$Tag-win64.zip"
+$archiveName = $release.archiveName
 $archivePath = Join-Path $destination $archiveName
-$manifestPath = Join-Path $destination 'release-manifest.json'
+$manifestPath = Join-Path $destination $release.manifestName
 $partial = Join-Path $destination ([guid]::NewGuid().ToString('N') + '.zip.partial')
 $checksumPartial = Join-Path $destination ([guid]::NewGuid().ToString('N') + '.sha.partial')
 $manifestPartial = Join-Path $destination ([guid]::NewGuid().ToString('N') + '.json.partial')
-foreach ($outputPath in @($archivePath, $manifestPath, (Join-Path $destination 'SHA256SUMS.txt'))) {
+foreach ($outputPath in @($archivePath, $manifestPath, (Join-Path $destination $release.checksumName))) {
     if ((Test-Path -LiteralPath $outputPath) -and
         (((Get-Item -LiteralPath $outputPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
         throw "Refusing to replace an output symbolic link: $outputPath"
@@ -269,9 +262,9 @@ try {
     finally { $archive.Dispose(); $stream.Dispose() }
     $archiveSha = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()
     $manifest = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         project = 'GlossTrainer'
-        game = 'BlackMythWukong'
+        game = $release.game
         version = $version
         tag = $Tag
         architecture = 'x64'
@@ -294,7 +287,7 @@ try {
     [IO.File]::WriteAllText($checksumPartial, "$archiveSha  $archiveName`n", $utf8)
     Move-Item -LiteralPath $partial -Destination $archivePath -Force
     Move-Item -LiteralPath $manifestPartial -Destination $manifestPath -Force
-    Move-Item -LiteralPath $checksumPartial -Destination (Join-Path $destination 'SHA256SUMS.txt') -Force
+    Move-Item -LiteralPath $checksumPartial -Destination (Join-Path $destination $release.checksumName) -Force
     [pscustomobject]@{ version = $version; archive = $archivePath; sha256 = $archiveSha; manifest = $manifestPath; manifestFiles = $files.Count }
 }
 finally {

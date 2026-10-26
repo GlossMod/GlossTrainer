@@ -47,19 +47,26 @@ namespace
         static constexpr std::size_t RuntimeGuidRva = 0x1C3040;
         static constexpr std::size_t ProtoNameRva = 0x1C3080;
         static constexpr std::size_t ProtoGuidRva = 0x1C30D0;
+        static constexpr std::size_t EngineHeaderRva = 0x1C2B00;
+        static constexpr std::size_t EngineNameRva = 0x1C3120;
+        static constexpr std::size_t EngineGuidRva = 0x1C3160;
         static constexpr std::size_t RuntimeTableRva = 0x20000;
         static constexpr std::size_t ProtoTableRva = 0x40000;
+        static constexpr std::size_t EngineTableRva = 0x70000;
         static constexpr std::size_t GetterRva = 0x4000;
         static constexpr std::size_t CostItemRva = 0x5000;
         static constexpr std::size_t AlternateTargetRva = 0x6000;
         static constexpr std::size_t RuntimeTargetRva = 0x7000;
         static constexpr std::size_t ProtoTargetRva = 0x8000;
+        static constexpr std::size_t EngineTargetRva = 0x9000;
         static constexpr std::uint32_t MainCount = 106230;
         static constexpr std::uint32_t ScriptCount = 22103;
         static constexpr std::uint32_t GetterRid = 0x8ca2;
         static constexpr std::uint32_t CostItemRid = 0x374c;
         static constexpr std::uint32_t RuntimeCount = 15630;
         static constexpr std::uint32_t ProtoCount = 36051;
+        static constexpr std::uint32_t EngineMetadataCount = 41548;
+        static constexpr std::uint32_t EngineAotCount = 81921;
 
         SyntheticImage()
         {
@@ -77,6 +84,8 @@ namespace
                           RuntimeCount, TextRva, TextRva + TextSize);
             WriteAssembly(ProtoHeaderRva, ProtoNameRva, ProtoGuidRva, ProtoTableRva,
                           ProtoCount, TextRva, TextRva + TextSize);
+            WriteAssembly(EngineHeaderRva, EngineNameRva, EngineGuidRva, EngineTableRva,
+                          EngineAotCount, TextRva, TextRva + TextSize);
             WriteString(MainNameRva, "BtlSvr.Main");
             WriteString(MainGuidRva, "65A46ED7-6F85-40F5-AD32-079A507252B6");
             WriteString(ScriptNameRva, "B1UI_GSE.Script");
@@ -86,6 +95,8 @@ namespace
             WriteString(RuntimeGuidRva, "70421AB0-86DD-4BD4-AFD6-6C909E8B51A7");
             WriteString(ProtoNameRva, "Protobuf.RunTime");
             WriteString(ProtoGuidRva, "3CED0FE6-3455-4ADB-9501-636B0DB4FC87");
+            WriteString(EngineNameRva, "UnrealEngine");
+            WriteString(EngineGuidRva, "61ECE3C0-C4C1-4D1A-A060-EDF9910DAE64");
             WriteBytes(GetterRva, {0x55, 0x48, 0x8b, 0xec, 0x48, 0x83, 0xec, 0x30, 0x48,
                                    0x89, 0x4d, 0xf8, 0x48, 0x89, 0x55, 0xf0, 0xe8});
             WriteBytes(CostItemRva, {0x55, 0x48, 0x8b, 0xec});
@@ -93,10 +104,17 @@ namespace
                                             0x89, 0x4d, 0xf8, 0x48, 0x89, 0x55, 0xf0, 0xe8});
             WriteBytes(RuntimeTargetRva, {0x90, 0xc3});
             WriteBytes(ProtoTargetRva, {0x90, 0xc3});
+            WriteBytes(EngineTargetRva, {0x90, 0xc3});
             WriteCall(MainTableRva, GetterRid, GetterRva);
             WriteCall(ScriptTableRva, CostItemRid, CostItemRva);
             WriteCall(RuntimeTableRva, 1, RuntimeTargetRva);
             WriteCall(ProtoTableRva, 1, ProtoTargetRva);
+            WriteCall(EngineTableRva, 1, EngineTargetRva);
+            WriteCall(EngineTableRva, 0xce8, EngineTargetRva);
+            WriteCall(EngineTableRva, EngineMetadataCount, EngineTargetRva);
+            // These valid AOT entries must still be rejected as MethodDef RIDs.
+            WriteCall(EngineTableRva, EngineMetadataCount + 1, EngineTargetRva);
+            WriteCall(EngineTableRva, EngineAotCount, EngineTargetRva);
         }
 
         ~SyntheticImage()
@@ -138,6 +156,8 @@ namespace
         void ScriptGuid(std::size_t guidRva) { WriteAt(ScriptHeaderRva + 0xc0, Address(guidRva)); }
         void RuntimeGuid(std::size_t guidRva) { WriteAt(RuntimeHeaderRva + 0xc0, Address(guidRva)); }
         void ProtoGuid(std::size_t guidRva) { WriteAt(ProtoHeaderRva + 0xc0, Address(guidRva)); }
+        void EngineGuid(std::size_t guidRva) { WriteAt(EngineHeaderRva + 0xc0, Address(guidRva)); }
+        void EngineCount(std::uint32_t count) { WriteAt(EngineHeaderRva + 0x154, count); }
         void MainGetterOpcode(std::uint8_t opcode)
         {
             base_[MainTableRva + (GetterRid - 1) * 5] = static_cast<std::byte>(opcode);
@@ -294,6 +314,61 @@ namespace
         CHECK(gloss::gameplay::aot::ProtoMethod(1) == 0);
     }
 
+    void TestOptionalEngineAssemblyIdentityAndMetadataBounds()
+    {
+        SyntheticImage image;
+        CHECK(static_cast<bool>(image));
+        if (!image || !image.Protect())
+        {
+            CHECK(false);
+            return;
+        }
+        CHECK(gloss::gameplay::aot::Initialize(image.Module()));
+        CHECK(gloss::gameplay::aot::Ready());
+        CHECK(gloss::gameplay::aot::EngineMethod(1) == image.Address(SyntheticImage::EngineTargetRva));
+        CHECK(gloss::gameplay::aot::EngineMethod(0xce8) == image.Address(SyntheticImage::EngineTargetRva));
+        CHECK(gloss::gameplay::aot::EngineMethod(SyntheticImage::EngineMetadataCount) == image.Address(SyntheticImage::EngineTargetRva));
+        CHECK(gloss::gameplay::aot::EngineMethod(0) == 0);
+        CHECK(gloss::gameplay::aot::EngineMethod(SyntheticImage::EngineMetadataCount + 1) == 0);
+        CHECK(gloss::gameplay::aot::EngineMethod(SyntheticImage::EngineAotCount) == 0);
+        CHECK(gloss::gameplay::aot::EngineMethod(SyntheticImage::EngineAotCount + 1) == 0);
+    }
+
+    void TestOptionalEngineIdentityOrInsufficientMethodCountIsNonFatal()
+    {
+        for (const bool wrongMvid : {true, false})
+        {
+            // Populate the real optional slot first, then prove a rejected new
+            // image cannot retain the prior image's relocated Engine table.
+            SyntheticImage valid;
+            CHECK(static_cast<bool>(valid));
+            if (!valid || !valid.Protect())
+            {
+                CHECK(false);
+                return;
+            }
+            CHECK(gloss::gameplay::aot::Initialize(valid.Module()));
+            CHECK(gloss::gameplay::aot::EngineMethod(0xce8) == valid.Address(SyntheticImage::EngineTargetRva));
+            SyntheticImage rejected;
+            CHECK(static_cast<bool>(rejected));
+            if (!rejected)
+            {
+                CHECK(false);
+                return;
+            }
+            if (wrongMvid) rejected.EngineGuid(SyntheticImage::BadGuidRva);
+            else rejected.EngineCount(SyntheticImage::EngineMetadataCount - 1);
+            CHECK(rejected.Protect());
+            CHECK(gloss::gameplay::aot::Initialize(rejected.Module()));
+            CHECK(gloss::gameplay::aot::Ready());
+            CHECK(gloss::gameplay::aot::EngineMethod(1) == 0);
+            CHECK(gloss::gameplay::aot::EngineMethod(0xce8) == 0);
+            CHECK(gloss::gameplay::aot::Method(SyntheticImage::GetterRid) == rejected.Address(SyntheticImage::GetterRva));
+            CHECK(gloss::gameplay::aot::RuntimeMethod(1) == rejected.Address(SyntheticImage::RuntimeTargetRva));
+            CHECK(gloss::gameplay::aot::ProtoMethod(1) == rejected.Address(SyntheticImage::ProtoTargetRva));
+        }
+    }
+
     void TestRejectsWrongAssemblyMvids()
     {
         {
@@ -412,6 +487,8 @@ int main()
     TestOptionalRuntimeAndProtoAssemblies();
     TestOptionalRuntimeIdentityFailureIsNonFatal();
     TestOptionalProtoIdentityFailureIsNonFatal();
+    TestOptionalEngineAssemblyIdentityAndMetadataBounds();
+    TestOptionalEngineIdentityOrInsufficientMethodCountIsNonFatal();
     TestRejectsWrongAssemblyMvids();
     TestRejectsNonCallMethodEntry();
     TestRejectsNonCallScriptEntry();

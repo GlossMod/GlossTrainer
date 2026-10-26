@@ -15,7 +15,7 @@ namespace gloss::gameplay::aot
             std::uintptr_t table{}, codeStart{}, codeEnd{};
             std::uint32_t count{}, metadataCount{};
         };
-        Assembly mainAssembly{}, scriptAssembly{}, runtimeAssembly{}, protoAssembly{};
+        Assembly mainAssembly{}, scriptAssembly{}, runtimeAssembly{}, protoAssembly{}, engineAssembly{};
         constexpr char Guid[] = "65A46ED7-6F85-40F5-AD32-079A507252B6";
         bool StringEquals(std::uintptr_t address, const char *expected)
         {
@@ -113,8 +113,10 @@ namespace gloss::gameplay::aot
         }
         runtimeAssembly = {};
         protoAssembly = {};
+        engineAssembly = {};
         Load(module, "UnrealEngine.Runtime", "70421AB0-86DD-4BD4-AFD6-6C909E8B51A7", 15630, runtimeAssembly);
         Load(module, "Protobuf.RunTime", "3CED0FE6-3455-4ADB-9501-636B0DB4FC87", 36051, protoAssembly);
+        Load(module, "UnrealEngine", "61ECE3C0-C4C1-4D1A-A060-EDF9910DAE64", 41548, engineAssembly);
         ready.store(true, std::memory_order_release);
         Log(std::format("Mono AOT BtlSvr.Main {}: {} methods, getter {:X}; B1UI_GSE.Script {} methods", Guid, mainAssembly.count, getter, scriptAssembly.count));
         return true;
@@ -122,6 +124,7 @@ namespace gloss::gameplay::aot
     std::uintptr_t Method(std::uint32_t rid) { return Ready() ? Resolve(mainAssembly, rid) : 0; }
     std::uintptr_t ScriptMethod(std::uint32_t rid) { return Ready() ? Resolve(scriptAssembly, rid) : 0; }
     std::uintptr_t RuntimeMethod(std::uint32_t rid) { return Ready() && runtimeAssembly.table ? Resolve(runtimeAssembly, rid) : 0; }
+    std::uintptr_t EngineMethod(std::uint32_t rid) { return Ready() && engineAssembly.table ? Resolve(engineAssembly, rid) : 0; }
     std::uintptr_t ProtoMethod(std::uint32_t rid) { return Ready() && protoAssembly.table ? Resolve(protoAssembly, rid) : 0; }
     bool Ready() { return ready.load(std::memory_order_acquire); }
 }

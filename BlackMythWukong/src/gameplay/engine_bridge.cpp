@@ -88,10 +88,33 @@ namespace gloss::gameplay::engine
             int (*structureStorageSize)(void *);
             void *(*cppStructOps)(void *);
             int (*cppStructSize)(void *);
-            std::int32_t (*exportText)(void *, ScriptArray *, void *, void *, void *, std::int32_t, void *);
+            void (*exportTextItem)(void *, ScriptArray *, void *, void *, void *, std::int32_t, void *);
         } api{};
         std::atomic_bool ready{};
         std::uint64_t frameHandle{};
+        std::string_view TypeName(Type type)
+        {
+            switch (type)
+            {
+            case Type::Object: return "Object";
+            case Type::Int: return "Int";
+            case Type::Float: return "Float";
+            case Type::Double: return "Double";
+            case Type::Bool: return "Bool";
+            case Type::Vector: return "Vector";
+            case Type::String: return "String";
+            case Type::ObjectArray: return "ObjectArray";
+            case Type::Enum: return "Enum";
+            case Type::Name: return "Name";
+            case Type::Rotator: return "Rotator";
+            case Type::Transform: return "Transform";
+            case Type::IntArray: return "IntArray";
+            case Type::StructArray: return "StructArray";
+            case Type::Interface: return "Interface";
+            case Type::Byte: return "Byte";
+            }
+            return "Unknown";
+        }
         std::uint64_t CastFlag(Type type)
         {
             switch (type)
@@ -193,6 +216,19 @@ namespace gloss::gameplay::engine
             name = Utf8(wide);
             return !name.empty();
         }
+        std::string FieldKey(std::string_view name)
+        {
+            // Native FName identity ignores ASCII case; its exported display
+            // spelling can depend on an earlier NamePool insertion (for example
+            // the live Position parameter is displayed as "position"). Fold
+            // lookup keys only, without changing display text or FName payloads.
+            // Non-ASCII bytes retain their existing exact-match behavior.
+            std::string key(name);
+            for (auto &character : key)
+                if (character >= 'A' && character <= 'Z')
+                    character = static_cast<char>(character + ('a' - 'A'));
+            return key;
+        }
         bool HasCast(void *property, std::uint64_t flag)
         {
             std::int32_t result{};
@@ -202,9 +238,11 @@ namespace gloss::gameplay::engine
         {
             if (name.empty() || name.size() > 256)
                 return false;
+            const auto requested = FieldKey(name);
             for (int depth = 0; structure && depth < 64; ++depth)
             {
                 void *field{};
+                bool found = false;
                 if (!Safe(api.children, field, structure))
                     return false;
                 for (int count = 0; field && count < 4096; ++count)
@@ -212,8 +250,14 @@ namespace gloss::gameplay::engine
                     std::string key;
                     if (!FieldName(field, key))
                         return false;
-                    if (key == name)
-                        return Describe(field, containerSize, false, result);
+                    if (FieldKey(key) == requested)
+                    {
+                        // Two spellings of the same FName within one declaring
+                        // structure are ambiguous metadata, never two fields.
+                        if (found || !Describe(field, containerSize, false, result))
+                            return false;
+                        found = true;
+                    }
                     void *next{};
                     if (!Safe(api.next, next, field))
                         return false;
@@ -221,6 +265,8 @@ namespace gloss::gameplay::engine
                 }
                 if (field)
                     return false;
+                if (found)
+                    return true;
                 void *parent{};
                 if (!Safe(api.super, parent, structure) || parent == structure)
                     return false;
@@ -319,7 +365,7 @@ namespace gloss::gameplay::engine
                 for (const auto &field : arg.fields)
                 {
                     ReflectedProperty reflected;
-                    if (!field.name || !names.insert(field.name).second || !FindField(structure, size, field.name, reflected) || !ValidateValue(reflected, field, true))
+                    if (!field.name || !names.insert(FieldKey(field.name)).second || !FindField(structure, size, field.name, reflected) || !ValidateValue(reflected, field, true))
                         return false;
                 }
                 return true;
@@ -567,7 +613,10 @@ namespace gloss::gameplay::engine
         optional(api.structureStorageSize, "Export_UStruct_GetStructureSize");
         optional(api.cppStructOps, "Export_UScriptStruct_GetCppStructOps");
         optional(api.cppStructSize, "Export_ICppStructOps_GetSize");
-        optional(api.exportText, "Export_FProperty_ExportText_Direct");
+        // ExportText_Direct is a differential serializer: it returns false and
+        // emits nothing for values identical to a null default. Read-only
+        // inspection requires ExportTextItem's unconditional void ABI instead.
+        optional(api.exportTextItem, "Export_FProperty_ExportTextItem");
         ready.store(complete, std::memory_order_release);
         Log(std::format("Engine bridge: {} validated registrations; bindings {}", found.size(), complete ? "ready" : "unavailable"));
         return complete;
@@ -615,7 +664,7 @@ namespace gloss::gameplay::engine
     bool SoftClassPath(std::uintptr_t object, const char *name, std::wstring &path)
     {
         path.clear();
-        if (!ValidObject(object) || !name || !api.exportText)
+        if (!ValidObject(object) || !name || !api.exportTextItem)
             return false;
         void *cls{};
         int size{};
@@ -624,10 +673,9 @@ namespace gloss::gameplay::engine
             !FindField(cls, size, name, property) || !HasCast(property.ptr, 0x200000000ull))
             return false;
         EngineString exported;
-        std::int32_t accepted{};
         std::wstring text;
-        if (!Safe(api.exportText, accepted, property.ptr, &exported.value, reinterpret_cast<void *>(object + property.offset), nullptr,
-                  reinterpret_cast<void *>(object), 0, nullptr) || accepted != 1 || !ReadWide(exported.value, text, 2048))
+        if (!SafeVoid(api.exportTextItem, property.ptr, &exported.value, reinterpret_cast<void *>(object + property.offset), nullptr,
+                      reinterpret_cast<void *>(object), 0, nullptr) || !ReadWide(exported.value, text, 2048) || text.find(L'\0') != std::wstring::npos)
             return false;
         if (text.empty() || text == L"None")
             return true;
@@ -643,6 +691,109 @@ namespace gloss::gameplay::engine
             text.find_first_of(L"\"'\\\r\n\t ") != std::wstring::npos || text.find(L'\0') != std::wstring::npos)
             return false;
         path = std::move(text);
+        return true;
+    }
+    bool ObjectReferenceAssigned(std::uintptr_t object, const char *name, bool &assigned)
+    {
+        assigned = false;
+        if (!ValidObject(object) || !name)
+            return false;
+        void *cls{};
+        int size{};
+        ReflectedProperty property;
+        if (!Safe(api.objectClass, cls, reinterpret_cast<void *>(object)) || !cls || !Safe(api.structureSize, size, cls) || size < 8 || size > 1024 * 1024 ||
+            !FindField(cls, size, name, property))
+            return false;
+        const bool hard = HasCast(property.ptr, CastFlag(Type::Object));
+        const bool weak = HasCast(property.ptr, 0x8000000ull); // FWeakObjectProperty
+        const bool soft = HasCast(property.ptr, 0x20000000ull); // FSoftObjectProperty (including soft classes)
+        if (static_cast<int>(hard) + static_cast<int>(weak) + static_cast<int>(soft) != 1)
+            return false;
+        if (hard)
+        {
+            std::uintptr_t value{};
+            if (property.size != sizeof(value) || !ReadMemory(object + property.offset, &value, sizeof(value)))
+                return false;
+            assigned = value != 0;
+            return true;
+        }
+        if (weak)
+        {
+            WeakObject value;
+            if (property.size != sizeof(value) || !ReadMemory(object + property.offset, &value, sizeof(value)))
+                return false;
+            // The managed FWeakObjectPtr carrier contains two signed int32s.
+            // This build's native Reset/SetUObject(nullptr) write {-1, 0};
+            // {0, 0} is the managed carrier's default initialization. A token
+            // with a serial retains a dependency even after its target dies;
+            // resolving it would erase that distinction.
+            if (value.serial == 0 && (value.index == -1 || value.index == 0))
+                return true;
+            if (value.index < 0 || value.serial <= 0)
+                return false;
+            assigned = true;
+            return true;
+        }
+        if (!api.exportTextItem)
+            return false;
+        EngineString exported;
+        std::wstring text;
+        if (!SafeVoid(api.exportTextItem, property.ptr, &exported.value, reinterpret_cast<void *>(object + property.offset), nullptr,
+                      reinterpret_cast<void *>(object), 0, nullptr) || !ReadWide(exported.value, text, 2048) || text.find(L'\0') != std::wstring::npos)
+            return false;
+        if (text.empty() || text == L"None")
+            return true;
+        // Native export preserves unloaded asset and level/subobject paths.
+        // Recognize only path syntax; unknown export text is not evidence of
+        // an empty reference. No soft-pointer storage layout is assumed.
+        if (const auto quote = text.find(L'\''); quote != std::wstring::npos)
+        {
+            if (quote == 0 || text.back() != L'\'' || text.find(L'\'', quote + 1) != text.size() - 1)
+                return false;
+            text = text.substr(quote + 1, text.size() - quote - 2);
+        }
+        if (text.empty() || text.size() > 2047 || text.front() != L'/' || text.find(L'.') == std::wstring::npos ||
+            text.find_first_of(L"\"'\\\r\n\t ") != std::wstring::npos)
+            return false;
+        assigned = true;
+        return true;
+    }
+    bool ExportPropertyText(std::uintptr_t object, const char *name, std::wstring &text)
+    {
+        return ExportPropertyPathText(object, {}, name, text);
+    }
+    bool ExportPropertyPathText(std::uintptr_t object, std::span<const std::string_view> path, const char *name, std::wstring &text)
+    {
+        text.clear();
+        if (!ValidObject(object) || !name || !api.exportTextItem || path.size() > 16)
+            return false;
+        void *cls{};
+        int size{};
+        if (!Safe(api.objectClass, cls, reinterpret_cast<void *>(object)) || !cls || !Safe(api.structureSize, size, cls) || size < 8 || size > 1024 * 1024)
+            return false;
+        auto address = object;
+        for (const auto part : path)
+        {
+            ReflectedProperty property;
+            void *nested{};
+            int nestedSize{};
+            if (!api.structType || !FindField(cls, size, part, property) || !HasCast(property.ptr, 0x100000ull) ||
+                !Safe(api.structType, nested, property.ptr) || !nested || !StructStorageSize(nested, nestedSize) ||
+                nestedSize != property.size || nestedSize < 1 || nestedSize > 65536)
+                return false;
+            address += property.offset;
+            cls = nested;
+            size = nestedSize;
+        }
+        ReflectedProperty property;
+        if (!FindField(cls, size, name, property))
+            return false;
+        EngineString exported;
+        std::wstring value;
+        if (!SafeVoid(api.exportTextItem, property.ptr, &exported.value, reinterpret_cast<void *>(address + property.offset), nullptr,
+                      reinterpret_cast<void *>(object), 0, nullptr) || !ReadWide(exported.value, value) || value.find(L'\0') != std::wstring::npos)
+            return false;
+        text = std::move(value);
         return true;
     }
     std::uintptr_t Load(std::wstring_view path, std::wstring_view unrealClass)
@@ -755,9 +906,13 @@ namespace gloss::gameplay::engine
         {
             ReflectedProperty property;
             std::string key;
-            if (!FieldName(field, key) || !Describe(field, size, true, property) || !(property.flags & 0x80) || properties.contains(key))
+            if (!FieldName(field, key) || !Describe(field, size, true, property) || !(property.flags & 0x80))
                 return {false, "反射参数结构不匹配"};
-            properties.emplace(std::move(key), property);
+            if (!properties.emplace(FieldKey(key), property).second)
+            {
+                Log(std::format("Engine bridge parameter name mismatch: function={} requested=<metadata> reflected={} reason=duplicate reflected FName", Utf8(path), key));
+                return {false, "反射参数结构不匹配"};
+            }
             void *next{};
             if (!Safe(api.next, next, field))
                 return {false, "反射参数读取失败"};
@@ -772,10 +927,18 @@ namespace gloss::gameplay::engine
             if (arg.type == Type::Object && !arg.output && arg.Get<std::uintptr_t>() && !ValidObject(arg.Get<std::uintptr_t>()))
                 return {false, "参数对象已经失效"};
             if (!arg.name)
+            {
+                Log(std::format("Engine bridge parameter name mismatch: function={} requested=<null> reason=missing name", Utf8(path)));
                 return {false, "接口参数名不匹配"};
-            const auto it = properties.find(arg.name);
-            if (it == properties.end() || !supplied.insert(arg.name).second)
+            }
+            const auto key = FieldKey(arg.name);
+            const auto it = properties.find(key);
+            if (it == properties.end() || !supplied.insert(key).second)
+            {
+                Log(std::format("Engine bridge parameter name mismatch: function={} requested={} reason={}", Utf8(path), arg.name,
+                    it == properties.end() ? "unknown name" : "duplicate supplied FName"));
                 return {false, "接口参数名不匹配"};
+            }
             const auto &p = it->second;
             // Const references can carry OutParm in native metadata, but must
             // never be treated as writable output arguments.
@@ -783,7 +946,13 @@ namespace gloss::gameplay::engine
             if (arg.output != output)
                 return {false, "接口参数方向不匹配"};
             if (!ValidateValue(p, arg))
+            {
+                Log(std::format("Engine bridge signature mismatch: function={} parameter={} expected={} expected_size={} argument_size={} actual_size={} offset={} flags=0x{:X} cast_match={} enum_cast={} byte_cast={} struct_cast={}",
+                    Utf8(path), arg.name, TypeName(arg.type), FixedSize(arg.type), arg.bytes.size(), p.size, p.offset, p.flags,
+                    HasCast(p.ptr, CastFlag(arg.type)) ? 1 : 0, HasCast(p.ptr, CastFlag(Type::Enum)) ? 1 : 0,
+                    HasCast(p.ptr, CastFlag(Type::Byte)) ? 1 : 0, HasCast(p.ptr, CastFlag(Type::Transform)) ? 1 : 0));
                 return {false, "接口参数类型或布局不匹配"};
+            }
         }
         struct DynamicValues
         {
@@ -803,7 +972,7 @@ namespace gloss::gameplay::engine
         CallState state = CallState::NotCalled;
         for (auto &arg : args)
         {
-            const auto &p = properties.at(arg.name);
+            const auto &p = properties.at(FieldKey(arg.name));
             auto *address = buffer + p.offset;
             if (IsDynamic(arg.type))
             {
@@ -837,7 +1006,7 @@ namespace gloss::gameplay::engine
             for (auto &arg : args)
                 if (arg.output)
                 {
-                    const auto &p = properties.at(arg.name);
+                    const auto &p = properties.at(FieldKey(arg.name));
                     if (!DecodeValue(p, buffer + p.offset, arg))
                     {
                         ok = false;

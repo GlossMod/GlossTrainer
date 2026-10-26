@@ -8,12 +8,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
-if ([string]::IsNullOrWhiteSpace($Artifact)) { $Artifact = Join-Path $PSScriptRoot '..\build\release\BlackMythWukong.asi' }
+$sourceRelease = & (Join-Path $PSScriptRoot 'resolve-release.ps1') -Game BlackMythWukong
+if ([string]::IsNullOrWhiteSpace($Artifact)) { $Artifact = Join-Path $PSScriptRoot ('../' + $sourceRelease.artifact) }
 if ([string]::IsNullOrWhiteSpace($LoaderArchive)) {
-    $LoaderArchive = Join-Path $PSScriptRoot ('..\output\release-package-' + (Get-Date -Format 'yyyyMMdd') + '\cache\Ultimate-ASI-Loader_x64.zip')
+    $LoaderArchive = Join-Path $PSScriptRoot ('../' + $sourceRelease.outputDirectory + '/cache/Ultimate-ASI-Loader/v10.0.0/Ultimate-ASI-Loader_x64.zip')
 }
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $PSScriptRoot ('..\output\release-package-' + (Get-Date -Format 'yyyyMMdd'))
+    $OutputDirectory = Join-Path $PSScriptRoot ('../output/package-validation/BlackMythWukong/v' + $sourceRelease.version)
 }
 $packager = Join-Path $PSScriptRoot 'package-release.ps1'
 $source = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -86,7 +87,7 @@ try {
     Assert-Condition (Test-Path -LiteralPath $loaderPath -PathType Leaf) "Offline tests require a pinned official Loader ZIP. Pass -LoaderArchive with its cached path: $loaderPath"
     Assert-Condition ((Get-FileHash -LiteralPath $loaderPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $loaderSha256) 'Offline Loader archive does not match the pinned SHA-256'
     Pass 'offline Loader fixture matches the pinned official x64 release'
-    $fixtureInputs = @('BlackMythWukong\src\runtime.hpp', 'BlackMythWukong\release-readme.md', 'LICENSE')
+    $fixtureInputs = @('BlackMythWukong\src\runtime.hpp', 'BlackMythWukong\release-readme.md', 'BlackMythWukong\release-notes.md', 'BlackMythWukong\validation\xmake.lua', 'Scripts\release-games.json', 'Scripts\package-release.ps1', 'Scripts\resolve-release.ps1', 'Scripts\test-package-release.ps1', 'Scripts\test-install.ps1', 'LICENSE')
     $fixtureInputs += @(Get-ChildItem -LiteralPath (Join-Path $source 'licenses') -File | ForEach-Object { 'licenses\' + $_.Name })
     foreach ($relative in $fixtureInputs) {
         $target = Join-Path $fixture $relative
@@ -103,13 +104,14 @@ try {
     }
     $version = [regex]::Match([IO.File]::ReadAllText((Join-Path $fixture 'BlackMythWukong\src\runtime.hpp')), 'Version\[\]\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
     Assert-Condition (-not [string]::IsNullOrEmpty($version)) 'Fixture source version missing'
-    $tag = 'v' + $version
+    $tag = 'BlackMythWukong/v' + $version
+    $stem = "GlossTrainer-BlackMythWukong-v$version-win64"
     $releaseDirectory = Join-Path $testRoot 'release'
     $common = @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', $releaseDirectory, '-Tag', $tag, '-SourceRevision', ('1' * 40))
     Invoke-Packager 'valid x64 ASI and verified Loader produce a portable release' $common
-    $zipPath = Join-Path $releaseDirectory "GlossTrainer-BlackMythWukong-$tag-win64.zip"
+    $zipPath = Join-Path $releaseDirectory "$stem.zip"
     $initialHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    Assert-Condition ([IO.File]::ReadAllText((Join-Path $releaseDirectory 'SHA256SUMS.txt')) -ceq "$initialHash  $([IO.Path]::GetFileName($zipPath))`n") 'External SHA256SUMS is incomplete or incorrect'
+    Assert-Condition ([IO.File]::ReadAllText((Join-Path $releaseDirectory "$stem.SHA256SUMS.txt")) -ceq "$initialHash  $([IO.Path]::GetFileName($zipPath))`n") 'External SHA256SUMS is incomplete or incorrect'
     Pass 'external checksum identifies the complete ZIP'
 
     $contents = Read-Zip $zipPath
@@ -147,10 +149,10 @@ try {
     }
     Pass 'README contains requested sections version attribution and all complete licenses'
 
-    $manifestPath = Join-Path $releaseDirectory 'release-manifest.json'
+    $manifestPath = Join-Path $releaseDirectory "$stem.manifest.json"
     Assert-Condition (-not $contents.ContainsKey('release-manifest.json')) 'Audit manifest leaked into the install ZIP'
     $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
-    Assert-Condition ($manifest.schemaVersion -eq 2 -and $manifest.project -ceq 'GlossTrainer' -and
+    Assert-Condition ($manifest.schemaVersion -eq 3 -and $manifest.project -ceq 'GlossTrainer' -and
         $manifest.game -ceq 'BlackMythWukong' -and $manifest.version -ceq $version -and
         $manifest.tag -ceq $tag -and $manifest.architecture -ceq 'x64' -and
         $manifest.entryPoint -ceq 'InitializeASI' -and $manifest.sourceRevision -ceq ('1' * 40)) 'Manifest metadata differs'
@@ -188,7 +190,28 @@ try {
     Assert-Condition ((Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $initialHash -and
         (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ceq $initialManifestHash) 'Repeated ZIP or manifest is not deterministic'
     Pass 'repeat packaging is byte-for-byte deterministic including the audit manifest'
-    Invoke-Packager 'mismatching tag is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-tag'), '-Tag', 'v999.999.999') 1 'does not match source version'
+    # A second game exists only inside this fixture. Both channels deliberately
+    # have the same version and share an output directory to detect collisions.
+    $secondGame = 'FixtureGame'
+    New-Item -ItemType Directory -Path (Join-Path $fixture "$secondGame/src") -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $fixture 'BlackMythWukong/src/runtime.hpp') -Destination (Join-Path $fixture "$secondGame/src/runtime.hpp")
+    [IO.File]::WriteAllText((Join-Path $fixture "$secondGame/readme.md"), "SECOND GAME README v{{VERSION}}`n{{LICENSES}}", $utf8)
+    [IO.File]::WriteAllText((Join-Path $fixture "$secondGame/tests.lua"), 'target("FixtureGameTests")', $utf8)
+    $registryPath = Join-Path $fixture 'Scripts/release-games.json'
+    $registry = [IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
+    $registry.games += [pscustomobject]@{ id = $secondGame; name = 'Fixture game'; target = $secondGame; versionFile = "$secondGame/src/runtime.hpp"; validationFile = "$secondGame/tests.lua"; readme = "$secondGame/readme.md"; releaseNotes = "$secondGame/readme.md"; packageScript = 'Scripts/package-release.ps1'; packageTests = 'Scripts/test-package-release.ps1'; installerTests = 'Scripts/test-install.ps1'; artifact = "build/release/$secondGame.asi"; format = 'asi-win64' }
+    [IO.File]::WriteAllText($registryPath, ($registry | ConvertTo-Json -Depth 6), $utf8)
+    $secondStem = "GlossTrainer-$secondGame-v$version-win64"
+    Invoke-Packager 'second registered game packages independently at the same version' @('-Artifact', $artifactPath, '-Game', $secondGame, '-SourceRoot', $fixture, '-OutputDirectory', $releaseDirectory, '-Tag', "$secondGame/v$version")
+    $secondContents = Read-Zip (Join-Path $releaseDirectory "$secondStem.zip")
+    $secondManifest = [IO.File]::ReadAllText((Join-Path $releaseDirectory "$secondStem.manifest.json")) | ConvertFrom-Json
+    Assert-Condition ([Text.Encoding]::UTF8.GetString($secondContents['README.md']).Contains('SECOND GAME README') -and $secondManifest.game -ceq $secondGame) 'Second game used another games README or receipt'
+    Assert-Condition ((Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $initialHash -and (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ceq $initialManifestHash) 'Second game overwrote the first game archive or manifest'
+    Assert-Condition ([IO.File]::ReadAllText((Join-Path $releaseDirectory "$stem.SHA256SUMS.txt")) -ceq "$initialHash  $([IO.Path]::GetFileName($zipPath))`n") 'Second game overwrote the first game checksum'
+    Pass 'same-directory cross-game packaging preserves the first archive checksum and manifest'
+    Invoke-Packager 'cross-game tag cannot package another selected game' @('-Artifact', $artifactPath, '-Game', $secondGame, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'cross-game'), '-Tag', $tag) 1 'does not match selected game'
+    Invoke-Packager 'unscoped legacy tag cannot publish a game' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'legacy-tag'), '-Tag', "v$version") 1 'Release tag must be'
+    Invoke-Packager 'mismatching tag is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-tag'), '-Tag', 'BlackMythWukong/v999.999.999') 1 'does not match source version'
     Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot 'bad-tag'))) 'Rejected tag created output'
 
     $original = [IO.File]::ReadAllBytes($artifactPath)
@@ -226,7 +249,7 @@ try {
     Copy-Item -LiteralPath $loaderPath -Destination $cacheArchive
     $cacheArguments = @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', $cacheOutput)
     Invoke-Packager 'cached official Loader supports fully offline packaging' $cacheArguments -UseCache
-    $cacheZip = Join-Path $cacheOutput "GlossTrainer-BlackMythWukong-$tag-win64.zip"
+    $cacheZip = Join-Path $cacheOutput "$stem.zip"
     $cacheZipHash = (Get-FileHash -LiteralPath $cacheZip -Algorithm SHA256).Hash
     Copy-Item -LiteralPath $corruptLoader -Destination $cacheArchive -Force
     Invoke-Packager 'cached Loader is rehashed and corruption is rejected' $cacheArguments 1 'Cached Loader archive SHA-256 mismatch:' -UseCache

@@ -6,6 +6,12 @@ GlossTrainer is a Windows x64 C++20 ASI plugin for Black Myth: Wukong, using Dea
 
 `Tests/` contains the local graphics host but is Git-ignored, as are `build/`, `output/`, and `data/`. The root build includes `Tests/`; check its availability in fresh checkouts.
 
+## Generated Validation Artifacts
+
+Store generated validation artifacts in the repository-root `output/` directory, preferably under `output/<task>-<YYYYMMDD>/`. This includes build/configure/test logs, screenshots, UI prototypes and prompts, runtime captures, dumps, JSON results, artifact hashes, and package receipts. Do not create these files or validation-output directories under `docs/`. Configure task scripts and commands to write these artifacts to `output/`.
+
+Keep maintained architecture, implementation, audit, and verification-summary documents in `docs/`. Record conclusions in `docs/verification.md` and link to raw evidence with paths such as `../output/<task>-<YYYYMMDD>/results.json`. When moving existing artifact directories, update documentation links and script output paths; preserve original captured logs and results.
+
 ## Build, Test, and Development Commands
 
 Install Visual Studio 2022 Desktop Development with C++, Windows SDK, and xmake. Run from the repository root:
@@ -28,7 +34,7 @@ Use four-space indentation, same-line opening braces, C++20, and UTF-8 source. F
 
 ## Testing Guidelines
 
-Tests use standalone C++ executables with custom `CHECK` assertions, plus PowerShell installer checks. Name test files `*_tests.cpp` and cases `Test...`. Run affected `GlossTrainer*Tests` targets in Debug and Release; use matching output directories. Cover failure paths and state restoration. No numeric coverage threshold is configured. Record evidence in `docs/verification.md`; graphics-host success does not establish in-game feature correctness.
+Tests use standalone C++ executables with custom `CHECK` assertions, plus PowerShell installer checks. Name test files `*_tests.cpp` and cases `Test...`. Run affected `GlossTrainer*Tests` targets in Debug and Release; use matching output directories. Cover failure paths and state restoration. No numeric coverage threshold is configured. Store raw validation evidence in `output/` and record summaries and evidence links in `docs/verification.md`; graphics-host success does not establish in-game feature correctness.
 
 ## Commit & Pull Request Guidelines
 

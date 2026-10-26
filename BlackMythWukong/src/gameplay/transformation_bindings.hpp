@@ -22,7 +22,8 @@ namespace gloss::gameplay::transformation::bindings
     inline bool Bindable(unsigned key, unsigned modifiers)
     {
         if (!key) return !modifiers;
-        return key >= 8 && key < 0xff && !(modifiers & ~7u) && !ModifierKey(key) &&
+        const bool mouse = key == 1 || key == 2 || key == 4 || key == 5 || key == 6;
+        return (mouse || key >= 8) && key < 0xff && !(modifiers & ~7u) && !ModifierKey(key) &&
                key != 0x1b && key != 0xe5 && key != 0xe7 &&
                !(key == 0x24 && modifiers == (features::Ctrl | features::Shift));
     }

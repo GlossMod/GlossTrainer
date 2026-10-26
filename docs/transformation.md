@@ -2,6 +2,44 @@
 
 本文记录参考 Mod 的实际实现、当前游戏构建的静态分析依据，以及全角色实现必须满足的边界。这里的“目录项”只表示资产线索，不代表角色已可控制。自动模型测试只验证目录、技能队列和生命周期模型，不等同于原生引擎桥接或游戏内验证。
 
+## 追加修复进度（2026-10-26）
+
+最新实机发现：移动时恢复悟空与部分武器初始化失败，均由桥接层对 FName 导出字段显示名区分大小写导致。REA 捕获移动参数 `position` 和武器参数 `Index`，分别与调用的 `Position`/`index` 不一致。已统一 ASCII 大小写匹配，保留严格类型、布局、方向和重复名称校验；六个受影响测试目标 Debug / Release 通过，Release 新包已安装并核对哈希。[本轮证据、测试与安装回执](../output/transformation-live-resume-20261026/)、[验证详情](verification.md)。重启前 Computer Use 因用户物理 Escape 停止，修复后移动和武器实测尚未完成。下文旧哈希及启动阻碍是此前状态。
+
+随后用户自行测试确认基本所有角色始终站姿滑行；当前日志已确认代理 controller 正确绑定，且部分武器初始化成功，仍有默认 inactive 武器回滚。`64E0CB6D...` 只读诊断包的用户实测已收到：四大天王（剑）实际速度/加速度非零、动画未暂停、ABPSetting存在且未禁用移动动画，因此排除“加速度为零”，继续追动画数据初始化和 Tick。翠堤武师的默认 inactive 武器同步后置显隐检查确实失败，正在补全部武器自身就绪预检。诊断不改动加速度、动画配置或武器失败 gate；用户操作游戏，代理读取日志。详细证据与 Debug/Release 回归见[最新验证记录](verification.md)。
+
+当前安装 `CEB2AD31...`：激活前等待所有生成武器完成自身 ECS 并确认事件订阅，等待期间不改玩家状态；保留同步显隐后置校验，失败不重放。用户确认翠堤武师可正常变身，日志证实武器从 Pending 到 Ready 且默认显隐正确。移动动画仍失败：翠堤/四剑/杨戬 Top 速度与 Move 加速度镜像更新，但 FinalABPMoveMode 长期为 None，正在比较配置与 Common 数据链。两配置回归通过不能替代尚未通过的动画实测。
+
+后续定位版 `77268924...` 已安装，增加资产配置模式、已有受管配置缓存与 Move.CommonData 实际模式的独立只读观察。该探针用本构建完整指纹和单次连续 GC 保护，不执行懒初始化、不跨帧保存受管引用；失败只记 unknown，不影响变身。当前等待用户短暂移动复测，尚未修复动画；完整回归与证据见[验证记录](verification.md)。
+
+用户已确认成功变身，并继续反馈移动动画、部分武器、鼠标左右键绑定、巨型角色视距及过场后悟空重复显示。当前代码加入角色原生 AI 移动请求、已生成武器的一次性本地主人/默认激活初始化、鼠标五键及组合键、按角色保存的 1–200 米视距。视距配置单独存放，不改技能名称/按键文件；自动按体型计算，运行中纠正游戏相机系统覆盖，退出恢复原相机。原型与提示词见[设计记录](../output/transformation-live-fix-20261025/camera-prototype.md)，移动/武器静态依据见[分析记录](../output/transformation-live-fix-20261025/movement-weapons.md)。
+
+过场期间现在暂挂变身，结束后自动恢复同一角色：激活前检查 camera movie 与玩家过场状态；激活中发现演出后停止输入、移动请求和待发技能，隐藏专属代理及已认领子对象，释放自有玩家属性句柄、免伤层和相机写入。相同玩家/控制器/世界内，三个过场量连续结束 250ms 后重新验证双方生命、特殊状态机和弱身份，把代理移到演出终点，重获隔离并恢复显隐、碰撞及原移动模式，不重复武器初始化。手动恢复、死亡、切图或对象失效仍清理临时对象；不会把演出中的悟空瞬移回旧代理位置。玩家状态使用带句柄的隔离请求，保留外部属性请求和直接显隐意图；发生移动/碰撞重算时最后重算隐藏，避免同步回调重新显露悟空。代理子对象暂停前的属性会保存，恢复时可观察到的外部差异保留；同值外部写入和持续技能生成器的完整冻结仍需专项适配。特殊 FSM 隔离仍仅对指纹、拥有身份及启动观察全部通过的代理生效。两配置自动测试通过不证明真实过场或全部角色可玩，当前实测状态见[验证记录](verification.md)。
+
+`77268924` 用户日志将站姿滑行定位到源 MM 配置4、备用模式0、最终模式0。AI代理缺少玩家专属 MM 状态派生，普通 MoveTo 又不发送状态事件。当前对拥有合法 MM 步态的角色使用正常 `BGURequestAIMoveToLocationWithMM`：只读查询角色自身已有配置，通过游戏 `IsMMStateValid` 选择 Walk/Run/Sprint 的锁定或自由状态；锁定资源键缺失而自由资源可用时，降为自身自由步态并转为速度朝向。非 MM、无匹配步态、配置暂不可读或可选选择器不可用时，仍允许普通原生 MoveTo，保留原有移动与锁定意图，仅显示可能滑行的原因。动画资源检查只选择请求类型，不阻止移动；游戏原有导航、施法、控制状态和生命周期检查仍生效。不使用数组下标、悟空动画或强写 Final 模式，不为普通回退发送 MM None；探测限频，动画重新可用时自动恢复对应请求并清除旧动画提示。源模式4会触发 MM 子图链接，Final=None 本身不阻止创建；初始化时序仍可能暂缺节点。资源键存在不能证明动画资源值和图最终工作。[静态依据](../output/transformation-live-resume-20261026/mm-state-driver-review.md)、[只读选择器](../output/transformation-live-resume-20261026/mm-selector-implementation-review.md)。用户已确认 `80A1112D` 部分角色移动动画生效、过场恢复正常；红孩儿被额外动画门禁拦截，故 `AE533E96` 已移除该拦截，新版仍待用户实测。[本轮证据与回归](verification.md)。
+
+最终 Release ASI `F444064D8C19A737A92680457247C44B84E8CED4E4AF92B99D88AFD75EF15385` 已安装，构建文件与安装文件哈希一致：[构建哈希](../output/transformation-followup-20261026/final-asi-sha256.txt)、[安装哈希](../output/transformation-followup-20261026/installed-final-sha256.txt)。两条游戏启动路径均未出现可操作窗口，Steam 恢复也失败，已请用户手动进入游戏。因此本轮新修复尚无游戏行为验收；四大天王琴、伞、龙、剑仍未验证。
+
+Native、Runtime、Special、Adapter、AOT 与 Localization 自动测试在 Debug / Release 均通过。Debug Localization 首次运行发现另一缺失翻译 key，补齐后复测通过。逐项原始输出：[Native](../output/transformation-followup-20261026/debug-native-run.log) / [Native Release](../output/transformation-followup-20261026/release-native-run.log)，[Runtime Debug](../output/transformation-followup-20261026/debug-GlossTrainerTransformationRuntimeTests-run.log) / [Runtime Release](../output/transformation-followup-20261026/release-GlossTrainerTransformationRuntimeTests-run.log)，[Special Debug](../output/transformation-followup-20261026/debug-GlossTrainerTransformationSpecialTests-run.log) / [Special Release](../output/transformation-followup-20261026/release-GlossTrainerTransformationSpecialTests-run.log)，[Adapter Debug](../output/transformation-followup-20261026/debug-GlossTrainerTransformationAdapterTests-run.log) / [Adapter Release](../output/transformation-followup-20261026/release-GlossTrainerTransformationAdapterTests-run.log)，[AOT Debug](../output/transformation-followup-20261026/debug-GlossTrainerAotTests-run.log) / [AOT Release](../output/transformation-followup-20261026/release-GlossTrainerAotTests-run.log)，[Localization 首次失败](../output/transformation-followup-20261026/debug-GlossTrainerLocalizationTests-run.log)、[Debug 复测](../output/transformation-followup-20261026/debug-localization-recheck-run.log) / [Release](../output/transformation-followup-20261026/release-GlossTrainerLocalizationTests-run.log)。自动测试和宿主回归均不代替用户在游戏中的角色与过场验收。
+
+## 当前通用适配范围（2026-10-26）
+
+此前 REA 观测定位了纯托管事件集合读取与 native→managed GC 状态切换问题；相关现场记录和 ABI 边界仍见[实机记录](../output/transformation-live-fix-20261025/live-findings.md)及[GC 边界](../output/transformation-live-fix-20261025/gc-transition.md)。这些是此前构建的证据。当前安装状态和本轮未完成的游戏验收见上节；下文旧轮次“未安装/由用户自行测试”只描述其当时范围。
+
+角色目录的验证状态只作提示，不限制“开始变身”。未验证或此前显示不可用的条目也可直接尝试，无需先点“检查角色与技能”；每次开始都会重新读取资源并进行初始化。菜单仅在当前游戏接口未就绪、已有会话或操作待处理时禁用开始按钮。资源类型、实际移动驱动、隔离和初始化检查仍决定该次尝试能否成功；失败按原流程恢复悟空，不将失败条目宣称为已验证。
+
+最新实现以能力检查取代历史的三个角色白名单。246 个参考路径采用相同检查规则，不因角色名直接放行；动态目录也接收 `TAMERT` 和 `UNIT_` 等候选名，仍须检查其真实类型。完整资源注册表覆盖和全部形态适配尚未完成，详见[全形态审计](transformation-all-forms-audit.md)。
+
+- 检查 Tamer 配置和角色 CDO 的移动组件；生成后再检查真实实例的移动模式、控制状态、隔离依赖和技能 ID。地面/下落采用水平输入，普通 CMC 飞行/游泳采用相机俯仰及水平朝向的三维输入；不强设 Walking，不强行越过游戏输入限制。定身、冰冻和技能暂停移动时保留会话及正在进行的连招。
+- 专用 FSM 模块仅隔离已由实际配置识别的代理状态图启动与更新；保留 CBG 更新和游戏原有 EndPlay 清理。它不覆盖阶段图、关卡 Actor 引用或唤醒关联。对象、路径和标签分别读取；硬、弱和软对象引用按实际反射类型读取，陈旧弱引用或未加载软路径仍视为依赖。非协同容器须与基础配置一致并符合已接受的空序列格式。字段缺失、读取失败或未知格式均不放行。Custom、车载、FlyControl、物理模拟和筋斗云专用驱动保留具体拒绝原因。`FloatRelativeSpotActor` 及触发区域字段的类型修复见[分析与证据](../output/transformation-reference-types-validation-20261025/analysis.md)。
+- 协同组件 AFE6–AFEC 七个注册、注销及消息入口现按临时根/子角色身份隔离，保留 AFE5 本地事件绑定；全部原生校验和 hook 安装成功后，非空 `BattleSC_GUID.TagName` / `SpecificEventListen_BattleSC` 不再单独拒绝变身。没有清空 CDO 标签或修改全局组。该模式会关闭协同 FSM 的相关消息，依赖伙伴/阶段的招式可能不可用；`FName.None` 也不能当作空 managed 字符串。见[静态审计](../output/transformation-runtime-observation-20261025/cooperative-audit.md)。
+- 软引用与容器统一使用无条件 `ExportTextItem` 导出；`ExportText_Direct` 会省略与默认空值相同的属性，不能把其 false 返回当作读取失败或空引用证据。后续 `BeginTriggerBox` 错误的[修复与原生接口依据](../output/transformation-empty-export-validation-20261025/analysis.md)保留了该区别。
+- 通过检查仅标“实验性”，表示可尝试独立代理和手动技能，不表示保留所有阶段/剧情行为，更不代表游戏内通过。没有任何角色因本轮合成测试升为“已验证”。下文“首批三个角色”描述的是历史实验实现，不能作为当前豁免名单。
+- 原生隔离新增有界 Owner 链，记录同会话子 Actor 的弱身份；根死亡恢复悟空，子死亡只清理该子对象。恢复先隔离临时角色，再按子→根→配置 Actor 清理，销毁中新出现的子对象保留到后续帧继续处理。失效/地址复用对象不继承认领。只拥有 Owner 关联且经过受保护 Hook 的对象可被记录；无归属关联、独立派生死亡实现和异步场景副作用仍需专项适配。
+- 完整逐技能列表、自定义名称、手动快捷键及旧动作槽均保留；真实实例缺失的技能不能由 CDO 列表强行触发。
+
+此前 REA MCP 对两次用户开始尝试的被动观测确认了协同标签和生成 UFunction 参数布局；该观测未捕获成功执行的 deferred spawn。碰撞参数类型修正为 Enum，FTransform 保持 96 字节。相关证据见[运行时观测记录](../output/transformation-runtime-observation-20261025/analysis.md)。这段历史静态/尝试证据不代表当前安装版的游戏角色验收。
+
 ## 输入材料和版本指纹
 
 | 材料             | 可复核指纹                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 说明                                                                                                                                                                                                                                                                  |
@@ -13,7 +51,7 @@
 | 游戏构建         | Steam App `2358720`，`appmanifest_2358720.acf` 的 `buildid` 为 `21393610`；EXE SHA-256 `CBA6127DF85FE6AEDF5A71B398F268C8A963C7B19582C3CAC087462518358E9A`                                                                                                                                                                                                                                                                                                                                                          | 可执行文件：`E:/steam/steamapps/common/BlackMythWukong/b1/Binaries/Win64/b1-Win64-Shipping.exe`。                                                                                                                                                                     |
 | 内嵌托管程序集   | `BtlSvr.Main` MVID `65A46ED7-6F85-40F5-AD32-079A507252B6`；本地分析提取物 SHA-256 `37D21F03714232499EE13F47ED294C9E36E5167B7E5DB39E2AC116B14B8ABDF5`。`UnrealEngine.Runtime` MVID `70421AB0-86DD-4BD4-AFD6-6C909E8B51A7`；SHA-256 `CBE5D6B3ECDD22EE384F325579B1F8686E9C8B7F4B523A9FA94E0EF15526DF61`。`GSE.ProtobufDB` MVID `807FE2DB-CA58-45F5-83D9-BB07D5E2C0E3`；嵌入 PE 候选从 EXE 偏移 `0x19160660` 提取，长度 `3,836,416` 字节，SHA-256 `743D83A014B6D70E076F70CAE84E5D9189D3F324FD43B36490F83CA64BB7E716`。 | 本地分析提取物位于 `tmp/game-mapping/0x16cbba40.dll`、`tmp/game-mapping/0x1c30b0e0.dll` 和 `tmp/game-mapping/xxj/protobufdb-0x19160660.dll`，不纳入版本控制；MVID/模块映射见 `tmp/game-mapping/xxj/aot-method-map.json` 及候选记录 `protobufdb-cli-candidates.json`。 |
 
-REA 已核对该 EXE 和游戏构建。较早的计划记录了 REA 成员 `ev_1c5816db03fcc3e5edf91ba48cff631b97e6b79aee84727cd5556bb27c2d3c33`；本次可复核的 REA 成员记录为 `ev_65511f202db823b19189cc393e741b1fd85cd56164553bdbcd43575f896816f7`，并标记为 partial：大型程序集解析受预算限制。托管类/方法补充检查使用本地 ILSpy `9.1.0.7988`（`--disable-updatecheck`）和 .NET `System.Reflection.Metadata` 的 `PEReader`/`MetadataReader` 读取内嵌模块。MethodDef token 只适用于以上构建指纹；不能跨版本照搬。尚未使用已配置的原生反编译提供器，也没有本轮游戏内运行证据。
+REA 已核对该 EXE 和游戏构建。较早的计划记录了 REA 成员 `ev_1c5816db03fcc3e5edf91ba48cff631b97e6b79aee84727cd5556bb27c2d3c33`；本次可复核的 REA 成员记录为 `ev_65511f202db823b19189cc393e741b1fd85cd56164553bdbcd43575f896816f7`，并标记为 partial：大型程序集解析受预算限制。托管类/方法补充检查使用本地 ILSpy `9.1.0.7988`（`--disable-updatecheck`）和 .NET `System.Reflection.Metadata` 的 `PEReader`/`MetadataReader` 读取内嵌模块。MethodDef token 只适用于以上构建指纹；不能跨版本照搬。该静态分析阶段没有配置原生反编译提供器或记录游戏执行；后续 REA 被动观测见本文前节和运行时分析，仍没有新修复构建的角色行为验收。
 
 ## 参考 Mod 的行为
 
@@ -57,13 +95,13 @@ REA 在上述构建上确认 EXE 身份；程序集解析范围受限后，本�
 ## 当前状态与验收用语
 
 - **形态覆盖边界：** 不同 Tamer 资产路径对应的阶段、友军和 NPC 变体会分别保留；同一 Tamer 资产在运行时切换的阶段或 `OverrideID` 组合尚未完整枚举。`catalogComplete` 固定为 `false`：当前并非完整形态库，也不是“所有角色变身功能”交付。
-- **当前实现范围（源码状态，不是游戏实测）：** 目录由参考 Mod 提示项和游戏 Asset Registry 的 `/Game/00Main/Design/Units` 有界枚举合并；当前实现始终将 `catalogComplete` 保持为 `false`，因为程序生成、过场和仅玩家形态覆盖未确认。只有杨戬、大圣和狼侍卫三种已写适配路径可进入实验性代理流程；它们通过资源配置、技能描述和初始化检查后仍需游戏验证，其他可读配置的角色保持未验证或不可用。
+- **当前实现范围（源码状态，不是游戏实测）：** 目录由参考 Mod 提示项和游戏 Asset Registry 的 `/Game/00Main/Design/Units` 有界枚举合并；`catalogComplete` 固定为 `false`，程序生成、过场、仅玩家形态及运行时变体的覆盖仍未确认。代理流程不再使用杨戬、大圣、狼侍卫的三角色白名单；所有候选都经过配置、移动、技能、隔离和初始化检查。具备特定 FSM 配置的候选还必须通过专用适配器指纹及启动观察。代码路径可尝试不等于稳定可玩，所有角色仍以游戏内证据确定验证状态。
 - **代理后端边界：** 运行时保留悟空和控制器，通过延迟配置 Tamer 与代理角色初始化目标形态、同步相机/输入并在退出时恢复；配置 Actor 不完成 Spawn，以避开普通 Tamer 全局注册路径。代码隔离存档、任务、死亡及掉落入口，并复制目标的单位、物理及组件标志配置。该路线仍是按已知资源配置和方法指纹限制的实验适配，未证明可推广到整个目录。
 - “目录完整”指完成游戏资产枚举并按资源路径与形态去重；参考 Mod 的 247 行清单不满足此定义。
 - “可玩 / 已验证”必须有目标游戏构建上的生成、初始化、移动、攻击、技能、受伤、死亡、恢复、剧情隔离及切图证据。当前没有本轮新增的游戏内测试；纯模型测试和带引擎边界 mock 的后端生命周期测试都不等于原生钩子或角色行为的游戏实测。
 - 对目录项保留具体支持状态与原因。未知和未测试资源可以展示，但不能被自动提升为可玩/已验证。
 - 临时角色死亡、会话超时、加载失败、控制器/世界/对象代次变化及恢复失败都应走同一幂等清理路径；对象弱引用必须检查 index 与 serial，避免地址复用污染新角色。
-- 杨戬、大圣和一个普通小怪是通用链路的首轮实测对象。通过之前不要批量声明其他角色支持。
+- 杨戬、大圣和普通小怪可作为通用代理链路的验证对象；这只是测试计划，不表示已完成本轮实测。四大天王（琴、伞、龙、剑）均未通过新构建的游戏内验证；只有剑存在历史 FSM 配置 REA 观测，不能据此推断四者生成、移动、武器、技能、阶段或恢复成功。资源路径、14 项离线指纹及专用模块边界见[适配分析](../output/transformation-special-20261026/analysis.md)。
 
 ## 当前代码接口与适配边界
 
@@ -71,7 +109,7 @@ REA 在上述构建上确认 EXE 身份；程序集解析范围受限后，本�
 
 当前目录把参考 Mod 的角色路径提示与游戏 Asset Registry 对 `/Game/00Main/Design/Units` 的 Tamer 蓝图枚举合并，并按稳定资源路径和形态标识去重。不同 Tamer 资产路径对应的阶段、友军和 NPC 变体会分别保留；同一 Tamer 资产在运行时切换的阶段或 `OverrideID` 组合尚未完整枚举。`catalogComplete` 有意固定为 `false`：这不是完整形态库，不能证明已包含程序生成角色、过场角色、玩家专属形态或运行时变体。用户界面中“已发现”仅指资源可读，不能理解为可生成或可玩。
 
-三个首批实验性适配是杨戬、大圣和普通小怪狼侍卫 `TAMER_gycy_lang_01`。加载阶段检查 Tamer 配置、`ResID`/`OverrideID`、角色类、技能目录和对象弱身份；仅这三种进入代理生成流程。流程会生成一个未完成 BeginPlay 的临时配置 Tamer，把有限的单位/物理/组件描述复制到配置对象，清空交互、任务图和剧情配置，再生成目标角色代理。代理完成 Spawn 后验证初始化/生命，设置阵营、关闭自主行为并清除自带目标；激活时保存悟空的隐藏、碰撞、移动模式和相机基线，再转接代理输入。代理角色保留其原始生命、战斗数值与可受伤状态；原悟空另外获得且只获得一层引用计数的免伤状态，恢复玩家状态成功后才移除本功能添加的那一层。恢复失败会保持保护并重试，原玩家弱对象失效时不会把免伤移除写到复用同一地址的新对象上。若游戏的免伤计数调用抛出异常、无法确认是否已增减，功能不会盲目重放该调用以免吞掉原有保护层；会保留恢复状态并要求重新载入，或等待当前玩家对象失效/更换后清理。该保护不应被解释为能拦截所有脚本直接改生命值的路径，需在游戏中验证。清理会先隐藏并禁用代理，再请求销毁；只有弱对象不再解析后才释放清理记录，恢复失败会保留记录并重试。
+通用代理流程不再以杨戬、大圣、狼侍卫 `TAMER_gycy_lang_01` 为白名单；所有目录项均按当次读取的 Tamer 配置、`ResID`/`OverrideID`、角色类、技能目录和对象弱身份进行门控。流程会生成一个未完成 BeginPlay 的临时配置 Tamer，把有限的单位/物理/组件描述复制到配置对象，清空交互、任务图和剧情配置，再生成目标角色代理。对于有专用 FSM 配置的形态，代理启动前还需登记 owned session，并通过启动/实例观察检查；这只覆盖该 FSM 路径，不清除场景阶段、飞行或其他关联依赖。代理完成 Spawn 后验证初始化/生命，设置阵营、关闭自主行为并清除自带目标；激活时保存悟空的隐藏、碰撞、移动模式和相机基线，再转接代理输入。代理角色保留其原始生命、战斗数值与可受伤状态；原悟空另外获得且只获得一层引用计数的免伤状态，恢复玩家状态成功后才移除本功能添加的那一层。恢复失败会保持保护并重试，原玩家弱对象失效时不会把免伤移除写到复用同一地址的新对象上。若游戏的免伤计数调用抛出异常、无法确认是否已增减，功能不会盲目重放该调用以免吞掉原有保护层；会保留恢复状态并要求重新载入，或等待当前玩家对象失效/更换后清理。该保护不应被解释为能拦截所有脚本直接改生命值的路径，需在游戏中验证。清理会先隐藏并禁用代理，再请求销毁；只有弱对象不再解析后才释放清理记录，恢复失败会保留记录并重试。
 
 技能页逐项显示当前检查角色从游戏技能接口枚举出的实际技能 ID。每项可单独设置按键或带修饰键的组合键，也可选填自定义名称；名称为空时保留游戏技能描述。保存键由角色稳定 ID 与实际技能 ID 组成，所以不同角色即使复用相同技能 ID 也不会串配置。新角色的技能数量不受旧 8 槽上限限制；角色目录覆盖不足仍意味着“当前可枚举技能”不等于整个游戏所有角色和形态的完整清单。
 
@@ -85,7 +123,7 @@ REA 在上述构建上确认 EXE 身份；程序集解析范围受限后，本�
 
 ## 建议的用户游戏内验证清单
 
-使用独立测试存档，逐项记录游戏构建、角色路径/形态、控制器类型、结果和失败原因。本轮自动测试使用合成对象，实验 ASI 未安装；游戏实测由用户自行执行。
+使用独立测试存档，逐项记录游戏构建、角色路径/形态、控制器类型、结果和失败原因。本轮 ASI 已安装，但当前两条启动路径均未取得可操作游戏窗口；自动测试与宿主使用合成对象，不构成角色实测。用户进入游戏后再执行下列测试，并将新修复与旧版本反馈区分记录。
 
 1. 依次测试杨戬、大圣和狼侍卫：检查加载、生成、初始化、镜头比例、正常移动/转向、轻击、重击、闪避、每个已配置技能、受伤、死亡退出和恢复悟空。
 2. 确认代理能受伤且原悟空不受正常战斗伤害；先手动给悟空施加免伤状态再变身，恢复后确认原有免伤层仍保留。让玩家状态/相机恢复出现可复现失败时，检查免伤会持续到下一次恢复成功。另测脚本直接改生命值的效果。
@@ -93,10 +131,11 @@ REA 在上述构建上确认 EXE 身份；程序集解析范围受限后，本�
 4. 使用键鼠和手柄分别测试默认映射及游戏内改键；测试锁定目标、松开移动、连续按技能、开关修改器菜单及切换窗口焦点。
 5. 与自由相机、隐藏玩家、无重力和其他会占用输入/玩家控制的功能交替启停；确认冲突功能暂挂后能恢复，恢复失败时界面仍保留“恢复悟空”入口。
 6. 对其它目录角色只记录“检查资源/技能目录”的结果，不要因可加载或能生成而标记为已验证。特殊剧情形态、友军、Boss 多阶段形态及缺少可用技能的角色单独记录限制。
+7. 分别测试四大天王琴、伞、龙、剑：确认专用 FSM 隔离时序、生成、移动动画、武器与通知、各技能/连招、锁定、受伤、死亡、恢复及剧情/阶段影响。四者当前均未验证；不能以离线指纹匹配、专用模块测试或任一成员历史观测替代逐个实测。
 
-此前 2026-10-25 八槽界面实验构建的 Debug / Release 全构建通过；11 组自动测试在两种配置下共 22 次执行均通过，[执行汇总](transformation-validation-20261025/results.json)。包含模型、反射桥接、Native 适配 mock、编译实际变身后端的恢复/技能队列测试及扩展冲突生命周期测试；具体证据与 IME 的两项环境 SKIP 见[验证记录](verification.md)。免伤回归覆盖 `0→1→0`、`2→3→2`、失败重试、同地址复用及增减结果不明时停止重放。离线[34 处指纹匹配](transformation-validation-20261025/native-fingerprints.json)也不证明钩子在游戏中安装成功。本轮逐技能配置改动尚未计入这些旧日志。
+此前 2026-10-25 八槽界面实验构建的 Debug / Release 全构建通过；11 组自动测试在两种配置下共 22 次执行均通过，[执行汇总](../output/transformation-validation-20261025/results.json)。包含模型、反射桥接、Native 适配 mock、编译实际变身后端的恢复/技能队列测试及扩展冲突生命周期测试；具体证据与 IME 的两项环境 SKIP 见[验证记录](verification.md)。免伤回归覆盖 `0→1→0`、`2→3→2`、失败重试、同地址复用及增减结果不明时停止重放。离线[34 处指纹匹配](../output/transformation-validation-20261025/native-fingerprints.json)也不证明钩子在游戏中安装成功。本轮逐技能配置改动尚未计入这些旧日志。
 
-本轮逐技能改动已完成 Debug / Release 全构建及 13 组测试，共 26 次执行 exit 0；[本轮汇总](transformation-skill-bindings-validation-20261025/results.json)。DX11/DX12 亮暗四组 UI 宿主回归通过，并查看了使用 96 项合成技能的真实页面截图；[暗色](transformation-skill-bindings-validation-20261025/ui-dx12-dark/GlossTrainer.Host-open.png) / [亮色](transformation-skill-bindings-validation-20261025/ui-dx12-light/GlossTrainer.Host-open.png)。实现前生成并查看的[新原型及提示词](transformation-skill-bindings-validation-20261025/prototype.md)取代此前八槽布局作为设计参考；fixture 数据不进入交付 ASI。
+本轮逐技能改动已完成 Debug / Release 全构建及 13 组测试，共 26 次执行 exit 0；[本轮汇总](../output/transformation-skill-bindings-validation-20261025/results.json)。DX11/DX12 亮暗四组 UI 宿主回归通过，并查看了使用 96 项合成技能的真实页面截图；[暗色](../output/transformation-skill-bindings-validation-20261025/ui-dx12-dark/GlossTrainer.Host-open.png) / [亮色](../output/transformation-skill-bindings-validation-20261025/ui-dx12-light/GlossTrainer.Host-open.png)。实现前生成并查看的[新原型及提示词](../output/transformation-skill-bindings-validation-20261025/prototype.md)取代此前八槽布局作为设计参考；fixture 数据不进入交付 ASI。
 
-这些证据不验证真实输入、动画、根运动、碰撞、仇恨、剧情隔离、异步清理或任一角色行为。三个首批适配仍为实验性，尚无本轮游戏内测试结果。游戏实测由用户自行进行；没有安装本轮 ASI。
+以上历史轮次的自动测试和宿主证据不验证真实输入、动画、根运动、碰撞、仇恨、剧情隔离、异步清理或任一角色行为。旧版用户反馈只适用于当时的构建；本轮最终 ASI 虽已安装，游戏尚未进入可操作状态，新修复及四大天王仍无游戏验收结果。
 

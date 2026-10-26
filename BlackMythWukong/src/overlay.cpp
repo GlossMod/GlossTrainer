@@ -283,7 +283,17 @@ namespace gloss::overlay
             }
             const auto color = ImGui::GetColorU32(selected ? accent : ImGui::GetStyleColorVec4(ImGuiCol_Text));
             NavigationIcon(index, ImVec2(origin.x + 17 * scale, origin.y + 13 * scale), color, scale);
-            draw->AddText(ImVec2(origin.x + 50 * scale, origin.y + 15 * scale), color, label);
+            if (index == 4)
+            {
+                const auto *navigationLabel = Text("七十二变\n（实验性）");
+                const auto textSize = ImGui::CalcTextSize(navigationLabel);
+                const auto fit = std::min(1.0f, (size.x - 58 * scale) / std::max(1.0f, textSize.x));
+                draw->AddText(nullptr, ImGui::GetFontSize() * fit,
+                              ImVec2(origin.x + 50 * scale, origin.y + (size.y - textSize.y * fit) * 0.5f),
+                              color, navigationLabel);
+            }
+            else
+                draw->AddText(ImVec2(origin.x + 50 * scale, origin.y + 15 * scale), color, label);
             return pressed;
         }
         void BeginCard(const char *id, ImVec2 size, float scale)
@@ -1454,8 +1464,9 @@ namespace gloss::overlay
                     RecordExtensionResult(trans::Inspect(selected));
                 ImGui::EndDisabled();
                 ImGui::SameLine();
-                ImGui::BeginDisabled(!status.ready || !idle ||
-                    (entry.support != trans::Support::Experimental && entry.support != trans::Support::Verified));
+                // Support labels describe evidence, not permission to attempt.
+                // Begin rechecks the selected resource on the game thread.
+                ImGui::BeginDisabled(!status.ready || !idle);
                 if (ImGui::Button(UiLabel("开始变身")))
                     RecordExtensionResult(trans::Begin(selected));
                 ImGui::EndDisabled();
@@ -1467,6 +1478,48 @@ namespace gloss::overlay
                         status.capabilities.recovery ? Text("就绪") : Text("等待"), status.capabilities.isolation ? Text("就绪") : Text("等待"));
                 }
                 const bool skillContext = skillSnapshot.inspected;
+                ImGui::PushID(selected.c_str());
+                // Keep a drag draft so disk persistence happens once on release,
+                // rather than once per rendered frame. The game thread applies
+                // the committed value even while this menu remains open.
+                static std::string cameraCharacter;
+                static float cameraMeters = 6.f;
+                static bool cameraEditing{};
+                const float savedCamera = trans::CameraDistance(selected);
+                if (cameraCharacter != selected)
+                {
+                    cameraCharacter = selected;
+                    cameraEditing = false;
+                    cameraMeters = savedCamera > 0.f ? savedCamera :
+                        status.activeId == selected && status.cameraDistanceMeters > 0.f ? status.cameraDistanceMeters : 6.f;
+                }
+                if (!cameraEditing && savedCamera == 0.f && status.activeId == selected && status.cameraDistanceMeters > 0.f)
+                    cameraMeters = status.cameraDistanceMeters;
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(Text("角色视距"));
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(std::max(72 * scale, ImGui::GetContentRegionAvail().x - 66 * scale));
+                ImGui::SliderFloat("##character-camera", &cameraMeters, 1.f, 200.f, Text("%.1f 米"), ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+                cameraEditing = ImGui::IsItemActive();
+                if (ImGui::IsItemDeactivatedAfterEdit())
+                {
+                    const auto result = trans::SetCameraDistance(selected, cameraMeters);
+                    RecordExtensionResult(result);
+                    if (!result.success) cameraMeters = savedCamera > 0.f ? savedCamera : 6.f;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip(Text("每个角色单独保存 · 松开滑块后即时生效\nCtrl+点击可输入 1 至 200 米；自动按体型计算"));
+                ImGui::SameLine();
+                if (ImGui::Button(UiLabel("自动"), ImVec2(58 * scale, 0)))
+                {
+                    const auto result = trans::SetCameraDistance(selected, 0.f);
+                    RecordExtensionResult(result);
+                    if (result.success) cameraCharacter.clear();
+                }
+                ImGui::PushFont(nullptr, 12);
+                ImGui::TextDisabled("%s", Text(savedCamera > 0.f ? "仅此角色 · 已保存视距" : "仅此角色 · 自动按体型"));
+                ImGui::PopFont();
+                ImGui::PopID();
                 // Merge the complete runtime list with the sparse persisted settings.
                 // Keep unknown saved IDs so a temporarily missing skill never erases a name or chord.
                 if (skillContext)
@@ -1989,7 +2042,7 @@ namespace gloss::overlay
                           ImVec2(closePosition.x + 10 * scale, closePosition.y + 22 * scale), closeColor, 1.5f * scale);
             ImGui::SetCursorPos(ImVec2(8 * scale, 88 * scale));
             ImGui::BeginGroup();
-            const char *pages[] = {Text("概览"), Text("修改功能"), Text("物品"), Text("传送"), Text("变身"), Text("设置")};
+            const char *pages[] = {Text("概览"), Text("修改功能"), Text("物品"), Text("传送"), Text("七十二变（实验性）"), Text("设置")};
             ImGui::BeginDisabled(updateRequired);
             for (int index = 0; index < static_cast<int>(std::size(pages)); ++index)
             {

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "games": [
+    {
+      "id": "BlackMythWukong",
+      "name": "Black Myth: Wukong",
+      "target": "BlackMythWukong",
+      "versionFile": "BlackMythWukong/src/runtime.hpp",
+      "validationFile": "BlackMythWukong/validation/xmake.lua",
+      "readme": "BlackMythWukong/release-readme.md",
+      "releaseNotes": "BlackMythWukong/release-notes.md",
+      "packageScript": "Scripts/package-release.ps1",
+      "packageTests": "Scripts/test-package-release.ps1",
+      "installerTests": "Scripts/test-install.ps1",
+      "artifact": "build/release/BlackMythWukong.asi",
+      "format": "asi-win64"
+    }
+  ]
+}

@@ -140,6 +140,22 @@ namespace
         CHECK(!result.success);
         CHECK(binding::Serialize(output) == before);
     }
+
+    void TestMouseButtonsAndExactMouseChordsRoundTrip()
+    {
+        binding::Config source{{"large-boss", {
+            {70001, "近战", 1, 0}, {70002, "蓄力", 2, Ctrl | Shift},
+            {70003, "", 4, Alt}, {70004, "", 5, 0}, {70005, "", 6, Ctrl}}}};
+        CHECK(binding::ValidBindings(source.begin()->second, Skills()).success);
+        binding::Config loaded;
+        CHECK(binding::Parse(binding::Serialize(source), loaded).success);
+        CHECK(binding::Serialize(source) == binding::Serialize(loaded));
+        CHECK(binding::Matches(loaded.begin()->second[1], 2, Ctrl | Shift));
+        CHECK(!binding::Matches(loaded.begin()->second[1], 2, Ctrl));
+        CHECK(!binding::Matches(loaded.begin()->second[1], 2, Ctrl | Shift | Alt));
+        CHECK(!binding::Bindable(3, 0)); // VK_CANCEL is not a mouse button.
+        CHECK(!binding::Bindable(7, 0)); // Undefined virtual key remains rejected.
+    }
 }
 
 int main()
@@ -149,6 +165,7 @@ int main()
     TestModifierMatchingIsExactAndUnboundSkillsDoNotMatch();
     TestDuplicateSkillIdsAndChordsAreRejectedPerCharacter();
     TestInvalidNamesAndMalformedFilesDoNotPolluteOutput();
+    TestMouseButtonsAndExactMouseChordsRoundTrip();
     if (failures)
     {
         std::cerr << failures << " transformation binding assertion(s) failed\n";

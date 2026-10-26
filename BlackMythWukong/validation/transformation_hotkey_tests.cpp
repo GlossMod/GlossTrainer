@@ -159,6 +159,42 @@ namespace
         gloss::features::SetUpdateRequired(false);
         CHECK(hotkeys::IsHotkey('H', Alt));
     }
+
+    void TestMouseCaptureLabelsConflictsAndDispatch()
+    {
+        constexpr unsigned keys[]{VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
+        constexpr const char *labels[]{"鼠标左键", "鼠标右键", "鼠标中键", "鼠标侧键 1", "鼠标侧键 2"};
+        for (std::size_t i = 0; i < std::size(keys); ++i)
+        {
+            CHECK(hotkeys::Conflicts(keys[i], Ctrl | Alt).success);
+            CHECK(hotkeys::Label(keys[i], 0) == labels[i]);
+            CHECK(hotkeys::Label(keys[i], Ctrl | Alt) == std::string("Ctrl+Alt+") + labels[i]);
+            hotkeys::BeginCapture("role-a", 41001);
+            CHECK(hotkeys::HandleHotkey(keys[i], Ctrl | Alt));
+            const auto captured = hotkeys::TakeCaptured();
+            CHECK(captured && captured->key == keys[i] && captured->modifiers == (Ctrl | Alt));
+        }
+        CHECK(gloss::features::SetHotkey(gloss::features::Id::InfiniteFocus, VK_RBUTTON, Shift).success);
+        CHECK(!hotkeys::Conflicts(VK_RBUTTON, Shift).success);
+        CHECK(hotkeys::Conflicts(VK_RBUTTON, 0).success);
+        CHECK(gloss::features::SetMenuHotkey(VK_XBUTTON1, Ctrl).success);
+        CHECK(!hotkeys::Conflicts(VK_XBUTTON1, Ctrl).success);
+        CHECK(gloss::features::GetMenuHotkey().label == "Ctrl+鼠标侧键 1");
+        CHECK(gloss::features::SetMenuHotkey('M', Ctrl).success);
+
+        fixture::status.phase = trans::Phase::Active;
+        fixture::status.activeId = "role-a";
+        fixture::bindings = {{41002, "鼠标招式", VK_LBUTTON, Ctrl}};
+        fixture::overlayVisible = false;
+        fixture::dispatched = 0;
+        CHECK(!hotkeys::HandleHotkey(VK_LBUTTON, 0));
+        CHECK(!hotkeys::HandleHotkey(VK_LBUTTON, Ctrl | Shift));
+        CHECK(hotkeys::HandleHotkey(VK_LBUTTON, Ctrl));
+        CHECK(fixture::dispatched == 1 && fixture::dispatchedSkill == 41002);
+        fixture::overlayVisible = true;
+        CHECK(!hotkeys::HandleHotkey(VK_LBUTTON, Ctrl)); // Normal menu clicks still belong to ImGui.
+        fixture::overlayVisible = false;
+    }
 }
 
 int main()
@@ -172,6 +208,7 @@ int main()
     TestGlobalHotkeysCannotBeMovedOntoSavedSkillChords();
     TestCaptureHandlesChordCancelAndClear();
     TestBoundKeyDispatchUsesActiveCharacterAndHonorsRuntimeGates();
+    TestMouseCaptureLabelsConflictsAndDispatch();
     hotkeys::CancelCapture();
     gloss::features::RegisterHotkeyConflictProbe({});
     std::filesystem::remove_all(fixture::dataDirectory, error);

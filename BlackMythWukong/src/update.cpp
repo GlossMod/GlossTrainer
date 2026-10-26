@@ -4,6 +4,7 @@
 #include <winhttp.h>
 #include <shellapi.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstdint>
@@ -18,10 +19,14 @@ namespace gloss::update
     namespace
     {
         constexpr std::size_t MaxResponseBytes = 512 * 1024;
+        constexpr std::size_t MaxScanBytes = 2 * 1024 * 1024;
+        constexpr std::size_t ReleasesPerPage = 20;
+        constexpr std::size_t MaxReleasePages = 10;
         constexpr ULONGLONG MaxRequestMilliseconds = 20000;
         constexpr wchar_t ApiHost[] = L"api.github.com";
-        constexpr wchar_t ApiPath[] = L"/repos/GlossMod/GlossTrainer/releases/latest";
+        constexpr std::string_view GameTagPrefix = "BlackMythWukong/";
         constexpr std::string_view ReleasePrefix = "https://github.com/GlossMod/GlossTrainer/releases/tag/";
+        constexpr std::string_view DownloadPrefix = "https://github.com/GlossMod/GlossTrainer/releases/download/";
         using VersionParts = std::array<std::uint32_t, 3>;
 
         std::optional<VersionParts> ParseVersion(std::string_view text, bool requireV)
@@ -52,6 +57,28 @@ namespace gloss::update
                     text.remove_prefix(separator + 1);
             }
             return parts;
+        }
+
+        std::optional<VersionParts> ParseGameTag(std::string_view tag)
+        {
+            if (!tag.starts_with(GameTagPrefix))
+                return std::nullopt;
+            return ParseVersion(tag.substr(GameTagPrefix.size()), true);
+        }
+
+        bool IsTagUrl(std::string_view url, std::string_view prefix, std::string_view tag, std::string_view suffix = {})
+        {
+            if (!ParseGameTag(tag))
+                return false;
+            if (url == std::string(prefix) + std::string(tag) + std::string(suffix))
+                return true;
+            for (const auto *separator : {"%2F", "%2f"})
+            {
+                const auto encoded = std::string("BlackMythWukong") + separator + std::string(tag.substr(GameTagPrefix.size()));
+                if (url == std::string(prefix) + encoded + std::string(suffix))
+                    return true;
+            }
+            return false;
         }
 
         Snapshot Failure()
@@ -108,53 +135,65 @@ namespace gloss::update
         detail::ReleaseResult FetchRelease()
         {
             const auto started = GetTickCount64();
-            HttpHandle session(WinHttpOpen(L"GlossTrainer-UpdateChecker/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+            HttpHandle session(WinHttpOpen(L"GlossTrainer-BlackMythWukong-UpdateChecker/2.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
             Require(WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000), "WinHttpSetTimeouts");
             HttpHandle connection(WinHttpConnect(session, ApiHost, INTERNET_DEFAULT_HTTPS_PORT, 0));
-            HttpHandle request(WinHttpOpenRequest(connection, L"GET", ApiPath, nullptr,
-                                                  WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
-            DWORD disabled = WINHTTP_DISABLE_COOKIES | WINHTTP_DISABLE_REDIRECTS | WINHTTP_DISABLE_AUTHENTICATION;
-            Require(WinHttpSetOption(request, WINHTTP_OPTION_DISABLE_FEATURE, &disabled, sizeof(disabled)), "Disable redirects/authentication");
-            DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
-            Require(WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy)), "Set redirect policy");
-            constexpr wchar_t headers[] = L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n";
-            Require(WinHttpSendRequest(request, headers, static_cast<DWORD>(-1L),
-                                       WINHTTP_NO_REQUEST_DATA, 0, 0, 0),
-                    "WinHttpSendRequest");
-            Require(WinHttpReceiveResponse(request, nullptr), "WinHttpReceiveResponse");
-            DWORD status{}, size = sizeof(status);
-            Require(WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                                        WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX),
-                    "Read HTTP status");
-            if (status == 404)
-                return {{Status::NoRelease, {}, "暂无正式发布版本", {}}, {}};
-            if (status != 200)
-                throw std::runtime_error(std::format("GitHub latest release returned HTTP {}", status));
-
-            DWORD contentLength{};
-            size = sizeof(contentLength);
-            if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
-                                    WINHTTP_HEADER_NAME_BY_INDEX, &contentLength, &size, WINHTTP_NO_HEADER_INDEX) &&
-                contentLength > MaxResponseBytes)
+            detail::ReleaseScan scan;
+            for (std::size_t page = 1; page <= MaxReleasePages; ++page)
             {
-                throw std::runtime_error("GitHub response exceeded the 512 KiB limit");
+                const auto path = std::format(L"/repos/GlossMod/GlossTrainer/releases?per_page={}&page={}", ReleasesPerPage, page);
+                HttpHandle request(WinHttpOpenRequest(connection, L"GET", path.c_str(), nullptr,
+                                                      WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
+                auto applyBudget = [&]
+                {
+                    const auto elapsed = GetTickCount64() - started;
+                    if (elapsed >= MaxRequestMilliseconds)
+                        throw std::runtime_error("GitHub release scan exceeded its 20 second time limit");
+                    const auto timeout = static_cast<int>(std::min<ULONGLONG>(5000, MaxRequestMilliseconds - elapsed));
+                    Require(WinHttpSetTimeouts(request, timeout, timeout, timeout, timeout), "Set request budget");
+                };
+                DWORD disabled = WINHTTP_DISABLE_COOKIES | WINHTTP_DISABLE_REDIRECTS | WINHTTP_DISABLE_AUTHENTICATION;
+                Require(WinHttpSetOption(request, WINHTTP_OPTION_DISABLE_FEATURE, &disabled, sizeof(disabled)), "Disable redirects/authentication");
+                DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+                Require(WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy)), "Set redirect policy");
+                constexpr wchar_t headers[] = L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n";
+                applyBudget();
+                Require(WinHttpSendRequest(request, headers, static_cast<DWORD>(-1L),
+                                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0), "WinHttpSendRequest");
+                applyBudget();
+                Require(WinHttpReceiveResponse(request, nullptr), "WinHttpReceiveResponse");
+                applyBudget();
+                DWORD status{}, size = sizeof(status);
+                Require(WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                            WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX), "Read HTTP status");
+                if (status != 200)
+                    throw std::runtime_error(std::format("GitHub release list returned HTTP {}", status));
+                DWORD contentLength{};
+                size = sizeof(contentLength);
+                if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                                        WINHTTP_HEADER_NAME_BY_INDEX, &contentLength, &size, WINHTTP_NO_HEADER_INDEX) &&
+                    (contentLength > MaxResponseBytes || contentLength > MaxScanBytes - scan.responseBytes))
+                    throw std::runtime_error("GitHub release scan exceeded its response byte limit");
+                std::string body;
+                std::array<char, 8192> buffer{};
+                for (;;)
+                {
+                    applyBudget();
+                    DWORD read{};
+                    Require(WinHttpReadData(request, buffer.data(), static_cast<DWORD>(buffer.size()), &read), "WinHttpReadData");
+                    applyBudget();
+                    if (!read)
+                        break;
+                    if (body.size() + read > MaxResponseBytes || body.size() + read > MaxScanBytes - scan.responseBytes)
+                        throw std::runtime_error("GitHub release scan exceeded its response byte limit");
+                    body.append(buffer.data(), read);
+                }
+                auto result = detail::EvaluateReleasePage(scan, body, Version);
+                if (scan.complete || scan.failed)
+                    return result;
             }
-            std::string body;
-            std::array<char, 8192> buffer{};
-            for (;;)
-            {
-                if (GetTickCount64() - started >= MaxRequestMilliseconds)
-                    throw std::runtime_error("GitHub request exceeded its total time limit");
-                DWORD read{};
-                Require(WinHttpReadData(request, buffer.data(), static_cast<DWORD>(buffer.size()), &read), "WinHttpReadData");
-                if (!read)
-                    break;
-                if (body.size() + read > MaxResponseBytes)
-                    throw std::runtime_error("GitHub response exceeded the 512 KiB limit");
-                body.append(buffer.data(), read);
-            }
-            return detail::EvaluateRelease(body, Version);
+            throw std::runtime_error("GitHub release scan reached its page limit before completion");
         }
 
         void RunCheck() noexcept
@@ -193,7 +232,7 @@ namespace gloss::update
     {
         bool IsTrustedReleaseUrl(std::string_view url, std::string_view tag)
         {
-            return ParseVersion(tag, true).has_value() && url == std::string(ReleasePrefix) + std::string(tag);
+            return IsTagUrl(url, ReleasePrefix, tag);
         }
 
         ReleaseResult EvaluateRelease(std::string_view payload, std::string_view currentVersion)
@@ -224,21 +263,106 @@ namespace gloss::update
                 if (!json.contains(name) || !json[name].is_boolean())
                     return reject("Missing/invalid release stability field");
                 if (json[name].get<bool>())
-                    return reject("GitHub latest endpoint returned a draft/prerelease");
+                    return reject("Release is a draft/prerelease");
             }
             if (!json.contains("tag_name") || !json["tag_name"].is_string() ||
                 !json.contains("html_url") || !json["html_url"].is_string())
                 return reject("Missing release tag/page");
             const auto tag = json["tag_name"].get<std::string>();
-            const auto latest = ParseVersion(tag, true);
+            const auto latest = ParseGameTag(tag);
             if (!latest)
-                return reject("Latest release tag is not strict vX.Y.Z");
+                return reject("Release tag is not strict BlackMythWukong/vX.Y.Z");
             const auto url = json["html_url"].get<std::string>();
             if (!IsTrustedReleaseUrl(url, tag))
                 return reject("Release page does not match the fixed GitHub repository/tag");
+            // A tag/release without the matching game package must never force an update.
+            const auto archiveName = std::string("GlossTrainer-BlackMythWukong-") + tag.substr(GameTagPrefix.size()) + "-win64.zip";
+            if (!json.contains("assets") || !json["assets"].is_array())
+                return reject("Release has no package assets");
+            bool packageFound = false;
+            for (const auto &asset : json["assets"])
+            {
+                if (!asset.is_object() || !asset.contains("name") || !asset["name"].is_string() ||
+                    asset["name"].get<std::string>() != archiveName)
+                    continue;
+                if (packageFound || !asset.contains("browser_download_url") || !asset["browser_download_url"].is_string() ||
+                    !asset.contains("size") || !asset["size"].is_number_unsigned() || asset["size"].get<std::uint64_t>() == 0 ||
+                    !IsTagUrl(asset["browser_download_url"].get<std::string>(), DownloadPrefix, tag, "/" + archiveName))
+                    return reject("Release package is duplicated or has invalid provenance");
+                packageFound = true;
+            }
+            if (!packageFound)
+                return reject("Release does not contain the matching BlackMythWukong ZIP");
             if (*latest > *current)
                 return {{Status::UpdateRequired, tag, "发现新版本，请下载更新后使用", url}, {}};
             return {{Status::Current, tag, "当前已是最新版本", url}, {}};
+        }
+
+        ReleaseResult EvaluateReleasePage(ReleaseScan &scan, std::string_view payload, std::string_view currentVersion)
+        {
+            auto reject = [&](std::string reason) -> ReleaseResult
+            {
+                scan.failed = true;
+                scan.newest = {};
+                return {Failure(), std::move(reason)};
+            };
+            if (scan.complete || scan.failed)
+                return reject("Release scan was already completed or failed");
+            if (!ParseVersion(currentVersion, false) ||
+                (!scan.currentVersion.empty() && scan.currentVersion != currentVersion))
+                return reject("Invalid or changed compiled current version");
+            scan.currentVersion = currentVersion;
+            if (scan.pages >= MaxReleasePages)
+                return reject("Release scan exceeded its page limit");
+            if (payload.size() > MaxResponseBytes || payload.size() > MaxScanBytes - scan.responseBytes)
+                return reject("Release scan exceeded its response byte limit");
+            nlohmann::json releases;
+            try
+            {
+                releases = nlohmann::json::parse(payload, [](int depth, nlohmann::json::parse_event_t, nlohmann::json &)
+                                               {
+                    if (depth > 32) throw std::runtime_error("GitHub JSON nesting exceeded the depth limit");
+                    return true;
+                }, false);
+            }
+            catch (const std::exception &error)
+            {
+                return reject(error.what());
+            }
+            if (releases.is_discarded() || !releases.is_array() || releases.size() > ReleasesPerPage)
+                return reject("GitHub response is not a bounded release-list page");
+            ++scan.pages;
+            scan.responseBytes += payload.size();
+            for (const auto &release : releases)
+            {
+                if (!release.is_object() || !release.contains("tag_name") || !release["tag_name"].is_string())
+                    return reject("Release-list entry has no valid tag");
+                const auto tag = release["tag_name"].get<std::string>();
+                // The repository's global latest and legacy naked vX.Y.Z channel are unrelated.
+                if (!tag.starts_with(GameTagPrefix))
+                    continue;
+                for (const auto *name : {"draft", "prerelease"})
+                    if (!release.contains(name) || !release[name].is_boolean())
+                        return reject("Missing/invalid release stability field");
+                if (release["draft"].get<bool>() || release["prerelease"].get<bool>())
+                    continue;
+                auto candidate = EvaluateRelease(release.dump(), currentVersion);
+                if (!candidate.diagnostic.empty())
+                    return reject(std::move(candidate.diagnostic));
+                if (scan.newest.latestVersion.empty() ||
+                    *ParseGameTag(candidate.snapshot.latestVersion) > *ParseGameTag(scan.newest.latestVersion))
+                    scan.newest = std::move(candidate.snapshot);
+            }
+            if (releases.size() == ReleasesPerPage)
+            {
+                if (scan.pages == MaxReleasePages)
+                    return reject("Release scan reached its page limit before completion");
+                return {{Status::Checking, {}, "正在检查更新…", {}}, {}};
+            }
+            scan.complete = true;
+            if (scan.newest.latestVersion.empty())
+                return {{Status::NoRelease, {}, "暂无正式发布版本", {}}, {}};
+            return {scan.newest, {}};
         }
     }
 

@@ -1,4 +1,5 @@
 #include "../src/localization.hpp"
+#include "../src/localization_model.hpp"
 #include "../src/gameplay/engine_bridge.hpp"
 #include <Windows.h>
 #include <iostream>
@@ -45,6 +46,9 @@ namespace gloss::localization
 {
     bool SetDetectedCulture(std::string_view culture, DetectionSource source)
     {
+        // Match the production validation boundary so malformed ASCII locale
+        // tags also exercise the GetCurrentCulture fallback.
+        if (!model::CultureToLanguage(culture)) return false;
         game_language_fixture::cultures.emplace_back(culture, source);
         return true;
     }
@@ -139,6 +143,40 @@ namespace
         CHECK(game_language_fixture::cultures.size() == priorCultures + 1);
         CHECK(game_language_fixture::cultures.back().first == "en-US");
     }
+
+    void TestMalformedAndOversizedLanguageFallback()
+    {
+        auto priorCalls = game_language_fixture::calls.size();
+        auto priorCultures = game_language_fixture::cultures.size();
+        game_language_fixture::now = 27000;
+        SetReply(LanguagePath, true, L"en--US");
+        SetReply(CulturePath, true, L"zh-CN");
+        gloss::gameplay::game_language::Tick();
+        CHECK(game_language_fixture::calls.size() == priorCalls + 2);
+        CHECK(game_language_fixture::cultures.size() == priorCultures + 1);
+        CHECK(game_language_fixture::cultures.back().first == "zh-CN");
+
+        priorCalls = game_language_fixture::calls.size();
+        priorCultures = game_language_fixture::cultures.size();
+        game_language_fixture::now = 32000;
+        SetReply(LanguagePath, true, std::wstring(86, L'e'));
+        SetReply(CulturePath, true, L"");
+        gloss::gameplay::game_language::Tick();
+        CHECK(game_language_fixture::calls.size() == priorCalls + 2);
+        CHECK(game_language_fixture::cultures.size() == priorCultures);
+
+        game_language_fixture::now = 37000;
+        game_language_fixture::onGameThread = false;
+        gloss::gameplay::game_language::Tick();
+        CHECK(game_language_fixture::calls.size() == priorCalls + 2);
+        // A skipped off-thread tick must not postpone the next game-thread probe.
+        game_language_fixture::onGameThread = true;
+        SetReply(LanguagePath, true, L"en-GB");
+        gloss::gameplay::game_language::Tick();
+        CHECK(game_language_fixture::calls.size() == priorCalls + 3);
+        CHECK(game_language_fixture::cultures.size() == priorCultures + 1);
+        CHECK(game_language_fixture::cultures.back().first == "en-GB");
+    }
 }
 
 int main()
@@ -147,6 +185,7 @@ int main()
     TestLanguagePreferenceAndInterval();
     TestCultureFallbackAndInvalidUtf16();
     TestFailedProbeRetriesAfterInterval();
+    TestMalformedAndOversizedLanguageFallback();
     if (game_language_fixture::failures)
     {
         std::cerr << game_language_fixture::failures << " game-language checks failed\n";

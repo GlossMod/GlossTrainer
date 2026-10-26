@@ -1,8 +1,165 @@
 # 本机验证记录
 
-最近更新：2026-10-25。Windows 11 x64、Visual Studio 2022、RTX 5080，游戏 Steam build 21393610。
+最近更新：2026-10-26。Windows 11 x64、Visual Studio 2022、RTX 5080，游戏 Steam build 21393610。
 
-## 变身实验构建（2026-10-25，未安装）
+## 黑神话 v0.3.5 与多游戏发布隔离（2026-10-26）
+
+用户确认 AE533E96 中红孩儿可以移动，仍没有移动动画，并接受当前效果、要求停止动画修复。本次保留该实现，将侧栏入口改为“七十二变（实验性）”，两行显示以适应原有宽度，英文同步更新。[亮暗导航原型](../output/imagegen/72-transformations-navigation-light-dark-20261026.png)使用 `custom-imagegen`、`model_providers.custom`、`gpt-image-2.5` 生成并查看；最终提示为精简导航、亮暗双主题、精确中文及选中项两行显示，不重做页面。
+
+同仓库的发布通道改为 `<Game>/vX.Y.Z`，本次为 `BlackMythWukong/v0.3.5`。注册表绑定每个游戏的版本文件、构建目标、验证清单、安装回归、打包脚本与发布说明。构建只配置选定游戏；发行包、校验文件、审计清单、Actions 产物与输出目录包含游戏标识。GitHub 发布不争用仓库全局 Latest，客户端完整分页扫描后只比较本游戏正式版及配套 ZIP，跨游戏、错误版本与混配附件不触发升级。详细规则见 [发布流程](releasing.md)。旧 `v0.3.4` 保留，旧客户端需手动下载本游戏新版本完成一次通道迁移。
+
+本轮构建和测试证据保存于 [原始命令结果](../output/game-release-20261026/build-tests.json)，脚本回归与发布回执也统一存放 `output/game-release-20261026/`。这里只记录可复核的自动验证与上述用户反馈，不将宿主通过或资源加载成功计为所有角色实测通过。
+
+本地最终结果：Debug / Release 各 19 个验证程序全部通过，两配置 ASI 构建通过，共 80 条命令 exit 0。PowerShell 5.1 / 7 的便携包回归各 26 项通过（[PS5](../output/game-release-20261026/package-ps5-final.log)、[PS7](../output/game-release-20261026/package-ps7-final.log)）；隔离回归各 26 项通过（[PS5](../output/game-release-20261026/isolation-ps5-fixed-v2.log)、[PS7](../output/game-release-20261026/isolation-ps7-fixed-v2.log)），含两游戏同版本、共用输出目录不覆盖、跨游戏字段/目标冲突拒绝、仅导入选定模块及不改调用方 xmake 配置。安装器使用固定哈希的离线 Loader 归档，18 项夹具通过，[最终日志](../output/game-release-20261026/installer-tests-offline-final.log)。初次配置的 DSL 接口错误、夹具配置污染、联网安装回归中止及误选损坏缓存的失败记录均保留，最终验证分别修复配置/夹具或改用正确离线输入，不将失败算作通过。
+
+已查看 v0.3.5 导航的真实宿主[暗色截图](../output/game-release-20261026/ui-dx12-dark-final/GlossTrainer.Host-restored.bmp)和[亮色截图](../output/game-release-20261026/ui-dx12-light-final/GlossTrainer.Host-restored.bmp)，两行文字无截断。DX12 亮色完整自动序列通过（3355 帧），[日志](../output/game-release-20261026/ui-dx12-light-final/GlossTrainer.Host.log)。先前 DX11 暗色及 DX12 暗色自动序列在首次按键时没有前台焦点，像素断言失败；恢复窗口后截图可见，不记为完整回归通过。此次未操控游戏或重新验收角色移动动画。
+
+本地最终 Release ASI SHA-256：`8870FE619FBB540C53D7A0B00D9204D9917C6E6E0314B179A2C125E1524EF350`；[本地四文件包回执](../output/game-release-20261026/local-package-receipt.json)。正式附件以 GitHub 对已提交源码重新构建的结果为准。
+
+## 动画资源缺失不再阻止移动（2026-10-26，AE533E96 已安装）
+
+用户完成 `80A1112D` 测试后确认：一些角色已经能移动并播放动画，过场恢复正常；缺少移动动画的角色反而无法移动，并明确举例红孩儿。本轮把过场结论记为用户实测反馈，不扩大为所有过场或全部角色验收。[用户测试日志摘要](../output/transformation-live-resume-20261026/mm-user-test-summary.md)、[原始快照](../output/transformation-live-resume-20261026/trainer-cinematic-mm-user-test.log)。
+
+红孩儿 `TAMER_hys_honghaier_01a` 的后续复现中，session `269695281` 连续 14 次选择结果均为 `available/current/required=true / valid=false / state=-1`，该会话没有发出可采样的移动请求。结合上一版 `animationReady=false` 时主动停止且不调用 MoveTo 的代码，确定了本功能的额外拦截；它不能证明游戏资产完全没有任何动画。[红孩儿复现快照](../output/transformation-live-resume-20261026/trainer-red-boy-before-fallback.log)、[逐会话数据](../output/transformation-live-resume-20261026/mm-user-test-summary.json)。
+
+当前修复把动画检查限定为选择请求类型：已有合法 MM 状态时继续 WithMM；非 MM、缺少当前步态、缓存暂不可读或可选选择器不可用时，均回退普通原生 MoveTo，并保留键鼠/手柄输入、慢走/跑步、目标和移动请求索引。不会猜测 MM 状态、发送 None 或借用悟空动画；缺少动画时可能滑行。250ms 动画探测限频仍保留，重新获得有效动画后会自动恢复对应请求并清除本功能的旧动画提示。菜单、焦点、施法、状态限制、过场、死亡、切图和恢复检查照常生效；动画缺失不能豁免这些条件。日志新增 `moveAPI=native/with-mm`，区别普通回退与实际发送 MM 参数。
+
+Debug / Release 的 Runtime 与 Localization 共 4 次测试及两配置 ASI 构建全部通过，[12 条最终命令](../output/transformation-live-resume-20261026/animation-fallback-results.json)。新增回归覆盖 available/current/required/valid 矩阵、MM→缺资源→未知→MM、JOG/RUN 与锁定朝向、缓存限频及请求连续性、暂挂和技能替代请求的索引取消、动画恢复后提示清除。Native 选择器和桥接代码本轮未改动，沿用上一节已通过的两配置测试，不把旧结果算作本轮重新执行。
+
+检测到游戏退出后安装 Release `AE533E9656C36B61008614A8D35EB346439667B1002A6F980D33D44E17960611`，构建、快照、安装文件哈希一致。[安装日志](../output/transformation-live-resume-20261026/install-animation-fallback.log)、[安装清单](../output/transformation-live-resume-20261026/install-animation-fallback-manifest.json)、[文件哈希](../output/transformation-live-resume-20261026/installed-animation-fallback-hashes.json)、[源码哈希](../output/transformation-live-resume-20261026/animation-fallback-source-hashes.json)。未操作游戏、未修改用户技能名称、按键或视距配置；已请用户复测红孩儿移动、技能和恢复，以及原本有动画的角色。用户随后确认红孩儿已可以移动，仍无移动动画，并接受当前效果、要求停止动画修复。该反馈仅确认上述移动结果，不将任何角色自动升为“已验证”。
+
+## 过场后恢复变身与 Motion Matching 请求（2026-10-26，已安装，待用户实测）
+
+用户已完成 `77268924` 定位版测试，翠堤武师、四大天王（剑）仍站姿滑行。[本轮原始日志](../output/transformation-live-resume-20261026/trainer-mode-none-user-test.log)确认二者源配置及受管缓存都是 `ABPMoveMode=4 / SpareMoveMode=0 / CommonFinalMode=0`，对象和缓存均存在且身份有效。静态核对发现，现有普通 AI MoveTo 没有发送 MM 状态事件，AIController 代理也不会执行玩家专用状态派生。[完整调用链及 UFunction 参数](../output/transformation-live-resume-20261026/mm-state-driver-review.md)来自本机构建同 SHA/MVID 的程序集与离线原生函数，不宣称新增动态 REA 调试或游戏验证。
+
+本版加入两项行为修复：
+
+- 同一玩家、控制器和世界内的过场暂挂变身，不再主动销毁角色。停止输入、移动请求和待发技能，隐藏本功能的代理及已认领子对象，撤销自有四项玩家属性句柄、免伤层和相机改动；过场、序列状态和退场标记连续结束 250ms 后，把同一代理放到演出终点，重新读取相机基线、验证双方生命及特殊状态机，再重获玩家隔离并恢复角色。武器不重复初始化，技能配置不改写。过场中手动恢复、跨图、对象失效、死亡及恢复失败仍统一清理，且不把旧玩家传回旧代理坐标。
+- MM 角色使用正常 `BGURequestAIMoveToLocationWithMM` 显式请求自身步态；独立只读选择器以游戏 `IsMMStateValid` 检查角色配置的状态键，锁定步态缺失时降为自身自由步态及速度朝向。非 MM 角色保留普通 MoveTo。未知缓存或缺少步态时保留变身并说明原因，250ms 限频复查，不借悟空动画、不强写 Final 模式、不重启自主 BT/FSM。状态键通过不保证资源值非空或最终动画成功；验收仍需实机画面。[选择器依据与完整指纹](../output/transformation-live-resume-20261026/mm-selector-implementation-review.md)。
+
+玩家隔离刷新改为移动、碰撞、隐藏的顺序；发生任何重算时最后必算隐藏，覆盖同步移动回调显露悟空的窗口。剧情外部请求保留原栈优先级，不通过新分配句柄压过演出。失败诊断按租约及代际去重，区分退休、不确定、读取失败与外部栈顶仍获胜。[隔离审查](../output/transformation-live-resume-20261026/cinematic-isolation-review.md)、[过场生命周期及技能边界](../output/transformation-live-resume-20261026/cinematic-runtime-review.md)。本版暂挂不等同于完整冻结所有技能蒙太奇、notify 或持续生成器；子对象同值属性修改的所有权仍不能仅靠值比较判定。相机、输入和位置恢复的 mock 通过不替代真实过场验收。
+
+Debug / Release 的 Native、Runtime、Adapter、Localization 四组测试及 ASI 构建全部 exit 0，共 20 条配置、构建和执行命令。[最终结果](../output/transformation-live-resume-20261026/cinematic-mm-final-results.json)。覆盖过场三种信号、同一角色恢复、连续退场观察、子对象原显隐、手动退出、切图取消、恢复部分失败、双方死亡、特殊状态机失效、MM 精确 Enum 参数、无资源与 unknown 区分、限频和拒绝重试。初次 Native Debug 因新增测试对象占用了旧归属链夹具索引而失败，修正为独立索引后复验通过，未放宽生产断言；[原失败](../output/transformation-live-resume-20261026/cinematic-mm-debug-GlossTrainerTransformationNativeTests-run.log)和[修复后复验](../output/transformation-live-resume-20261026/cinematic-mm-debug-native-recheck-run.log)均保留。
+
+确认游戏进程退出后已安装本版 Release；[安装日志](../output/transformation-live-resume-20261026/install-cinematic-mm.log)、[安装清单](../output/transformation-live-resume-20261026/install-cinematic-mm-manifest.json)、[构建/快照/安装文件哈希](../output/transformation-live-resume-20261026/installed-cinematic-mm-hashes.json)、[源码哈希](../output/transformation-live-resume-20261026/cinematic-mm-source-hashes.json)可复核。安装当时尚无用户实测结果；后续用户已反馈过场恢复正常、部分动画可用，另有缺动画角色移动被拦截，详见本文开头的新回退修复记录。不据此提升全部角色为“已验证”，整体变身目标仍未完成。
+
+## 移动回滚与武器初始化：实时反射核对（2026-10-26，修复验证中）
+
+用户进入游戏后，代理通过 REA MCP 被动观测 PID 71880 中修改器的反射字段读取，复现四大天王（剑）移动后恢复悟空、翠堤武师武器初始化失败。两者具有同一根因：桥接层把 FName 的导出显示字符串当作大小写敏感键。实际移动接口字段是 `position`，调用使用 `Position`；武器接口实际字段是 `Index`，调用使用 `index`。参数名称检查拒绝执行，随后变身生命周期回滚。REA 证据分别为 `ev_25710f59bbcafee3471c0fc4ce76fff58d1096c7252b2b59b98fce405577dceb` 和 `ev_ae77817318648b08bf3a469048e2d4bda9cd28c971ac7feeb7c937ddbfeb20c7`。[完整移动字段快照](../output/transformation-live-resume-20261026/live-reflection.json)、[武器字段快照](../output/transformation-live-resume-20261026/live-weapons-reflection.json)、[修复前日志](../output/transformation-live-resume-20261026/trainer-before-name-fix.log)、[签名分析](../output/transformation-live-resume-20261026/movement-signature-audit.md)。
+
+桥接查找已统一折叠 ASCII 大小写，覆盖参数验证、写入、回读及嵌套属性；保留重复名称、数量、类型、布局与方向检查，不改 FName 载荷或显示名。控制器诊断同时修正为原生 `K2_GetPawn`，旧 `controlsProxy=false` 不能作为控制器未绑定的证据。本节仍在验证中，不能据此宣布移动、武器或四大天王已经可玩；下方启动阻碍及旧安装哈希为此前记录。
+
+EngineBridge、TransformationRuntime、TransformationNative、TransformationSpecial、TransformationAdapter、Extension 六目标在 Debug / Release 构建、运行均 exit 0，[结果](../output/transformation-live-resume-20261026/results.json)记录 27 条命令且没有失败或缺失日志。Release ASI 构建与安装成功，[安装回执](../output/transformation-live-resume-20261026/install-name-fix.log)与[两份文件哈希](../output/transformation-live-resume-20261026/installed-name-fix-hashes.json)已保留。准备重启游戏时 Computer Use 报告用户按下物理 Escape，按要求停止本轮桌面输入。新包尚未完成修复后实测；目标仍未完成，角色状态不提升为已验证。
+
+后续在用户继续任务后成功启动新进程 PID 36760，插件磁盘 SHA-256 为 `1B53E92C27FE4694AEFF0CA8C61892B078D94C4E89185611F5D75A7E5FEB08EE`。用户明确改为自己操作游戏，代理只分析日志，随后未再发送游戏输入。新日志多次确认 `pawnRead=true / controlsProxy=true / dataCacheMatches=true`；此前移动名称错误不再出现，部分武器完成初始化。但用户反馈基本所有角色始终站姿滑行，因此移动动画验收明确未通过。日志还发现三武器角色在默认 inactive 的第 1 项后回滚，不能把所有武器标为通过。[用户测试日志快照](../output/transformation-live-resume-20261026/trainer-user-sliding.log)。后续只读诊断会分别记录速度、实际加速度、导航加速度开关及武器失败阶段；未经运行值证实不修改加速度属性，不强播动画。
+
+只读诊断版在游戏退出后安装：SHA-256 `64E0CB6D4A1154FB0ED519C2E03E92558729AAB71F4574559904904046538420`，构建与安装文件一致，[回执](../output/transformation-live-resume-20261026/install-movement-diagnostics.log)、[哈希](../output/transformation-live-resume-20261026/installed-diagnostics-hashes.json)。移动请求后的后续帧至少 50ms 开始采样，之后每秒至多一次，每会话最多 24 组运动/动画样本及 8 条停止事件；记录独立 read-success/unknown、角色 stable ID、会话、真实 class、Velocity/Acceleration/MaxAcceleration、导航开关、动画实例与适用的 ABP 设置。读取失败不影响会话，不写动画或加速度属性。武器诊断保留所有 gate 和事件顺序，仅补 `stage/reason` 与显隐前后值。最新 [Runtime Debug/Release](../output/transformation-live-resume-20261026/diagnostics-animation-results.json) 和 [Native Debug/Release](../output/transformation-live-resume-20261026/diagnostics-native-results.json) 均通过，含可选探针缺失/错误类型/空对象/异常、采样延迟/上限/复位及零诊断写入。静态依据见[动画驱动](../output/transformation-live-resume-20261026/animation-driver-review.md)、[移动诊断](../output/transformation-live-resume-20261026/movement-animation-runtime-review.md)、[武器后置检查](../output/transformation-live-resume-20261026/weapon-postevent-review.md)。
+
+用户已完成本包实测：[日志快照](../output/transformation-live-resume-20261026/trainer-diagnostics-user-test.log)。四大天王（剑）resource 1990 的多个移动样本 Velocity 约 250、Acceleration 约 2048、MaxAcceleration 2048，两个导航加速度开关均为 true；Mesh/AnimInstance/ABPSetting 存在，动画未暂停、速率 1、bDisableABPMove=false。用户确认仍始终站姿滑行，因此排除“实际加速度为零”，转查动画数据初始化与 Tick；不能继续盲改加速度开关。翠堤武师 resource 2017 连续三次均在 index1 默认 inactive 武器处 `post-hidden-mismatch`（beforeHidden=0、afterHidden=0），明确失败点；尚不能仅凭此证明事件无订阅或武器自身 LateBeginPlay 未完成。
+
+后续版本 `CEB2AD31BEAF4EDFBF182B42629649D885F8AEC94EB2928938DD9E47219E2363` 已在再次确认无游戏进程后安装，[收据](../output/transformation-live-resume-20261026/install-graph-ready.log)、[构建/快照/安装哈希一致](../output/transformation-live-resume-20261026/installed-graph-ready-hashes.json)、[源码哈希](../output/transformation-live-resume-20261026/graph-ready-source-hashes.json)。此版本加入：
+
+- 激活前检查全部已生成武器自己的 `BGUSimpleActorBaseCS.IsBeginPlayFinished`（RID 95B6，完整本构建指纹）和两个事件的实际订阅；Pending 不发送事件、不保存玩家恢复基线、不改相机/免伤/隔离租约，沿用会话总计 15 秒超时。已完成 ECS 但缺失订阅明确失败。真正派发前再次检查身份和就绪状态；显隐后置校验通过后才记 Complete，调用不确定或后置失败不重放。
+- 在同一 24 次/每秒一次预算内只读采样 Top.MappedSpeed、Move linked graph 的 FinalABPMoveMode / IsMoveAccelerating、实际 owning actor，以及 Monster 的起步/停止/加速混合镜像或 Advanced 的 mapped speed / gait。精确 FName 标签和反射类型来自本机构建，字段缺失/错误类型/图缺失均独立记录，不裸读 ECS 私有字段、不写动画状态。
+
+[Native Debug/Release](../output/transformation-live-resume-20261026/weapons-ready-native-results.json)、[Runtime/Localization Debug/Release](../output/transformation-live-resume-20261026/graph-ready-runtime-localization-results.json)、[ASI 两配置构建](../output/transformation-live-resume-20261026/graph-ready-asi-results.json)均 exit 0。新增回归覆盖多武器等待零部分事件、空/不可读订阅、对象复用/失效、后置失败不重放；生产后端等待转就绪、超时/切图/恢复/失败清理；动画图精确 Name/Object/Enum 参数、owner/class/null/type/NaN gate、采样上限与复位。首次 Runtime 回归发现测试 mock 错将旧会话累计 mutation 计数用于新会话零写入判断，已改为独立的本会话等待断言；原失败日志保留，随后两配置回归通过。
+
+用户已完成 `CEB2AD31...` 实测，确认翠堤武师现在可正常变身，移动仍无动作。[新 trainer 快照](../output/transformation-live-resume-20261026/trainer-graph-ready-user-test.log)显示 13:47:46 两个武器先 `initialized=0 / pending`，下一帧均 `initialized=1 / masterSubscriber=1 / activeSubscriber=1`，默认 active 武器由 hidden=1 转为 0，默认 inactive 武器保留 hidden=1，后置校验均成功。这证实此前角色已 LateBeginPlay、武器尚未完成自身 ECS 的时序缺口，以及本次等待实际覆盖了该分支；不扩大为全部角色武器验收。
+
+翠堤、四剑、杨戬的 Top.MappedSpeed 均随移动变化，Move 图存在、Owner 与 proxy 相符、IsMoveAccelerating 随移动更新，但所有采样的 FinalABPMoveMode 都是 0（None）。Enum 宽度/反射读取已重新静态核对，不能再把它解释为读失败默认值；下一步区分真实配置模式、受管 CommonData 引用/缓存和 Common.Update 路径。见[枚举审查](../output/transformation-live-resume-20261026/locomotion-enum-review.md)与[动画驱动第 9 节](../output/transformation-live-resume-20261026/animation-driver-review.md)。游戏自有日志已另存 [b1 快照](../output/transformation-live-resume-20261026/b1-graph-ready-user-test.log)，本次日志未记录能归因于 Common.Update 的异常；日志阴性不证明调用成功。
+
+本版动画实测明确仍未通过，不提升角色为“已验证”。用户继续操作游戏，代理仅分析日志。补充 REA 成员分析 Evidence `ev_f462d889b01a1627b65eee9b692c74d2505b18f86bcec22e23ba67eefb5c7b1f` 仍受 64 MiB 元数据表示预算限制，返回 unavailable；[原始结果](../output/transformation-live-resume-20261026/mode-none-rea-members.json)。具体方法体与类型由本机同 SHA/MVID 的 ILSpy 补充，不宣称 REA 已解出这些方法。
+
+为定位模式归零，新增只读缓存采样版 `772689243755BA86E77513E6DD2E939715D3556855679FC92FBE9299A7CDE5E6`，在确认游戏进程已退出后安装，[安装日志](../output/transformation-live-resume-20261026/install-mode-none.log)、[构建/快照/安装哈希](../output/transformation-live-resume-20261026/installed-mode-none-hashes.json)、[源码哈希](../output/transformation-live-resume-20261026/mode-none-source-hashes.json)。它保留已实测的武器等待修复；新增 Top 资产 CommonSetting.ABPMoveMode / MotionMatchingSetting.SpareMoveMode 的严格嵌套反射采样，以及独立能力的 `InspectAnimationState`：在一次连续 GC unsafe scope 内读取 Top 已有 BUABPSettingData、两个已有配置缓存与 Move.CommonData，通过四个已核对非泛型纯 getter 读取模式，再复核引用、weak identity、OwningActor 和会话代际。全部指纹由精确 Main MVID/RID call table 定位；证据见[原生探针报告](../output/transformation-live-resume-20261026/animation-aot-probe-review.md)。不存在的缓存报告 missing，不可读取报告 unknown，真实 None 保留 0；不会调用有懒初始化副作用的 getter，不创建缓存、不改模式、不重新执行生命周期。指纹失败仅禁用该诊断，不阻断变身。
+
+本轮 [Debug/Release Native、Runtime 回归与 ASI 构建](../output/transformation-live-resume-20261026/mode-none-results.json)全部 exit 0。Native 新测试核对所有诊断指纹的独立失败、纯 getter ABI、缺失与错误枚举、SEH、读取失败、GC 进入/退出配对、引用变化、weak 地址复用、owner/会话变化、零写入及不调用懒 getter；Runtime 覆盖资产嵌套 Enum 类型错误、合法 0、class/interface 缺失、采样限频上限和 optional native observation 不可用时仍 Active。本版仍是定位动画模式的诊断更新，尚无真实游戏读数，不能称动画已修复。
+
+## 追加修复验证（2026-10-26，已安装，实机待继续）
+
+用户已确认旧修复版能够完成变身；连续移动、技能、恢复及新反馈仍需实机复核。鼠标、绑定持久化、快捷键、相机配置和 Gameplay 测试已在 Debug/Release 通过。最终 Native、Runtime、Special、Adapter、AOT、Localization 测试也在两种配置通过，新增覆盖四项原玩家状态句柄、过场直接显隐、同步 EndPlay、重复回调、特殊状态机启动顺序及 Engine 程序集边界。Debug Localization 首次因缺少租约错误文案翻译失败，补齐后 Debug 复测和 Release 通过，失败日志保留。安装器临时游戏回归 18 项通过。详见[本轮原始日志](../output/transformation-followup-20261026/)和[较早的中间测试](../output/transformation-live-fix-20261025/followup-tests.md)。这些测试使用合成对象，不等同于真实游戏行为。
+
+主程序、宿主及变身 UI fixture 最终 Release 构建通过。最终 ASI SHA-256 `F444064D8C19A737A92680457247C44B84E8CED4E4AF92B99D88AFD75EF15385` 已安装并回读一致：[构建哈希](../output/transformation-followup-20261026/final-asi-sha256.txt)、[安装回执](../output/transformation-followup-20261026/install-final.log)、[安装哈希](../output/transformation-followup-20261026/installed-final-sha256.txt)。启动 b1.exe 和 Shipping.exe 均未获得可操作游戏窗口；Steam 窗口恢复也失败，已请用户手动进场。这些尝试没有运行到角色变身，尚无本轮新代码的游戏验收，四大天王琴/伞/龙/剑均保留未验证；静态依据见[专用状态图分析](../output/transformation-special-20261026/analysis.md)。旧 PID 70188 已退出，下文 PID 和安装状态均属历史记录。
+
+UI 原型已按项目要求使用 `custom-imagegen` 的 `model_providers.custom` / `gpt-image-2.5` 生成并查看，见[亮暗原型和提示词](../output/transformation-live-fix-20261025/camera-prototype.md)。旧宿主的 DX11 亮色重复出现 `hideVerified=0`：日志记录隐藏，GPU 截图却仍显示菜单。确认旧宿主在 `Present` 后读取 `FLIP_DISCARD` 缓冲区，内容不保证保留；仅测试夹具改为 Draw 完成、Present 之前复制到独立快照，生产渲染代码不变。修正后 DX11／DX12 亮暗四组均 exit 0，检查显示、隐藏、缩放、最小化恢复及按键释放；旧失败日志全部保留。[DX11 亮色日志](../output/transformation-followup-20261026/ui-prepresent-dx11-light/GlossTrainer.Host.log) / [DX11 暗色](../output/transformation-followup-20261026/ui-prepresent-dx11-dark/GlossTrainer.Host.log) / [DX12 亮色](../output/transformation-followup-20261026/ui-prepresent-dx12-light/GlossTrainer.Host.log) / [DX12 暗色](../output/transformation-followup-20261026/ui-prepresent-dx12-dark/GlossTrainer.Host.log)。真实 fixture 页面截图已查看：[暗色](../output/transformation-followup-20261026/ui-prepresent-dx11-dark/GlossTrainer.Host-restored.bmp)、[亮色](../output/transformation-followup-20261026/ui-prepresent-dx11-light/GlossTrainer.Host-restored.bmp)。fixture、原型和宿主通过均不替代角色实测。
+
+续轮复核仍没有游戏进程；资源管理器窗口也在重新枚举、重新绑定后激活失败，错误为 `failed to activate captured window`，因此尚不能把启动阻碍归因于游戏代码。未向游戏发送输入，等待可操作桌面及游戏场景。[续轮窗口审计](../output/transformation-followup-20261026/continuation-window-audit-2.json)。
+
+## 代理实机修复进度（2026-10-25，已安装，验证进行中）
+
+用户已授权代理接管游戏测试。实机复现翠堤武师生成后因读取纯托管 `RPCEventCollection` 失败回滚，修复为 D9C1 getter 后又捕获真实 `OnClearTargetInfo` 内 Mono 协作 GC 状态断言。新增操作级 balanced GC unsafe 作用域，保留完整清目标调用和所有原有隔离检查。原始证据、失败观测范围和停机经过见[实机记录](../output/transformation-live-fix-20261025/live-findings.md)，入口 ABI 与指纹见[GC 修复依据](../output/transformation-live-fix-20261025/gc-transition.md)。
+
+Release ASI `3B947AF31562758589D994C9E1D501BEB63074BAE4492EA396E1C42DFBC8D98F` 已由安装脚本安装，磁盘哈希已核对；重启进程 PID 70188。受影响 Native/Runtime 两目标在 Debug、Release 下均通过，含清目标失败后清理、恢复和同角色重试，见[测试结果](../output/transformation-live-fix-20261025/test-results.md)。本节为进行中记录：尚未由代理完成修复版移动、技能与恢复的连续实测，未新增“已验证”角色。后文“未安装/用户自行测试”属于各次历史交付边界，不是当前授权或安装状态。
+
+## REA 运行时观测与变身生成/协同修复（2026-10-25，新包未安装）
+
+用户分别尝试翠堤武师和四大天王（伞）后，通过 REA MCP / Frida 被动捕获修改器的反射读取：阶段路径为空，协同标签实际为 `UGuid.BattleSC.Huan` / `UGuid.BattleSC.f4`，并非读取失败。反射元数据快照确认 deferred spawn 参数区为 136 字节，其中 FTransform 为 96 字节、碰撞参数是 1 字节 FEnumProperty。结合源码和旧游戏日志定位 `Arg::Byte` 错传，已改为 `Arg::Enum(..., 1)`；捕获未包含成功执行的 deferred spawn 或其实际参数值。[完整分析与 REA 证据](../output/transformation-runtime-observation-20261025/analysis.md)。
+
+新增临时角色协同隔离：AFE6–AFEC 七个实例 void 入口拦截注册、注销及消息；保留 AFE5 本地绑定，仅按当前会话的根/子角色弱身份生效。全部 18 处原生指纹通过且 hook 安装完整后才发布就绪。允许可读的非空协同标签与事件列表，保留其它阶段/场景依赖检查；不改 CDO、原始关卡角色或全局协同中心。协同 FSM 消息也被停用，相关招式完整性仍待实测。[静态审计与初始化时序边界](../output/transformation-runtime-observation-20261025/cooperative-audit.md)。
+
+- 最终 Debug / Release 全构建及 16 个测试目标分别通过，共 32 次 exit 0：[汇总](../output/transformation-runtime-observation-20261025/results.json)、[Debug](../output/transformation-runtime-observation-20261025/build-debug.txt)、[Release](../output/transformation-runtime-observation-20261025/build-release.txt)。IME 环境回读 SKIP 保留在日志中。
+- [桥接回归](../output/transformation-runtime-observation-20261025/GlossTrainerEngineBridgeTests-release.txt)验证 Enum/Byte/Int 互不混用及错误参数诊断。[原生回归](../output/transformation-runtime-observation-20261025/GlossTrainerTransformationNativeTests-release.txt)覆盖各处指纹失败、安装失败回滚与七入口的身份边界；[生产后端回归](../output/transformation-runtime-observation-20261025/GlossTrainerTransformationRuntimeTests-release.txt)覆盖三类协同标签、非空事件列表、适配未就绪、CDO 不变、阶段/字段失败及恢复。
+- 精确 EXE SHA-256、程序集 MVID 和 18 个入口的离线字节匹配，其中新增协同入口 7 个：[离线回执](../output/transformation-runtime-observation-20261025/native-cooperative-fingerprints.json)。这是磁盘证据，不能证明新 hook 已在游戏内安装。
+- 最终 ASI 均为 AMD64 / PE32+ DLL 并导出 `InitializeASI`：[大小与 SHA-256](../output/transformation-runtime-observation-20261025/artifacts.json)。Release SHA-256 `757B7E12CC14C7AC364E10F4455165616E39573181BE0FCEE7A24D3D3285965A`。
+
+最终测试包 `output/GlossTrainer-transformation-runtime-fix-20261025-r2.zip` 保留旧包，逐项回读 manifest 大小与哈希：[打包回执](../output/transformation-runtime-observation-20261025/package-receipt.json)。r2 只完善文档措辞和交付证据，ASI 与本轮初包相同。本轮没有安装、重启或控制游戏。观测会话已调用关闭，响应原文保留；关闭后同 PID 仍运行。磁盘安装文件仍为旧 ASI `1BE0DE1D3F58FF9DC0F4A47F2C8C4934BA17F4868C82DBA679DDE74D74E48443`。
+
+没有修改 UI 布局或重跑图形宿主，没有新版本的角色游戏行为验收，不新增“已验证”角色。游戏由用户自行复测，先检查翠堤武师、四大天王（伞）与普通小怪的生成、移动、技能和恢复，再记录协同伙伴、死亡、召唤物与切图影响。
+
+## 空引用完整导出与唤醒字段路径修复（2026-10-25，未安装）
+
+用户更新前轮包后仍遇到 `BeginTriggerBox 无法校验`。确认 `ExportText_Direct` 会对与空默认值相同的属性返回 false 并省略输出；此前将其误当作读取失败。三个只读导出入口统一改用真实 void ABI 的无条件 `ExportTextItem`，覆盖软对象、软类、直接容器和嵌套容器。独立字段审计又发现 `WakeUpLinkEnable` / `CanTriggerWakeUpLinkWhenDead` 属于 `WakeUpConfig`，已从错误的顶层查询改为结构体路径读取。依据见[分析及 REA MCP 记录](../output/transformation-empty-export-validation-20261025/analysis.md)、[字段审计和安装文件只读核对](../output/transformation-empty-export-validation-20261025/field-audit.md)。
+
+- 最终代码在 Debug / Release 均构建主程序及全部 16 个测试目标，32 次执行 exit 0：[汇总](../output/transformation-empty-export-validation-20261025/results.json)、[Debug 构建](../output/transformation-empty-export-validation-20261025/build-debug.txt)、[Release 构建](../output/transformation-empty-export-validation-20261025/build-release.txt)。IME 每配置的候选窗/组合窗环境回读两项 SKIP 保留。
+- 桥接回归改用严格 void ABI，增加差异导出省略空值的合成复现及空软对象、空软类、空容器、嵌套唤醒列表的完整导出；读取失败、异常、未知格式及内存释放仍验证：[Debug](../output/transformation-empty-export-validation-20261025/GlossTrainerEngineBridgeTests-debug.txt)、[Release](../output/transformation-empty-export-validation-20261025/GlossTrainerEngineBridgeTests-release.txt)。模拟复现与原生字节证据分别记录，未执行游戏原生函数。
+- 生产后端夹具只在真实嵌套位置提供两个唤醒 bool，移除顶层兜底；覆盖 false 正常开始/恢复、两个开关分别为 true 时拒绝、字段缺失报错，以及实例初始化后产生依赖时清理/恢复：[Debug](../output/transformation-empty-export-validation-20261025/GlossTrainerTransformationRuntimeTests-debug.txt)、[Release](../output/transformation-empty-export-validation-20261025/GlossTrainerTransformationRuntimeTests-release.txt)。
+- x64 / PE32+ DLL、`InitializeASI` 导出及哈希已核对：[构建回执](../output/transformation-empty-export-validation-20261025/artifacts.json)。`git diff --check` 通过。没有更改 UI 布局、重新执行图形宿主或新增已验证角色。
+
+新测试包：`output/GlossTrainer-transformation-empty-export-20261025.zip`，保留前轮包。Release ASI SHA-256 `1BE0DE1D3F58FF9DC0F4A47F2C8C4934BA17F4868C82DBA679DDE74D74E48443`，打包后逐一回读 manifest 有效载荷大小和哈希，见[打包回执](../output/transformation-empty-export-validation-20261025/package-receipt.json)。版本显示仍为 0.3.4，以哈希区分构建。
+
+未安装 ASI、未操作游戏。日志仅确认了用户遇到 BeginTriggerBox 错误，没有捕获该字段当时的真实内容或原生返回值；空容器具体序列化字符串仍待游戏验证，不能将合成测试视为角色实测通过。
+
+## 角色依赖字段引用类型修复（2026-10-25，未安装）
+
+修正 `FloatRelativeSpotActor` 被当作硬对象指针读取的问题，并同时修正 `BeginTriggerBox` / `EndTriggerBox` 的软对象读取。新增只读 `ObjectReferenceAssigned`：空引用可以继续初始化；非空/陈旧弱引用、未加载软路径仍为依赖，类型/布局/读取失败不放行。保留全部验证状态的开始入口、技能名称和按键持久化，以及生成前/后的隔离复检。详细字段表、REA 成功/预算限制和本地补证见[分析](../output/transformation-reference-types-validation-20261025/analysis.md)。
+
+- Debug / Release x64 主程序和 16 个测试目标构建成功，32 次测试执行 exit 0：[汇总](../output/transformation-reference-types-validation-20261025/results.json)、[Debug 构建](../output/transformation-reference-types-validation-20261025/build-debug.txt)、[Release 构建](../output/transformation-reference-types-validation-20261025/build-release.txt)。IME 各配置的候选窗和组合窗环境回读仍为 SKIP。
+- 引擎桥接测试覆盖硬/弱/软反射类型、8 字节弱引用布局、原生/零初始化空值、非空/陈旧 token、类型/尺寸/数组维数/边界异常、读取/导出失败、未知文本与临时字符串释放：[Debug](../output/transformation-reference-types-validation-20261025/GlossTrainerEngineBridgeTests-debug.txt)、[Release](../output/transformation-reference-types-validation-20261025/GlossTrainerEngineBridgeTests-release.txt)。
+- 生产后端合成测试覆盖空引用正常开始与恢复、CDO 依赖/字段错误拒绝、真实实例初始化后才产生弱引用依赖时清理临时 Tamer / proxy 并恢复悟空：[Debug](../output/transformation-reference-types-validation-20261025/GlossTrainerTransformationRuntimeTests-debug.txt)、[Release](../output/transformation-reference-types-validation-20261025/GlossTrainerTransformationRuntimeTests-release.txt)。首轮夹具把硬引用移入独立映射后漏掉属性写入接口，造成激活失败和后续断言终止；[失败日志](../output/transformation-reference-types-validation-20261025/initial-runtime-debug-failure.txt)保留，补齐硬引用读写同步后两种配置重跑全部通过。
+- 两个 ASI 的 AMD64 / PE32+ DLL 格式、`InitializeASI` 导出和 SHA-256 均已核对：[构建回执](../output/transformation-reference-types-validation-20261025/artifacts.json)。`git diff --check` 通过。本轮无 UI 布局修改，没有重新执行图形宿主。
+
+测试包：`output/GlossTrainer-transformation-reference-types-20261025.zip`，保留此前测试包。Release ASI SHA-256：`1F11A9F8597944C8AEFF0DD9717B69F89920883C64673B57C2DC09E51336909E`。打包后回读 manifest 并逐一核对 ZIP 有效载荷，见[回执](../output/transformation-reference-types-validation-20261025/package-receipt.json)。界面版本仍为 0.3.4，以构建哈希区分。
+
+未安装或操作游戏；没有新增已验证角色。上述结果不能确认截图中二王子或其它角色的实际移动、技能和剧情隔离行为，游戏实测由用户自行进行。
+
+## 目录角色不受验证状态限制（2026-10-25，未安装）
+
+移除变身页“开始变身”对 `Support` 状态的限制。未验证、不可用等条目也可直接提交 Begin，无需先检查技能；保留接口就绪、空闲会话与待处理请求的门槛。每次尝试仍检查真实资源、驱动、隔离和初始化；失败恢复悟空，状态标签不表示稳定可玩。
+
+- Debug / Release 主程序及全部 16 个测试目标构建成功；32 次执行全部 exit 0，见[汇总](../output/transformation-open-status-validation-20261025/results.json)、[Debug 构建](../output/transformation-open-status-validation-20261025/build-debug.txt)、[Release 构建](../output/transformation-open-status-validation-20261025/build-release.txt)。IME 两项环境回读 SKIP 仍保留。
+- 新增生产后端合成回归：未经 Inspect 的未验证条目可开始尝试；无效资源进入恢复并标为不可用，资源恢复后仍可不经 Inspect 直接 Begin、完成激活和恢复。见[Debug](../output/transformation-open-status-validation-20261025/GlossTrainerTransformationRuntimeTests-debug.txt)、[Release](../output/transformation-open-status-validation-20261025/GlossTrainerTransformationRuntimeTests-release.txt)。
+- 按项目要求先生成并查看 `custom-imagegen` / `model_providers.custom` / `gpt-image-2.5` [亮暗原型及提示词](../output/transformation-open-status-validation-20261025/prototype.md)，保留现有布局。
+- 查看恢复窗口后的实际 UI fixture 截图：[DX11 暗色](../output/transformation-open-status-validation-20261025/ui-dx11-dark/GlossTrainer.Host-restored.png)、[DX12 亮色](../output/transformation-open-status-validation-20261025/ui-dx12-light/GlossTrainer.Host-restored.png)。未验证角色的开始按钮可用。两次完整宿主自动序列均因首次菜单键时 `foreground-target=0`、无法完成菜单开关像素断言而 exit 1，不能记为宿主回归通过；最小化/恢复后前台为 1，页面可以显示。模拟鼠标未取得 Begin 回调证据，入口可提交性由生产后端回归覆盖。原始 GPU BMP 已转换为 PNG。
+
+本轮没有安装或操作游戏，没有新增已验证角色。ASI 的 x64 格式、InitializeASI 导出与 SHA-256 见[构建回执](../output/transformation-open-status-validation-20261025/artifacts.json)。
+
+本轮测试包：`output/GlossTrainer-transformation-open-status-20261025.zip`。Release ASI SHA-256 为 `22A9436A420F240F602CA4E34B45C92405E16F8BA5193D762A2E2C22253EE7EC`；ZIP 中 64 个有效载荷均已核对大小和 SHA-256，视觉夹具未进入 ASI，见[打包回执](../output/transformation-open-status-validation-20261025/package-receipt.json)。
+
+## 通用代理能力与清理回归（2026-10-25，未安装）
+
+本轮以移动组件、初始化后真实技能和隔离依赖检查替代历史三角色名单；没有把目录条目直接升级为已验证。实现及未完成的专用形态见[当前范围](transformation.md)和[全形态审计](transformation-all-forms-audit.md)。没有更改 UI 布局，没有进行游戏内输入、安装或逐角色游戏验收。
+
+| 验证 | 结果与证据 |
+| --- | --- |
+| x64 Debug / Release 主程序与全部 16 个测试目标构建 | 均通过；[Debug 构建](../output/transformation-adapter-validation-20261025/debug-build.log) / [Release 构建](../output/transformation-adapter-validation-20261025/release-build.log) |
+| 全部 16 组自动测试，两种配置 | 32 次执行 exit 0；[汇总](../output/transformation-adapter-validation-20261025/results.json)、[Debug 输出](../output/transformation-adapter-validation-20261025/debug-tests.log)、[Release 输出](../output/transformation-adapter-validation-20261025/release-tests.log) |
+| 真实后端、引擎边界合成测试 | 非旧名单路径、地面/三维移动策略、输入与施法时序、CDO/实例技能差异、特殊状态、场景/控制依赖拒绝、弱身份复用、子对象死亡与延迟销毁、销毁中新子对象重查均通过。夹具不代表该路径真实可玩 |
+| 更新检查失败策略 | 两种配置的 Update 测试通过：先确认新版，再收到失败结果时解除限制；UI 消息为“检查更新失败”。未伪造真实 GitHub 发布或实施网络断连 |
+| IME 环境边界 | 两种配置执行成功；各有候选窗和组合窗 readback 两项环境 SKIP，不能据此宣称输入法所有行为通过 |
+| 测试目录隔离 | 全部测试从独立临时工作目录运行；Localization 测试目标新增 MSVC `/FC`，使源码覆盖检查可由绝对 `__FILE__` 定位源码，修复其既有 cwd 依赖 |
+
+没有执行本轮图形宿主或游戏实测。普通 CMC 分流和数据规则的合成通过，不能证明真实动画、根运动、派生死亡实现、异步掉落/任务隔离和全部形态正常。阶段图、专用 ECS mover 和无 Owner 关联的复合形态仍有未完成分支。
+
+## 首批变身实验构建（历史记录，2026-10-25，未安装）
 
 新增独立变身模块、游戏动作转接、角色目录和技能槽页面。当前只开放杨戬、大圣、狼侍卫三个实验性适配；没有任何角色被标记为已验证。参考表的 247 行合并为 246 条路径线索，运行时尝试合并 Asset Registry 资源；同资产的运行阶段/覆盖配置尚未完整枚举，目录始终提示覆盖不足。实现分析、REA 成员、程序集指纹和用户手测步骤见 [变身文档](transformation.md)，来源逐项清单见 [CSV](transformation-reference.csv)。
 
@@ -306,22 +463,33 @@ wukong_minimap.dll 63903ED2CA7DACD9516090141F7C5015AFB46D5B9AE9FC3A8A738B769EE04
 
 | 验证 | 结果与证据 |
 | --- | --- |
-| Debug / Release 全构建 | 均通过；[Debug](localization-validation-20261025/build-debug.txt) / [Release](localization-validation-20261025/build-release.txt) |
-| 15 组测试 × 两种配置 | 30 次执行 exit 0，[汇总](localization-validation-20261025/results.json)。含此前全部 13 组与 Localization / GameLanguage 两组 |
-| 语言保存及词典 | 默认跟随、文化优先级、手动覆盖、立即切换、保存后重读、失败回滚、坏配置、重复 key、printf/模板占位符、UI/feature 静态 key 覆盖；[Release](localization-validation-20261025/GlossTrainerLocalizationTests-release.txt) |
-| 游戏线程语言探测 mock | Language 优先、Culture 后备、非 ASCII 拒绝、5 秒限频、失败重试及非游戏线程门控；[Release](localization-validation-20261025/GlossTrainerGameLanguageTests-release.txt) |
-| DX11 / DX12 设置页 | 中文/英文 × 亮/暗共 8 场景通过；菜单显示/隐藏、按住键释放、主链选择、尺寸变化及最小化恢复。[汇总](localization-validation-20261025/ui-results.json) |
-| 英文功能及变身页 | 初次宿主运行通过；查看截图发现分类挤压和试招按钮截断，修正后两页另做最终宿主复测。[结果](localization-validation-20261025/ui-layout-final-results.json)，[功能](localization-validation-20261025/dx11-dark-en-features-final/GlossTrainer.Host-open.png) / [变身](localization-validation-20261025/dx12-light-en-transform-final/GlossTrainer.Host-open.png) |
-| 布局调整后复验 | Debug / Release ASI 重新构建，语言测试各再通过一次；[记录](localization-validation-20261025/post-layout-validation.json)。其他测试的代码和依赖未变 |
-| 静态接口证据 | REA 受程序集 64 MiB 表示预算限制；[REA 原始记录](localization-validation-20261025/rea-language-members.json)与[补充元数据/IL](localization-validation-20261025/game-language-static-evidence.json)明确身份、路径及 FString 输出，不能替代游戏调用验证 |
-| 原型 | UI 实现前使用 custom-imagegen / model_providers.custom / gpt-image-2.5 生成并查看；[图与完整提示词](localization-validation-20261025/prototype.md) |
-| 最终 ASI | Debug / Release 均为 AMD64 PE32+ DLL，导出 InitializeASI；[大小与 SHA-256](localization-validation-20261025/artifacts.json) |
+| Debug / Release 全构建 | 均通过；[Debug](../output/localization-validation-20261025/build-debug.txt) / [Release](../output/localization-validation-20261025/build-release.txt) |
+| 15 组测试 × 两种配置 | 30 次执行 exit 0，[汇总](../output/localization-validation-20261025/results.json)。含此前全部 13 组与 Localization / GameLanguage 两组 |
+| 语言保存及词典 | 默认跟随、文化优先级、手动覆盖、立即切换、保存后重读、失败回滚、坏配置、重复 key、printf/模板占位符、UI/feature 静态 key 覆盖；[Release](../output/localization-validation-20261025/GlossTrainerLocalizationTests-release.txt) |
+| 游戏线程语言探测 mock | Language 优先、Culture 后备、非 ASCII 拒绝、5 秒限频、失败重试及非游戏线程门控；[Release](../output/localization-validation-20261025/GlossTrainerGameLanguageTests-release.txt) |
+| DX11 / DX12 设置页 | 中文/英文 × 亮/暗共 8 场景通过；菜单显示/隐藏、按住键释放、主链选择、尺寸变化及最小化恢复。[汇总](../output/localization-validation-20261025/ui-results.json) |
+| 英文功能及变身页 | 初次宿主运行通过；查看截图发现分类挤压和试招按钮截断，修正后两页另做最终宿主复测。[结果](../output/localization-validation-20261025/ui-layout-final-results.json)，[功能](../output/localization-validation-20261025/dx11-dark-en-features-final/GlossTrainer.Host-open.png) / [变身](../output/localization-validation-20261025/dx12-light-en-transform-final/GlossTrainer.Host-open.png) |
+| 布局调整后复验 | Debug / Release ASI 重新构建，语言测试各再通过一次；[记录](../output/localization-validation-20261025/post-layout-validation.json)。其他测试的代码和依赖未变 |
+| 静态接口证据 | REA 受程序集 64 MiB 表示预算限制；[REA 原始记录](../output/localization-validation-20261025/rea-language-members.json)与[补充元数据/IL](../output/localization-validation-20261025/game-language-static-evidence.json)明确身份、路径及 FString 输出，不能替代游戏调用验证 |
+| 原型 | UI 实现前使用 custom-imagegen / model_providers.custom / gpt-image-2.5 生成并查看；[图与完整提示词](../output/localization-validation-20261025/prototype.md) |
+| 最终 ASI | Debug / Release 均为 AMD64 PE32+ DLL，导出 InitializeASI；[大小与 SHA-256](../output/localization-validation-20261025/artifacts.json) |
 
 首轮测试曾发现一项测试负向期望写反、词典重复和 printf 检查差异，修正后完成上述全量及最终复测。IME 候选窗和组合窗位置回读在两种配置中仍各有一个环境 SKIP，其余断言通过，不将 SKIP 视为输入法验收。
 
-设置页实际截图：[中文暗色](localization-validation-20261025/dx11-dark-zh-CN-settings/GlossTrainer.Host-open.png)、[中文亮色](localization-validation-20261025/dx11-light-zh-CN-settings/GlossTrainer.Host-open.png)、[英文暗色](localization-validation-20261025/dx12-dark-en-settings/GlossTrainer.Host-open.png)、[英文亮色](localization-validation-20261025/dx12-light-en-settings/GlossTrainer.Host-open.png)。截图来自 GPU backbuffer 读回，BMP 转换为同名 PNG 保存。长名称列表项按列裁剪并可查看提示。视觉夹具使用合成角色/技能并模拟语言来源，不编入生产 ASI；宿主自己的启动最小化/恢复只用于取得前台，不操作游戏。
+设置页实际截图：[中文暗色](../output/localization-validation-20261025/dx11-dark-zh-CN-settings/GlossTrainer.Host-open.png)、[中文亮色](../output/localization-validation-20261025/dx11-light-zh-CN-settings/GlossTrainer.Host-open.png)、[英文暗色](../output/localization-validation-20261025/dx12-dark-en-settings/GlossTrainer.Host-open.png)、[英文亮色](../output/localization-validation-20261025/dx12-light-en-settings/GlossTrainer.Host-open.png)。截图来自 GPU backbuffer 读回，BMP 转换为同名 PNG 保存。长名称列表项按列裁剪并可查看提示。视觉夹具使用合成角色/技能并模拟语言来源，不编入生产 ASI；宿主自己的启动最小化/恢复只用于取得前台，不操作游戏。
 
 本轮未安装到游戏，未运行游戏内测试；游戏实测由用户完成。测试不能证明真实游戏语言反射或角色可玩性。新包为 `output/GlossTrainer-localization-zh-en-20261025.zip`，保留此前两份变身测试包。界面版本仍为 0.3.4，以构建哈希区分；无提交、发布或安装。
+
+## 中英文后续覆盖复验：2026-10-25
+
+核对已完成的语言功能时，发现近期变身适配新增状态未进入原词典。[修复前审计](localization-followup-audit-20261025.md)记录具体遗漏；现已新增 41 个精确 key 和 6 个锚定模板，当前共 1897 个 key、16 个模板。恢复悟空的退出原因只翻译应用自有原因一层；快捷键冲突消息中的玩家名称始终保留原文。技能名称与按键配置在切换语言前后保持相同序列化内容。
+
+- Debug / Release 均重新构建 ASI、LocalizationTests、GameLanguageTests；四次测试全部 exit 0。[执行记录](../output/localization-followup-validation-20261025/results.json)、[构建产物](../output/localization-followup-validation-20261025/artifacts.json)。
+- 扩展源覆盖至全部 gameplay `.cpp/.hpp` 和 localization.cpp；新增实际移动适配结果、技能配置失败、格式化后的运行时错误、恢复原因及中文玩家名称回归。
+- 游戏语言 mock 新增无效 ASCII 标签、超长值、空回退值及离开游戏线程后恢复探测；原有偏好保存、重读、失败回滚等检查仍通过。
+- 本次仅修改翻译与测试，沿用上一节已查看的 DX11/DX12、亮暗、中英文布局截图；未再次运行宿主，也未把历史宿主记录记作本次执行。
+
+后续构建包为 `output/GlossTrainer-localization-zh-en-20261025-r2.zip`，包含当前工作区构建和对应源码，保留旧包。默认与手动语言行为见[语言说明](localization.md)。仍未安装或操作游戏，真实游戏语言与输入法效果由用户实测。
 
 ## GitHub 复制安装包：2026-10-26
 

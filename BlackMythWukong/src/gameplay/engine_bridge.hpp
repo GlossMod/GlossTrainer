@@ -64,9 +64,23 @@ namespace gloss::gameplay::engine
     std::uintptr_t Load(std::wstring_view path, std::wstring_view unrealClass);
     std::uintptr_t Construct(std::uintptr_t unrealClass, std::uintptr_t outer);
     std::uintptr_t DefaultObject(std::uintptr_t unrealClass);
-    // Uses the reflected property's native text exporter; no soft-pointer
+    // Uses the reflected property's unconditional native ExportTextItem;
+    // ExportText_Direct can omit values identical to a null default. No soft-pointer
     // internal offsets are assumed. Empty path represents an unset reference.
     bool SoftClassPath(std::uintptr_t object, const char *property, std::wstring &path);
+    // Read-only assignment check for reflected hard, weak and soft object
+    // references. Stale weak tokens and unloaded soft paths remain assigned;
+    // failure to validate/read a reference is never reported as an empty one.
+    bool ObjectReferenceAssigned(std::uintptr_t object, const char *property, bool &assigned);
+    // Read-only unconditional native text export of one reflected property, including
+    // containers. Validates metadata and storage bounds without decoding its
+    // internal layout. Preserves the export verbatim; callers must recognize
+    // the concrete property's syntax and reject unknown forms.
+    bool ExportPropertyText(std::uintptr_t object, const char *property, std::wstring &text);
+    // Same native export for a leaf within reflected struct properties. Every
+    // hop uses the engine's struct metadata and storage size, never offsets
+    // inferred from container contents.
+    bool ExportPropertyPathText(std::uintptr_t object, std::span<const std::string_view> path, const char *property, std::wstring &text);
     std::uintptr_t World(std::uintptr_t object);
     bool ConsoleExists(std::wstring_view name);
     CallResult ExecuteConsole(std::wstring_view command, std::uintptr_t world);

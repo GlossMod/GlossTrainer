@@ -54,6 +54,7 @@ namespace gloss::gameplay::transformation
         std::string activeId, inspectedId, message, catalogMessage;
         Capabilities capabilities;
         std::uint64_t generation{};
+        float cameraDistanceMeters{};
     };
 
     // Public calls only queue work. Engine objects are read and changed by Tick
@@ -76,6 +77,10 @@ namespace gloss::gameplay::transformation
     // name, and key == 0 leaves a skill unbound. No fixed action-slot limit.
     std::vector<SkillBinding> Bindings(std::string_view id);
     features::Result SetBindings(std::string_view id, std::vector<SkillBinding> bindings);
+    // Zero selects automatic sizing. Overrides are per stable character ID and
+    // persist separately from skill names/chords; engine writes occur in Tick.
+    float CameraDistance(std::string_view id);
+    features::Result SetCameraDistance(std::string_view id, float meters);
     features::Result TriggerSkill(int skillId);
     bool IsActive();
     bool NeedsExclusiveControl();

@@ -24,7 +24,7 @@ GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个
 需要 Windows、Visual Studio 2022 C++ 桌面工具、Windows SDK 及 [xmake](https://xmake.io/)。在仓库根目录配置，再构建相应模块：
 
 ```powershell
-xmake f -y -p windows -a x64 -m release
+xmake f -y -p windows -a x64 -m release --game=<模块名>
 xmake build <模块名>
 ```
 
@@ -38,10 +38,10 @@ xmake project -k compile_commands .vscode
 
 安装 XMake 扩展后，其默认设置会在 `xmake.lua` 变化时自动更新数据库，也可执行 `XMake: UpdateIntellisense` 手动更新。`compile_commands.json` 含本机路径，不提交到 Git。
 
-正式 `vX.Y.Z` 标签触发 Debug / Release 构建、回归、打包和 Releases 发布；手动运行 workflow 仅构建验证。流程、版本规则和本地打包方式见 [发布说明](docs/releasing.md)。
+正式 `<游戏ID>/vX.Y.Z` 标签（例如 `BlackMythWukong/v0.3.5`）只触发对应游戏的 Debug / Release 构建、回归、打包和 Releases 发布。每个游戏独立版本；包名、校验文件、候选产物和输出目录均按游戏隔离。手动运行 workflow 时指定游戏 ID，仅构建验证。注册表、迁移规则和本地打包方式见 [发布说明](docs/releasing.md)。
 
-更新检查只使用公开 GitHub Releases，不自动下载安装。成功确认有新版后要求玩家自行下载；检查失败不限制使用，仅显示“检查更新失败”。
+更新检查按游戏通道筛选公开 GitHub Releases，不使用仓库全局 Latest，也不自动下载安装。成功确认有新版后要求玩家自行下载；检查失败不限制使用，仅显示“检查更新失败”。
 
-[下载最新发行版](https://github.com/GlossMod/GlossTrainer/releases/latest) · [源码](https://github.com/GlossMod/GlossTrainer)
+[按游戏选择发行版](https://github.com/GlossMod/GlossTrainer/releases) · [源码](https://github.com/GlossMod/GlossTrainer)
 
 第三方许可位于 [licenses](licenses/)，分发时请保留。各模块的运行要求、使用说明和验证范围以模块 README 为准。

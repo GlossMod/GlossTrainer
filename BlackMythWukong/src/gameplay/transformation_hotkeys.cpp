@@ -76,6 +76,14 @@ namespace gloss::gameplay::transformation::hotkeys
         if (modifiers & features::Ctrl) result += "Ctrl+";
         if (modifiers & features::Shift) result += "Shift+";
         if (modifiers & features::Alt) result += "Alt+";
+        switch (key)
+        {
+        case VK_LBUTTON: return result + "鼠标左键";
+        case VK_RBUTTON: return result + "鼠标右键";
+        case VK_MBUTTON: return result + "鼠标中键";
+        case VK_XBUTTON1: return result + "鼠标侧键 1";
+        case VK_XBUTTON2: return result + "鼠标侧键 2";
+        }
         wchar_t name[64]{};
         auto scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
         if (key == VK_LEFT || key == VK_RIGHT || key == VK_UP || key == VK_DOWN || key == VK_DELETE || key == VK_INSERT ||

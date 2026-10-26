@@ -9,6 +9,7 @@ namespace gloss::gameplay::aot
     std::uintptr_t Method(std::uint32_t methodDefRid);
     std::uintptr_t ScriptMethod(std::uint32_t methodDefRid);
     std::uintptr_t RuntimeMethod(std::uint32_t methodDefRid);
+    std::uintptr_t EngineMethod(std::uint32_t methodDefRid);
     std::uintptr_t ProtoMethod(std::uint32_t methodDefRid);
     bool Ready();
 }

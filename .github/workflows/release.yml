@@ -3,14 +3,20 @@ name: Build, validate and release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - '*/v*.*.*'
   workflow_dispatch:
+    inputs:
+      game:
+        description: 'Registered game ID (Scripts/release-games.json); build only'
+        required: true
+        default: BlackMythWukong
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.inputs.game || github.ref }}
   cancel-in-progress: false
 
 defaults:
@@ -18,136 +24,161 @@ defaults:
     shell: pwsh
 
 jobs:
+  resolve:
+    name: Resolve game release channel
+    runs-on: windows-2022
+    outputs:
+      game: ${{ steps.release.outputs.game }}
+      version: ${{ steps.release.outputs.version }}
+      candidate: ${{ steps.release.outputs.candidate }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate registered game and namespaced source version
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          SELECTED_GAME: ${{ inputs.game }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:EVENT_NAME -eq 'push') {
+            $release = & ./Scripts/resolve-release.ps1 -Tag $env:REF_NAME
+          } else {
+            $release = & ./Scripts/resolve-release.ps1 -Game $env:SELECTED_GAME
+          }
+          "game=$($release.game)" >> $env:GITHUB_OUTPUT
+          "version=$($release.version)" >> $env:GITHUB_OUTPUT
+          "candidate=$($release.candidateName)" >> $env:GITHUB_OUTPUT
+
   build:
-    name: Windows x64 ${{ matrix.mode }}
+    name: ${{ needs.resolve.outputs.game }} Windows x64 ${{ matrix.mode }}
+    needs: resolve
     runs-on: windows-2022
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         mode: [debug, release]
+    env:
+      RELEASE_GAME: ${{ needs.resolve.outputs.game }}
+      BUILD_MODE: ${{ matrix.mode }}
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-
-      - name: Check formal source version and release tag
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $sourceVersions = [regex]::Matches((Get-Content -LiteralPath BlackMythWukong/src/runtime.hpp -Raw), 'inline\s+constexpr\s+char\s+Version\[\]\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*;')
-          if ($sourceVersions.Count -ne 1) { throw 'Expected one formal version in runtime.hpp.' }
-          $tag = 'v' + $sourceVersions[0].Groups[1].Value
-          if ($env:EVENT_NAME -eq 'push' -and ($env:REF_NAME -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$' -or $env:REF_NAME -cne $tag)) {
-            throw "Tag '$env:REF_NAME' must exactly match source version '$tag'."
-          }
-          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Set up pinned xmake
         uses: xmake-io/github-action-setup-xmake@3a1a5dddfc7fa625d9a698738334bf55655a861a # v1
         with:
           xmake-version: '3.1.2'
-
-      - name: Configure and build all tracked targets
-        env:
-          BUILD_MODE: ${{ matrix.mode }}
+      - name: Build only the selected game and its validation targets
         run: |
           $ErrorActionPreference = 'Stop'
-          & xmake f -y -p windows -a x64 -m $env:BUILD_MODE
+          $release = & ./Scripts/resolve-release.ps1 -Game $env:RELEASE_GAME
+          & xmake f -y -p windows -a x64 -m $env:BUILD_MODE --game=$env:RELEASE_GAME
           if ($LASTEXITCODE -ne 0) { throw 'xmake configuration failed.' }
-          & xmake build -y
-          if ($LASTEXITCODE -ne 0) { throw 'xmake build failed.' }
-
-      - name: Run every validation executable
-        env:
-          BUILD_MODE: ${{ matrix.mode }}
+          foreach ($target in @($release.target) + $release.tests) {
+            & xmake build -y $target
+            if ($LASTEXITCODE -ne 0) { throw "xmake build failed: $target" }
+          }
+      - name: Run selected game validation executables
         run: |
           $ErrorActionPreference = 'Stop'
-          $testNames = @([regex]::Matches((Get-Content -LiteralPath BlackMythWukong/validation/xmake.lua -Raw), 'target\("([^"\r\n]+Tests)"\)') | ForEach-Object { $_.Groups[1].Value })
-          if ($testNames.Count -eq 0 -or @($testNames | Sort-Object -Unique).Count -ne $testNames.Count) { throw 'Validation target inventory is empty or duplicated.' }
+          $release = & ./Scripts/resolve-release.ps1 -Game $env:RELEASE_GAME
           $repository = $PWD.Path
-          $workingDirectory = Join-Path $repository ('output/validation-' + $env:BUILD_MODE)
+          $workingDirectory = Join-Path $repository "output/validation/$($release.game)/v$($release.version)/$env:BUILD_MODE"
           New-Item -ItemType Directory -Path $workingDirectory -Force | Out-Null
           Push-Location -LiteralPath $workingDirectory
           try {
-            foreach ($testName in $testNames) {
-              $testPath = Join-Path (Join-Path (Join-Path $repository build) $env:BUILD_MODE) ($testName + '.exe')
+            foreach ($testName in $release.tests) {
+              $testPath = Join-Path $repository "build/$env:BUILD_MODE/$testName.exe"
               if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) { throw "Validation executable is missing: $testPath" }
-              Write-Host "Running $testName ($env:BUILD_MODE) from an isolated output directory"
               & $testPath
               if ($LASTEXITCODE -ne 0) { throw "$testName failed with exit code $LASTEXITCODE." }
             }
           } finally { Pop-Location }
-
-      - name: Validate installer behavior with isolated fixtures
+      - name: Validate selected game installer
         if: matrix.mode == 'release'
         run: |
-          $fixtureRoot = Join-Path $PWD 'output/installer-fixtures'
+          $release = & ./Scripts/resolve-release.ps1 -Game $env:RELEASE_GAME
+          $fixtureRoot = Join-Path $PWD "output/installer-fixtures/$($release.game)/v$($release.version)"
           New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
           $env:TEMP = $fixtureRoot
           $env:TMP = $fixtureRoot
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./Scripts/test-install.ps1
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $release.installerTests
           if ($LASTEXITCODE -ne 0) { throw 'Installer regression failed.' }
-
-      - name: Package verified Release ASI
+      - name: Package verified selected game Release ASI
         if: matrix.mode == 'release'
         env:
           SOURCE_REVISION: ${{ github.sha }}
         run: |
-          & ./Scripts/package-release.ps1 -Artifact ./build/release/BlackMythWukong.asi -OutputDirectory ./output/release-package-ci -Tag $env:RELEASE_TAG -SourceRevision $env:SOURCE_REVISION
+          $ErrorActionPreference = 'Stop'
+          $release = & ./Scripts/resolve-release.ps1 -Game $env:RELEASE_GAME
+          & $release.packageScript -Game $release.game -Artifact $release.artifact -Tag $release.tag -SourceRevision $env:SOURCE_REVISION
           if (-not $?) { throw 'Release packaging failed.' }
-
-      - name: Test portable packaging offline in PowerShell 5 and 7
+          "RELEASE_DIRECTORY=$($release.outputDirectory)" >> $env:GITHUB_ENV
+      - name: Test portable packaging and channel isolation in PowerShell 5 and 7
         if: matrix.mode == 'release'
         run: |
+          $release = & ./Scripts/resolve-release.ps1 -Game $env:RELEASE_GAME
           foreach ($engine in @('powershell.exe', 'pwsh.exe')) {
-            & $engine -NoProfile -ExecutionPolicy Bypass -File ./Scripts/test-package-release.ps1 -Artifact ./build/release/BlackMythWukong.asi -LoaderArchive ./output/release-package-ci/cache/Ultimate-ASI-Loader/v10.0.0/Ultimate-ASI-Loader_x64.zip -OutputDirectory ./output/release-package-validation
+            & $engine -NoProfile -ExecutionPolicy Bypass -File $release.packageTests -Artifact $release.artifact -LoaderArchive "$($release.outputDirectory)/cache/Ultimate-ASI-Loader/v10.0.0/Ultimate-ASI-Loader_x64.zip" -OutputDirectory "output/package-validation/$($release.game)/v$($release.version)"
             if ($LASTEXITCODE -ne 0) { throw "Release package regression failed in $engine." }
+            & $engine -NoProfile -ExecutionPolicy Bypass -File ./Scripts/test-release-isolation.ps1 -OutputDirectory "output/channel-validation/$($release.game)/v$($release.version)"
+            if ($LASTEXITCODE -ne 0) { throw "Release isolation regression failed in $engine." }
           }
-
-      - name: Upload release candidate
+      - name: Upload game-specific release candidate
         if: matrix.mode == 'release'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: release-candidate
+          name: ${{ needs.resolve.outputs.candidate }}
           path: |
-            output/release-package-ci/GlossTrainer-BlackMythWukong-*-win64.zip
-            output/release-package-ci/SHA256SUMS.txt
-            output/release-package-ci/release-manifest.json
+            ${{ env.RELEASE_DIRECTORY }}/*.zip
+            ${{ env.RELEASE_DIRECTORY }}/*.SHA256SUMS.txt
+            ${{ env.RELEASE_DIRECTORY }}/*.manifest.json
           if-no-files-found: error
           retention-days: 14
 
   publish:
-    name: Publish formal GitHub Release
-    needs: build
+    name: Publish game-specific GitHub Release
+    needs: [resolve, build]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: windows-2022
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - name: Download verified release candidate
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download verified game release candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: release-candidate
+          name: ${{ needs.resolve.outputs.candidate }}
           path: output/release-candidate
-
-      - name: Verify archive checksum and publish
+      - name: Verify game source receipt and archive checksum before publishing
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_REVISION: ${{ github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:RELEASE_TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Only formal version tags can be published.' }
-          $name = "GlossTrainer-BlackMythWukong-$env:RELEASE_TAG-win64.zip"
-          $zip = Join-Path $PWD (Join-Path 'output/release-candidate' $name)
-          $sums = Join-Path $PWD 'output/release-candidate/SHA256SUMS.txt'
+          $release = & ./Scripts/resolve-release.ps1 -Tag $env:RELEASE_TAG
+          $zip = Join-Path $PWD "output/release-candidate/$($release.archiveName)"
+          $sums = Join-Path $PWD "output/release-candidate/$($release.checksumName)"
+          $manifest = Get-Content -LiteralPath "output/release-candidate/$($release.manifestName)" -Raw | ConvertFrom-Json
           $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ((Get-Content -LiteralPath $sums -Raw) -cne "$actual  $name`n") { throw 'Downloaded release candidate checksum differs.' }
-          $arguments = @('release', 'create', $env:RELEASE_TAG, $zip, $sums, '--repo', $env:GH_REPO, '--verify-tag', '--title', "GlossTrainer $env:RELEASE_TAG", '--generate-notes', '--latest')
+          if ((Get-Content -LiteralPath $sums -Raw) -cne "$actual  $($release.archiveName)`n" -or
+              $manifest.game -cne $release.game -or $manifest.tag -cne $release.tag -or
+              $manifest.version -cne $release.version -or $manifest.sourceRevision -cne $env:SOURCE_REVISION -or
+              $manifest.archive.name -cne $release.archiveName -or $manifest.archive.sha256 -cne $actual) {
+            throw 'Downloaded release candidate identity or checksum differs.'
+          }
+          $arguments = @('release', 'create', $release.tag, $zip, $sums, '--repo', $env:GH_REPO, '--verify-tag', '--title', "GlossTrainer $($release.name) v$($release.version)", '--notes-file', $release.releaseNotes, '--latest=false')
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { throw 'GitHub Release publication failed.' }

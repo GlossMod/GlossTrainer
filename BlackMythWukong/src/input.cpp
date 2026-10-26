@@ -2,6 +2,7 @@
 #include "features.hpp"
 #include "update.hpp"
 #include "ime.hpp"
+#include "input_mouse_shortcuts.hpp"
 #include "gameplay/transformation_hotkeys.hpp"
 #include <MinHook.h>
 #include <imgui.h>
@@ -24,10 +25,6 @@ namespace gloss::input
     namespace
     {
         constexpr UINT CursorSync = WM_APP + 0x351;
-        constexpr USHORT MouseDown[] = {RI_MOUSE_LEFT_BUTTON_DOWN, RI_MOUSE_RIGHT_BUTTON_DOWN,
-                                        RI_MOUSE_MIDDLE_BUTTON_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN};
-        constexpr USHORT MouseUp[] = {RI_MOUSE_LEFT_BUTTON_UP, RI_MOUSE_RIGHT_BUTTON_UP,
-                                      RI_MOUSE_MIDDLE_BUTTON_UP, RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_UP};
         using RawKey = std::tuple<ULONG_PTR, USHORT, USHORT, USHORT>;
         struct WindowState
         {
@@ -44,6 +41,7 @@ namespace gloss::input
             std::array<bool, 5> gameButtons{};
             std::set<RawKey> rawKeys;
             std::map<ULONG_PTR, std::array<bool, 5>> rawButtons;
+            MouseShortcutState mouseShortcuts;
         };
         std::mutex windowsMutex;
         std::map<HWND, std::shared_ptr<WindowState>> windows;
@@ -54,15 +52,16 @@ namespace gloss::input
         {
             HRAWINPUT handle{};
             USHORT mouseUps{};
+            USHORT mouseSuppressed{};
         };
         thread_local RawReleaseFilter releaseFilter;
         struct ReleaseFilterScope
         {
             RawReleaseFilter previous = releaseFilter;
-            ReleaseFilterScope(HRAWINPUT handle, USHORT mouseUps)
+            ReleaseFilterScope(HRAWINPUT handle, USHORT mouseUps, USHORT mouseSuppressed = 0)
             {
-                if (mouseUps && rawFilterReady.load())
-                    releaseFilter = {handle, mouseUps};
+                if ((mouseUps || mouseSuppressed) && rawFilterReady.load())
+                    releaseFilter = {handle, mouseUps, mouseSuppressed};
             }
             ~ReleaseFilterScope() { releaseFilter = previous; }
         };
@@ -109,19 +108,25 @@ namespace gloss::input
         UINT WINAPI RawDataHook(HRAWINPUT handle, UINT command, LPVOID data, PUINT size, UINT headerSize)
         {
             const auto result = originalRawData(handle, command, data, size, headerSize);
-            if (handle == releaseFilter.handle && releaseFilter.mouseUps && command == RID_INPUT && data &&
+            if (handle == releaseFilter.handle && (releaseFilter.mouseUps || releaseFilter.mouseSuppressed) && command == RID_INPUT && data &&
                 result != UINT(-1) && result >= offsetof(RAWINPUT, data) + sizeof(RAWMOUSE))
             {
                 auto &raw = *static_cast<RAWINPUT *>(data);
                 if (raw.header.dwType == RIM_TYPEMOUSE)
                 {
-                    // The game receives the real handle and up transitions, but none of
-                    // the same packet's movement, button-down, or wheel input.
-                    raw.data.mouse.usFlags = MOUSE_MOVE_RELATIVE;
-                    raw.data.mouse.usButtonFlags = releaseFilter.mouseUps;
-                    raw.data.mouse.usButtonData = 0;
-                    raw.data.mouse.ulRawButtons = 0;
-                    raw.data.mouse.lLastX = raw.data.mouse.lLastY = 0;
+                    if (releaseFilter.mouseUps)
+                    {
+                        // While the menu captures input, release only buttons whose
+                        // original down was already delivered to the game.
+                        raw.data.mouse.usFlags = MOUSE_MOVE_RELATIVE;
+                        raw.data.mouse.usButtonFlags = releaseFilter.mouseUps;
+                        raw.data.mouse.usButtonData = 0;
+                        raw.data.mouse.ulRawButtons = 0;
+                        raw.data.mouse.lLastX = raw.data.mouse.lLastY = 0;
+                    }
+                    // Outside menu capture, suppress only bound transitions. Keep
+                    // camera movement, wheel and unrelated buttons in the same packet.
+                    FilterMouseButtons(raw.data.mouse, releaseFilter.mouseSuppressed);
                 }
             }
             return result;
@@ -452,17 +457,62 @@ namespace gloss::input
             }
             return false;
         }
+        USHORT MouseShortcuts(const std::shared_ptr<WindowState> &state, const RAWINPUT &raw)
+        {
+            if (raw.header.dwType != RIM_TYPEMOUSE) return 0;
+            bool rawOnly{};
+            {
+                std::lock_guard lock(state->mutex);
+                rawOnly = state->rawMouseOnly;
+            }
+            const bool foreground = GetForegroundWindow() == state->window;
+            const auto device = reinterpret_cast<std::uintptr_t>(raw.header.hDevice);
+            USHORT suppressed{};
+            for (std::size_t index = 0; index < 5; ++index)
+            {
+                if (raw.data.mouse.usButtonFlags & MouseDown[index])
+                {
+                    const bool matches = !rawOnly && foreground && MatchesLegacyShortcut(MouseKeys[index]);
+                    MouseShortcutEdge edge;
+                    {
+                        std::lock_guard lock(state->mutex);
+                        edge = state->mouseShortcuts.Raw(device, index, true, rawOnly, foreground, matches);
+                    }
+                    if (edge.dispatch)
+                    {
+                        const auto action = DispatchHotkey(MouseKeys[index]);
+                        edge.consumed |= action != ShortcutAction::None;
+                        {
+                            std::lock_guard lock(state->mutex);
+                            state->mouseShortcuts.CompleteRaw(device, index, edge.consumed);
+                        }
+                        if (action == ShortcutAction::ToggleMenu) ToggleMenu(state);
+                    }
+                    if (edge.consumed) suppressed |= MouseDown[index];
+                }
+                if (raw.data.mouse.usButtonFlags & MouseUp[index])
+                {
+                    std::lock_guard lock(state->mutex);
+                    if (state->mouseShortcuts.Raw(device, index, false, rawOnly, foreground, false).consumed)
+                        suppressed |= MouseUp[index];
+                }
+            }
+            return suppressed;
+        }
         LRESULT DispatchRaw(const std::shared_ptr<WindowState> &state, WPARAM wparam, LPARAM lparam, bool isTarget)
         {
             const auto handle = reinterpret_cast<HRAWINPUT>(lparam);
             RAWINPUT raw{};
             const bool valid = ReadRaw(handle, raw);
+            const auto suppressed = valid && isTarget ? MouseShortcuts(state, raw) : USHORT{};
+            if (suppressed) FilterMouseButtons(raw.data.mouse, suppressed);
             if (valid && isTarget && FeedRaw(state, raw))
                 return DefWindowProcW(state->window, WM_INPUT, wparam, lparam);
             if (!isTarget || !Active(state->window))
             {
                 if (valid)
                     TrackRaw(state, raw);
+                ReleaseFilterScope filter(handle, 0, suppressed);
                 return CallWindowProcW(state->original, state->window, WM_INPUT, wparam, lparam);
             }
             bool releaseKeyboard{};
@@ -492,7 +542,7 @@ namespace gloss::input
             }
             if (releaseKeyboard || mouseUps)
             {
-                ReleaseFilterScope filter(handle, mouseUps);
+                ReleaseFilterScope filter(handle, mouseUps, suppressed);
                 // Do not hold either mutex while the game's procedure reads this real handle.
                 return CallWindowProcW(state->original, state->window, WM_INPUT, wparam, lparam);
             }
@@ -538,6 +588,7 @@ namespace gloss::input
                     state->shortcutConsumed.fill(false);
                     state->rawShortcutConsumed.fill(false);
                     state->shortcutCharacters.fill(false);
+                    state->mouseShortcuts.Reset();
                 }
                 {
                     std::lock_guard lock(OverlayMutex());
@@ -592,6 +643,29 @@ namespace gloss::input
                 std::lock_guard lock(state->mutex);
                 if (scan && state->shortcutCharacters[scan])
                     return 0;
+            }
+            std::size_t mouseIndex{};
+            bool mouseDown{};
+            if (isTarget && MouseButtonMessage(message, wparam, mouseIndex, mouseDown))
+            {
+                MouseShortcutEdge edge;
+                {
+                    std::lock_guard lock(state->mutex);
+                    edge = state->mouseShortcuts.Legacy(mouseIndex, mouseDown, state->rawMouseOnly,
+                        GetForegroundWindow() == window);
+                }
+                if (edge.dispatch)
+                {
+                    const auto action = DispatchHotkey(MouseKeys[mouseIndex]);
+                    edge.consumed |= action != ShortcutAction::None;
+                    {
+                        std::lock_guard lock(state->mutex);
+                        state->mouseShortcuts.CompleteLegacy(mouseIndex, edge.consumed);
+                    }
+                    if (action == ShortcutAction::ToggleMenu) ToggleMenu(state);
+                }
+                if (edge.consumed)
+                    return message == WM_XBUTTONDOWN || message == WM_XBUTTONUP || message == WM_XBUTTONDBLCLK ? TRUE : 0;
             }
             if (message == WM_INPUT)
                 return DispatchRaw(state, wparam, lparam, isTarget);
@@ -705,6 +779,7 @@ namespace gloss::input
             state->shortcutConsumed.fill(false);
             state->rawShortcutConsumed.fill(false);
             state->shortcutCharacters.fill(false);
+            state->mouseShortcuts.Reset();
         }
         ReadRawRegistration(state);
         ime::Attach(window);
@@ -746,6 +821,7 @@ namespace gloss::input
                 state->shortcutConsumed.fill(false);
                 state->rawShortcutConsumed.fill(false);
                 state->shortcutCharacters.fill(false);
+                state->mouseShortcuts.Reset();
             }
             // ClipCursor can be restored from the renderer thread. Synthetic key ups
             // and ReleaseCapture are deferred to the owning window thread.

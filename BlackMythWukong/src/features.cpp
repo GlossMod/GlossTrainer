@@ -146,6 +146,14 @@ namespace gloss::features
                 result += "Shift+";
             if (modifiers & Alt)
                 result += "Alt+";
+            switch (key)
+            {
+            case VK_LBUTTON: return result + "鼠标左键";
+            case VK_RBUTTON: return result + "鼠标右键";
+            case VK_MBUTTON: return result + "鼠标中键";
+            case VK_XBUTTON1: return result + "鼠标侧键 1";
+            case VK_XBUTTON2: return result + "鼠标侧键 2";
+            }
             wchar_t name[64]{};
             auto scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
             if (key == VK_LEFT || key == VK_RIGHT || key == VK_UP || key == VK_DOWN || key == VK_DELETE || key == VK_INSERT || key == VK_HOME || key == VK_END || key == VK_PRIOR || key == VK_NEXT || key == VK_DIVIDE || key == VK_NUMLOCK)
@@ -168,7 +176,8 @@ namespace gloss::features
         }
         bool Bindable(unsigned key, unsigned modifiers)
         {
-            return key < 0xff && (!key || key >= VK_BACK) && !(modifiers & ~7u) && !ModifierKey(key) && key != VK_ESCAPE &&
+            const bool mouse = key == VK_LBUTTON || key == VK_RBUTTON || key == VK_MBUTTON || key == VK_XBUTTON1 || key == VK_XBUTTON2;
+            return key < 0xff && (!key || mouse || key >= VK_BACK) && !(modifiers & ~7u) && !ModifierKey(key) && key != VK_ESCAPE &&
                    key != VK_PROCESSKEY && key != VK_PACKET && !(key == VK_HOME && modifiers == (Ctrl | Shift));
         }
         bool ParseHotkey(const wchar_t *text, unsigned &key, unsigned &modifiers)
