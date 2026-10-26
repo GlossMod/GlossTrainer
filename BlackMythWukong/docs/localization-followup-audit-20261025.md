@@ -2,7 +2,7 @@
 
 日期：2026-10-25。只读核对源码、词典、测试源码及已有验证记录；本次未运行构建、自动测试或游戏。以下“当前发现”是在补充修复前读取到的状态；实施代理随后可能更新词典或测试，最终结果需由主代理重新检查并记录。
 
-主代理复验：下列漏项已补齐，同时补充移动适配头文件、技能配置头文件和恢复原因组合文案；当前为 1897 个 key、16 个模板。Debug / Release 两项语言测试均通过，详见[后续验证](../output/localization-followup-validation-20261025/results.json)与[验证说明](verification.md#中英文后续覆盖复验2026-10-25)。以下保留修复前证据。
+主代理复验：下列漏项已补齐，同时补充移动适配头文件、技能配置头文件和恢复原因组合文案；当前为 1897 个 key、16 个模板。Debug / Release 两项语言测试均通过，详见[后续验证](../../output/localization-followup-validation-20261025/results.json)与[验证说明](verification.md#中英文后续覆盖复验2026-10-25)。以下保留修复前证据。
 
 ## 当前发现：偏好与自动检测
 
@@ -59,6 +59,6 @@
 ## 现有检查与记录
 
 - `localization_tests.cpp::TestApplicationTranslationKeyCoverage` 目前只检查 `overlay.cpp` 和 `features.cpp`；它没有检查变身后端生成的状态/原因字符串，所以未覆盖上述遗漏。补充测试宜把 `transformation.cpp` 纳入字符串键覆盖，并正确处理编号动态模板与格式化后缀。
-- 仓库已有记录声称 Debug、Release 构建和 15 组自动测试各通过，且完成 8 个语言/亮暗设置页宿主场景及英文功能/变身页宿主截图；证据文件位于 `output/localization-validation-20261025/`，汇总在 `docs/verification.md`。本审计只核对了文档、测试源码与产物文件存在性，没有重新执行这些验证。
+- 仓库已有记录声称 Debug、Release 构建和 15 组自动测试各通过，且完成 8 个语言/亮暗设置页宿主场景及英文功能/变身页宿主截图；证据文件位于 `output/localization-validation-20261025/`，汇总在 `BlackMythWukong/docs/verification.md`。本审计只核对了文档、测试源码与产物文件存在性，没有重新执行这些验证。
 - 游戏语言调用、游戏菜单内语言变化、真实目录名称和游戏行为仍需玩家实际游戏验证；已有宿主截图或 mock 结果不构成游戏内验证。
 

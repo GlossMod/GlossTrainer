@@ -46,11 +46,11 @@ ImGui 的 `Platform_SetImeDataFn` 仅复制文本焦点、客户区光标位置�
 
 界面开关默认 Insert，保存于同文件的 `[Menu] Toggle=key,modifiers`；加载时先确定菜单组合，再加载功能绑定，空值或非法菜单配置回退 Insert，冲突的功能绑定跳过。菜单录制不能清空，与功能绑定双向检查精确组合冲突；输入按“录制、菜单、功能”顺序分发。legacy 与 raw-only 使用同一动作判断，分别跟踪按下与已消费状态，消费重复消息、释放以及相应扫描码派生的字符，防止录制当次关闭菜单或字母菜单键泄漏进文本框。`--menu-key` 宿主参数可核对自定义单键的实际图形 Hook 路径。
 
-设置页按 [menu-key-v1 亮暗原型](../output/imagegen/menu-key-v1.png) 拆分外观与快捷键卡片，保留内边距和录制模态框；原型来自 `custom-imagegen`、`model_providers.custom`、固定模型 `gpt-image-2.5`，完整提示词见 [prompt](../output/imagegen/menu-key-v1.prompt.txt)。底部键帽和启动提示都从当前菜单绑定读取。
+设置页按 [menu-key-v1 亮暗原型](../../output/imagegen/menu-key-v1.png) 拆分外观与快捷键卡片，保留内边距和录制模态框；原型来自 `custom-imagegen`、`model_providers.custom`、固定模型 `gpt-image-2.5`，完整提示词见 [prompt](../../output/imagegen/menu-key-v1.prompt.txt)。底部键帽和启动提示都从当前菜单绑定读取。
 
-界面沿用 [compact-list-v1 原型](../output/imagegen/compact-list-v1.png)（`custom-imagegen`、`model_providers.custom`、固定 `gpt-image-2.5`；[原提示词](../output/imagegen/compact-list-v1.prompt.txt)）。基础窗口 960×680，表格开启 `PadOuterX`，单元格 14×8，clipper 与实际行共用动态行高，至少 44px。默认窗口内边距 14×10 供提示框 / 下拉框使用；手工定位的主窗口局部覆盖为 0，卡片与模态框继续显式设置内边距，避免相互影响。
+界面沿用 [compact-list-v1 原型](../../output/imagegen/compact-list-v1.png)（`custom-imagegen`、`model_providers.custom`、固定 `gpt-image-2.5`；[原提示词](../../output/imagegen/compact-list-v1.prompt.txt)）。基础窗口 960×680，表格开启 `PadOuterX`，单元格 14×8，clipper 与实际行共用动态行高，至少 44px。默认窗口内边距 14×10 供提示框 / 下拉框使用；手工定位的主窗口局部覆盖为 0，卡片与模态框继续显式设置内边距，避免相互影响。
 
-传送页采用先生成并查看的 [travel-groups-v1 原型](../output/imagegen/travel-groups-v1.png)（`model_providers.custom` / `gpt-image-2.5`；[提示词](../output/imagegen/travel-groups-v1.prompt.txt)）。地标按 scene ID 分组并保持场景目录与组内原顺序，使用单一滚动区和可变高度内容；普通与搜索折叠状态分别保存在 UI 内存中。搜索文字变化时展开匹配组，清空时切回普通状态；全部展开 / 折叠只作用于当前筛选可见的组，不发出传送请求。
+传送页采用先生成并查看的 [travel-groups-v1 原型](../../output/imagegen/travel-groups-v1.png)（`model_providers.custom` / `gpt-image-2.5`；[提示词](../../output/imagegen/travel-groups-v1.prompt.txt)）。地标按 scene ID 分组并保持场景目录与组内原顺序，使用单一滚动区和可变高度内容；普通与搜索折叠状态分别保存在 UI 内存中。搜索文字变化时展开匹配组，清空时切回普通状态；全部展开 / 折叠只作用于当前筛选可见的组，不发出传送请求。
 
 扩展请求由 `OnEndFrame` 在游戏线程执行，单次排队、30 秒过期，绑定玩家、控制器及世界代际。对象或世界变化取消旧请求并恢复旧状态；旧世界暂停或时间倍率恢复失败时逐帧重试。组件换代后关闭会恢复该功能拥有的所有仍有效旧组件；镜头距离每帧重设，并保存游戏自身最新基值用于关闭恢复。原生自由相机通过 debug 控制器所属的 CheatManager 关闭，验证原控制器恢复后清理本次创建的相机对象，关闭不依赖 debug 控制器拥有 Pawn。
 
@@ -62,9 +62,9 @@ ImGui 的 `Platform_SetImeDataFn` 仅复制文本焦点、客户区光标位置�
 
 ## Mono AOT 属性路径
 
-从真实玩家查询的虚表槽获取包装方法，验证 `GetFloatValue -> GetValue -> generic context[0x18] -> GSBindList<float>.get_Item` 的完整机器码及寄存器转发，PLT 跳转最多四级，所有代码目标必须位于可执行页。泛型槽尚未初始化时返回失败并稍后重试；安装线程不会主动调用托管方法。实际只读调用图见 [现场包装链](fling-reference/live-attribute-callgraph.json) 与 [泛型 getter](fling-reference/live-attribute-getter.json)。
+从真实玩家查询的虚表槽获取包装方法，验证 `GetFloatValue -> GetValue -> generic context[0x18] -> GSBindList<float>.get_Item` 的完整机器码及寄存器转发，PLT 跳转最多四级，所有代码目标必须位于可执行页。泛型槽尚未初始化时返回失败并稍后重试；安装线程不会主动调用托管方法。实际只读调用图见 [现场包装链](../../output/fling-reference/live-attribute-callgraph.json) 与 [泛型 getter](../../output/fling-reference/live-attribute-getter.json)。
 
-GSBindList 的调用探针采集真正的 `List<float>.get_Item`。随后只在该方法内寻找唯一浮点数组 getter 特征，避免全局 17 个相似 getter 的歧义。玩家身份需线程局部调用标记、原始 trampoline 返回地址、动态栈范围及匹配的属性枚举共同确认。本轮运行时已连接该路径，证据见 [实际 List reader](fling-reference/live-list-reader.json)、[v0.2.0 运行日志](fling-reference/runtime-v0.2.0.log) 与 [v0.2.1 运行日志](fling-reference/runtime-v0.2.1.log)；这里的现场地址只用于证据定位，安装不硬编码这些地址。
+GSBindList 的调用探针采集真正的 `List<float>.get_Item`。随后只在该方法内寻找唯一浮点数组 getter 特征，避免全局 17 个相似 getter 的歧义。玩家身份需线程局部调用标记、原始 trampoline 返回地址、动态栈范围及匹配的属性枚举共同确认。本轮运行时已连接该路径，证据见 [实际 List reader](../../output/fling-reference/live-list-reader.json)、[v0.2.0 运行日志](../../output/fling-reference/runtime-v0.2.0.log) 与 [v0.2.1 运行日志](../../output/fling-reference/runtime-v0.2.1.log)；这里的现场地址只用于证据定位，安装不硬编码这些地址。
 
 属性回调使用独立的有界同步，不获取 ImGui 锁，也不分配内存。getter 在保留原指令语义后覆盖返回值；关闭战斗类覆盖后立即返回原始属性。生命、法力、气力等资源还在真实变更事件中保护；不是由 UI 线程直接写目标内存。
 
@@ -80,8 +80,8 @@ GSBindList 的调用探针采集真正的 `List<float>.get_Item`。随后只在�
 
 功能模型将强制更新状态与后端写事务串行处理，阻止新启用与应用；已启用功能请求关闭，恢复仍由原后端完成。异步游戏线程请求也须核对门控，避免已排队启用在确认新版后生效。解除更新限制不自动重启旧功能。一次性已完成的数据修改不回滚。
 
-v0.3.4 按稳定场景 ID 与精确地标键清理开发、测试和占位目录，保留32场景、284地标和17个有地标的场景分组；不对“正常位置”等通用名称进行全局删除。原始统计、推断边界及清理规则见 [目录记录](xxj-reference/catalog-data.md)。
+v0.3.4 按稳定场景 ID 与精确地标键清理开发、测试和占位目录，保留32场景、284地标和17个有地标的场景分组；不对“正常位置”等通用名称进行全局删除。原始统计、推断边界及清理规则见 [目录记录](../../output/xxj-reference/catalog-data.md)。
 
-界面先生成并查看 [release-ui-v1 原型](../output/imagegen/release-ui-v1.png)，沿用现有金色强调、亮暗主题和卡片留白；来源为 `custom-imagegen`、`model_providers.custom` / `gpt-image-2.5`，[完整提示词](../output/imagegen/release-ui-v1.prompt.txt)。原型仅用于设计，所示版本数据不是在线 Release 验证。
+界面先生成并查看 [release-ui-v1 原型](../../output/imagegen/release-ui-v1.png)，沿用现有金色强调、亮暗主题和卡片留白；来源为 `custom-imagegen`、`model_providers.custom` / `gpt-image-2.5`，[完整提示词](../../output/imagegen/release-ui-v1.prompt.txt)。原型仅用于设计，所示版本数据不是在线 Release 验证。
 
-正式标签触发 GitHub Actions 的两种配置构建和回归，全部通过后由最小写权限作业发布 ZIP 与 SHA256SUMS。ZIP使用明确文件清单，游戏 README 来自 `BlackMythWukong/readme.md`；根 README 只描述整个项目。生成时检查 x64 PE、InitializeASI 导出、许可和版本，记录有效载荷哈希。流程见 [发布说明](releasing.md)。
+正式标签触发 GitHub Actions 的两种配置构建和回归，全部通过后由最小写权限作业发布 ZIP 与 SHA256SUMS。ZIP使用明确文件清单，游戏 README 来自 `BlackMythWukong/readme.md`；根 README 只描述整个项目。生成时检查 x64 PE、InitializeASI 导出、许可和版本，记录有效载荷哈希。流程见 [发布说明](../../docs/releasing.md)。

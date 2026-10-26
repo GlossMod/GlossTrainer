@@ -13,7 +13,7 @@ Language=auto
 
 静态 UI 文案和目录短名称位于 `BlackMythWukong/src/localization_strings.inc` 与 `localization_catalog.inc`。当前这两个词典共有 1,897 个唯一源 key；动态状态文案有 16 个编号模板，模板捕获会保留原值，只有“已恢复悟空”的应用自有退出原因再翻译一层。词典覆盖全部 32 个场景、284 个地标、247 条变身来源角色名，以及 1,159 条中文物品短名；另一个物品 AK-47 保留原名。参考和调试标签采用语义翻译，不宣称全部为游戏官方英语。运行时新发现且尚未收录的名称保留原文。当前仍有 428 条唯一物品长描述保留游戏原文；它们不是遗漏的短名称或 UI 操作文案。应用自有文案使用 `localization::Text` / `Translate`；玩家填写的技能名、书签名和其他自定义文字应直接显示，不能送入翻译函数。
 
-游戏语言来源通过本机游戏包中的 Unreal Engine 托管程序集进行只读静态检查：两个 getter 均为无参数、返回字符串的静态方法，并确认反射函数路径与 `FString` 返回字段。[提取记录](../output/localization-validation-20261025/game-language-static-evidence.json)同时注明 REA 解析预算限制、程序集身份和静态检查不能证明游戏内调用一定成功。实现选择优先使用 `GetCurrentLanguage` 再回退到 `GetCurrentCulture`，仍需用户在游戏中确认实际语言结果。
+游戏语言来源通过本机游戏包中的 Unreal Engine 托管程序集进行只读静态检查：两个 getter 均为无参数、返回字符串的静态方法，并确认反射函数路径与 `FString` 返回字段。[提取记录](../../output/localization-validation-20261025/game-language-static-evidence.json)同时注明 REA 解析预算限制、程序集身份和静态检查不能证明游戏内调用一定成功。实现选择优先使用 `GetCurrentLanguage` 再回退到 `GetCurrentCulture`，仍需用户在游戏中确认实际语言结果。
 
 ## 自动验证
 
@@ -40,4 +40,4 @@ Debug 执行时将 `build\release` 替换成 `build\debug`。自动测试和宿�
 4. 检查功能、物品、地标、变身页及亮暗主题，确认搜索和状态提示；技能自定义名称、组合键和书签名称应保留原样。
 5. 单独确认输入法、游戏内改键、手柄及真实游戏语言反射结果。以上仍待用户实测。
 
-实现前通过 `custom-imagegen`（`model_providers.custom` / `gpt-image-2.5`）生成并查看了[亮暗设计原型与完整提示词](../output/localization-validation-20261025/prototype.md)。最终测试与实际截图见[验证记录](verification.md#中英文界面2026-10-25)。
+实现前通过 `custom-imagegen`（`model_providers.custom` / `gpt-image-2.5`）生成并查看了[亮暗设计原型与完整提示词](../../output/localization-validation-20261025/prototype.md)。最终测试与实际截图见[验证记录](verification.md#中英文界面2026-10-25)。

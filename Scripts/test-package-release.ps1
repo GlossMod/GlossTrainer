@@ -87,7 +87,8 @@ try {
     Assert-Condition (Test-Path -LiteralPath $loaderPath -PathType Leaf) "Offline tests require a pinned official Loader ZIP. Pass -LoaderArchive with its cached path: $loaderPath"
     Assert-Condition ((Get-FileHash -LiteralPath $loaderPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $loaderSha256) 'Offline Loader archive does not match the pinned SHA-256'
     Pass 'offline Loader fixture matches the pinned official x64 release'
-    $fixtureInputs = @('BlackMythWukong\src\runtime.hpp', 'BlackMythWukong\release-readme.md', 'BlackMythWukong\release-notes.md', 'BlackMythWukong\validation\xmake.lua', 'Scripts\release-games.json', 'Scripts\package-release.ps1', 'Scripts\resolve-release.ps1', 'Scripts\test-package-release.ps1', 'Scripts\test-install.ps1', 'LICENSE')
+    $fixtureInputs = @($sourceRelease.versionFile, $sourceRelease.readme, $sourceRelease.releaseNotes, $sourceRelease.validationFile,
+        'Scripts\release-games.json', 'Scripts\package-release.ps1', 'Scripts\resolve-release.ps1', 'Scripts\test-package-release.ps1', 'Scripts\test-install.ps1', 'LICENSE')
     $fixtureInputs += @(Get-ChildItem -LiteralPath (Join-Path $source 'licenses') -File | ForEach-Object { 'licenses\' + $_.Name })
     foreach ($relative in $fixtureInputs) {
         $target = Join-Path $fixture $relative
@@ -95,14 +96,14 @@ try {
         Copy-Item -LiteralPath (Join-Path $source $relative) -Destination $target
     }
     [IO.File]::WriteAllText((Join-Path $fixture 'README.md'), 'ROOT README MUST NOT SHIP')
-    [IO.File]::AppendAllText((Join-Path $fixture 'BlackMythWukong\release-readme.md'), "`nRELEASE README FIXTURE`n", $utf8)
+    [IO.File]::AppendAllText((Join-Path $fixture $sourceRelease.readme), "`nRELEASE README FIXTURE`n", $utf8)
     # No fixtures access a game, download data, or write outside output/.
-    foreach ($relative in @('data\reference.exe', 'data\reference.rar', 'Saved\save.sav', 'scripts\GlossTrainer\ui.ini', 'scripts\GlossTrainer\hotkeys.ini', 'scripts\GlossTrainer\trainer.ini', 'Scripts\install.ps1', 'docs\install.md')) {
+    foreach ($relative in @('data\reference.exe', 'data\reference.rar', 'Saved\save.sav', 'scripts\GlossTrainer\ui.ini', 'scripts\GlossTrainer\hotkeys.ini', 'scripts\GlossTrainer\trainer.ini', 'Scripts\install.ps1', 'BlackMythWukong\docs\install.md')) {
         $target = Join-Path $fixture $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
         [IO.File]::WriteAllText($target, 'MUST NOT SHIP')
     }
-    $version = [regex]::Match([IO.File]::ReadAllText((Join-Path $fixture 'BlackMythWukong\src\runtime.hpp')), 'Version\[\]\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
+    $version = [regex]::Match([IO.File]::ReadAllText((Join-Path $fixture $sourceRelease.versionFile)), 'Version\[\]\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
     Assert-Condition (-not [string]::IsNullOrEmpty($version)) 'Fixture source version missing'
     $tag = 'BlackMythWukong/v' + $version
     $stem = "GlossTrainer-BlackMythWukong-v$version-win64"

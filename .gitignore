@@ -10,9 +10,9 @@ tmp/
 .DS_Store
 output
 Tests
-docs/evidence
+**/docs/evidence/
 data
 
-docs/*-reference
+**/docs/*-reference/
 tools
 tmp

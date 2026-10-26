@@ -84,4 +84,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-release-i
 
 每次发布在 PowerShell 5.1 / 7 运行便携包和游戏隔离测试。隔离夹具覆盖两游戏相同版本、输出目录共用、独立测试列表、跨游戏 / 版本混配拒绝、未知游戏、重复 ID 和路径越界拒绝；它不宣称验证了尚未实现的第二款游戏。
 
-应用更新检查仅提示手工下载，不自动下载、运行安装器或替换正在使用的 ASI。游戏内特性验证与发布包验证分别记录在 [verification.md](verification.md)。
+应用更新检查仅提示手工下载，不自动下载、运行安装器或替换正在使用的 ASI。游戏内特性与发布包验证记录在各游戏自己的 `docs/verification.md`，例如[黑神话验证记录](../BlackMythWukong/docs/verification.md)。

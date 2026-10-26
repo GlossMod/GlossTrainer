@@ -1,18 +1,20 @@
 # GlossTrainer · 黑神话：悟空
 
+[文档目录](docs/README.md) · [安装说明](docs/install.md) · [验证记录](docs/verification.md)
+
 《黑神话：悟空》Windows x64 游戏内修改器，当前源码版本为 **v0.3.5**。使用 C++20、Dear ImGui 1.92.9 和 MinHook 1.3.4，支持 DX11 / DX12 覆盖层，通过 [Ultimate ASI Loader v10.0.0](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v10.0.0) 自动加载。
 
-本版包含 **64 项功能**，采用支持搜索和分类的紧凑列表，适配亮色 / 暗色主题；另有 1,160 条物品、32 个场景和 284 个地标的物品与传送工具。影神图可选择故事阶段（0–5）和画像阶段（0–1），按场景传送使用游戏默认出生点。精魄、法术和影神图的单项删除尚未实现，界面中已禁用。新增功能的游戏效果仍待用户手测；操作和验证范围见 [功能说明](../docs/gameplay.md) 和 [验证记录](../docs/verification.md)。
+本版包含 **64 项功能**，采用支持搜索和分类的紧凑列表，适配亮色 / 暗色主题；另有 1,160 条物品、32 个场景和 284 个地标的物品与传送工具。影神图可选择故事阶段（0–5）和画像阶段（0–1），按场景传送使用游戏默认出生点。精魄、法术和影神图的单项删除尚未实现，界面中已禁用。新增功能的游戏效果仍待用户手测；操作和验证范围见 [功能说明](docs/gameplay.md) 和 [验证记录](docs/verification.md)。
 
 传送地标按 17 个场景分组，支持逐组或全部展开 / 折叠；搜索会展开匹配组，清空搜索后恢复原折叠状态。
 
-“七十二变（实验性）”页提供角色搜索、分类、支持状态、技能配置和恢复悟空入口。目录中所有角色均可直接点击“开始变身”，无需先检查技能；验证状态和此前的不可用提示不阻止重新尝试。资源与初始化失败时显示原因并恢复悟空。参考 Mod 的名称和资源路径仅作为目录线索；实际目录覆盖、原生接口要求和逐角色验证范围见 [变身实现记录](../docs/transformation.md)。角色的“未验证”状态不能视为稳定可玩承诺。
+“七十二变（实验性）”页提供角色搜索、分类、支持状态、技能配置和恢复悟空入口。目录中所有角色均可直接点击“开始变身”，无需先检查技能；验证状态和此前的不可用提示不阻止重新尝试。资源与初始化失败时显示原因并恢复悟空。参考 Mod 的名称和资源路径仅作为目录线索；实际目录覆盖、原生接口要求和逐角色验证范围见 [变身实现记录](docs/transformation.md)。角色的“未验证”状态不能视为稳定可玩承诺。
 
-角色检查按实际组件与初始化结果选择地面、游泳或普通飞行代理；阶段图、场景关联和专用移动驱动不因出现在目录中就开放。通过结构检查的角色仍为实验性，完整多阶段形态和游戏内验证范围见[全形态审计](../docs/transformation-all-forms-audit.md)。
+角色检查按实际组件与初始化结果选择地面、游泳或普通飞行代理；阶段图、场景关联和专用移动驱动不因出现在目录中就开放。通过结构检查的角色仍为实验性，完整多阶段形态和游戏内验证范围见[全形态审计](docs/transformation-all-forms-audit.md)。
 
 文本输入控件支持中文输入法：窗口线程管理菜单专用输入法上下文，候选位置跟随输入光标，关闭菜单或失焦后恢复原关联。搜狗输入法的实际候选选词需在更新后由玩家确认；自动回归范围见验证记录。
 
-界面支持简体中文和 English，默认跟随游戏文本语言。“设置 → 语言”可选择“跟随游戏 / 简体中文 / English”，切换立即生效，偏好保存在 `scripts\GlossTrainer\language.ini`。设置页显示检测到的游戏语言及来源；暂时无法读取游戏语言时，明确显示使用系统语言临时回退。玩家自定义技能名和书签名保持原样。物品长篇说明目前保留原文，详细范围见[语言功能说明](../docs/localization.md)。
+界面支持简体中文和 English，默认跟随游戏文本语言。“设置 → 语言”可选择“跟随游戏 / 简体中文 / English”，切换立即生效，偏好保存在 `scripts\GlossTrainer\language.ini`。设置页显示检测到的游戏语言及来源；暂时无法读取游戏语言时，明确显示使用系统语言临时回退。玩家自定义技能名和书签名保持原样。物品长篇说明目前保留原文，详细范围见[语言功能说明](docs/localization.md)。
 
 功能快捷键初始全部未绑定。菜单内点击功能行的快捷键按钮可录制；Esc 取消，Backspace 或 Delete 清除；冲突绑定会被拒绝。界面开关默认 **Insert**，可在“设置 → 快捷键”点击“修改”录制按键或 Ctrl / Shift / Alt 组合键，支持恢复默认，不能留空。菜单键始终可用，独立于功能快捷键总开关；当前菜单组合和 **Ctrl+Shift+Home** 不能再分配给功能。两类绑定保存在 `scripts\GlossTrainer\hotkeys.ini`，主题、缩放和窗口位置保存在 `scripts\GlossTrainer\ui.ini`。
 
@@ -29,7 +31,7 @@ v0.3.5 将 GitHub 更新检查按游戏隔离，仅接受本游戏的正式版�
 
 更新前退出游戏，再复制新版文件。卸载时移除 `scripts\GlossTrainer.asi`；确认 `version.dll`、`version.ini` 仅供本修改器使用后再移除。按需保留 `scripts\GlossTrainer` 配置和日志，不要删除整个 scripts 目录。此方式不创建安装器清单；源码安装器的清单式安装和卸载见下一节。
 
-玩家版说明模板见 [release-readme.md](release-readme.md)，包含修改器名称、安装方法、功能、署名及完整许可证；打包规则见 [发布说明](../docs/releasing.md)。
+玩家版说明模板见 [release-readme.md](docs/release-readme.md)，包含修改器名称、安装方法、功能、署名及完整许可证；打包规则见 [发布说明](../docs/releasing.md)。
 
 ## 从源码构建与安装
 
@@ -75,7 +77,7 @@ xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" 
 xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" --name=BlackMythWukong --uninstall
 ```
 
-直接安装已有 ASI、缓存目录、冲突排查和验证方法见 [安装说明](../docs/install.md)。
+直接安装已有 ASI、缓存目录、冲突排查和验证方法见 [安装说明](docs/install.md)。
 
 ## 测试与适配范围
 
@@ -102,8 +104,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-install.p
 
 当前适配基于本机 Steam build **21393610** 的唯一特征和 Mono AOT 属性调用链。版本变动、入口歧义或玩家尚未捕获时，对应功能保持未支持或等待状态；不会在多个数组 getter 中任选一个。参考修改器标题的 `v1.0–v1.0.20` 不是本项目全版本兼容承诺。
 
-游戏功能测试覆盖参数暂存、快捷键、特征扫描、真实 MinHook trampoline、CPU 扩展状态保留及合成玩家属性队列。DX11 / DX12 宿主验证实际图形 Hook、交换链、输入消息和尺寸变化；宿主不执行游戏功能。这些测试均不能替代游戏中的逐项效果验收。v0.3.0 当前游戏内逐项验收待用户手测，不能从构建、静态映射或宿主测试推断通过；以 [验证记录](../docs/verification.md) 为准。
+游戏功能测试覆盖参数暂存、快捷键、特征扫描、真实 MinHook trampoline、CPU 扩展状态保留及合成玩家属性队列。DX11 / DX12 宿主验证实际图形 Hook、交换链、输入消息和尺寸变化；宿主不执行游戏功能。这些测试均不能替代游戏中的逐项效果验收。v0.3.0 当前游戏内逐项验收待用户手测，不能从构建、静态映射或宿主测试推断通过；以 [验证记录](docs/verification.md) 为准。
 
 界面原型使用 `custom-imagegen` 的 `gpt-image-2.5` 生成，随后按原型实现；构建和验证结果以任务实际记录为准，本 README 不代替验收记录。
 
-模块及 Hook 生命周期见 [架构说明](../docs/architecture.md)，参考包研究依据见 [静态分析](../docs/fling-reference/static-analysis.md) 和 [当前游戏映射](../docs/fling-reference/game-mapping.md)。第三方许可保存在 [licenses](../licenses/)；发行包 README 内嵌项目与依赖的完整许可。Loader 由打包器或源码安装器从固定官方发布下载并校验，复制安装包已包含 Loader。
+模块及 Hook 生命周期见 [架构说明](docs/architecture.md)，参考包研究依据见 [静态分析](../output/fling-reference/static-analysis.md) 和 [当前游戏映射](../output/fling-reference/game-mapping.md)。第三方许可保存在 [licenses](../licenses/)；发行包 README 内嵌项目与依赖的完整许可。Loader 由打包器或源码安装器从固定官方发布下载并校验，复制安装包已包含 Loader。

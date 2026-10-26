@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-GlossTrainer is a Windows x64 C++20 ASI plugin for Black Myth: Wukong, using Dear ImGui and MinHook. `BlackMythWukong/src/` contains runtime, input, overlay, and DX11/DX12 renderers; its `gameplay/` subdirectory contains hooks, engine bridges, and embedded catalog data. `BlackMythWukong/validation/` holds regression tests. `Scripts/` provides installation tooling; `docs/` records architecture and verification; `licenses/` holds dependency notices.
+GlossTrainer hosts Windows x64 C++20 trainers in per-game directories, using Dear ImGui and MinHook. `BlackMythWukong/src/` contains runtime, input, overlay, and DX11/DX12 renderers; its `gameplay/` subdirectory contains hooks, engine bridges, and embedded catalog data. `BlackMythWukong/validation/` holds regression tests, and `BlackMythWukong/docs/` holds this game's architecture, implementation, installation and verification documents. `Scripts/` provides installation tooling; root `docs/` holds shared release and maintenance documents; `licenses/` holds dependency notices.
 
 `Tests/` contains the local graphics host but is Git-ignored, as are `build/`, `output/`, and `data/`. The root build includes `Tests/`; check its availability in fresh checkouts.
 
@@ -10,7 +10,7 @@ GlossTrainer is a Windows x64 C++20 ASI plugin for Black Myth: Wukong, using Dea
 
 Store generated validation artifacts in the repository-root `output/` directory, preferably under `output/<task>-<YYYYMMDD>/`. This includes build/configure/test logs, screenshots, UI prototypes and prompts, runtime captures, dumps, JSON results, artifact hashes, and package receipts. Do not create these files or validation-output directories under `docs/`. Configure task scripts and commands to write these artifacts to `output/`.
 
-Keep maintained architecture, implementation, audit, and verification-summary documents in `docs/`. Record conclusions in `docs/verification.md` and link to raw evidence with paths such as `../output/<task>-<YYYYMMDD>/results.json`. When moving existing artifact directories, update documentation links and script output paths; preserve original captured logs and results.
+Keep game-specific architecture, implementation, audit, release templates and verification-summary documents in `<Game>/docs/`; keep the module README as the entry point. Shared cross-game documentation stays in root `docs/`. For Black Myth: Wukong, record conclusions in `BlackMythWukong/docs/verification.md` and link to root raw evidence with paths such as `../../output/<task>-<YYYYMMDD>/results.json`. When moving documents or existing artifact directories, update links and script input/output paths; preserve original captured logs and results.
 
 ## Build, Test, and Development Commands
 
@@ -34,7 +34,7 @@ Use four-space indentation, same-line opening braces, C++20, and UTF-8 source. F
 
 ## Testing Guidelines
 
-Tests use standalone C++ executables with custom `CHECK` assertions, plus PowerShell installer checks. Name test files `*_tests.cpp` and cases `Test...`. Run affected `GlossTrainer*Tests` targets in Debug and Release; use matching output directories. Cover failure paths and state restoration. No numeric coverage threshold is configured. Store raw validation evidence in `output/` and record summaries and evidence links in `docs/verification.md`; graphics-host success does not establish in-game feature correctness.
+Tests use standalone C++ executables with custom `CHECK` assertions, plus PowerShell installer checks. Name test files `*_tests.cpp` and cases `Test...`. Run affected `GlossTrainer*Tests` targets in Debug and Release; use matching output directories. Cover failure paths and state restoration. No numeric coverage threshold is configured. Store raw validation evidence in root `output/` and record summaries and evidence links in the game's `docs/verification.md` (`BlackMythWukong/docs/verification.md` for Black Myth: Wukong); graphics-host success does not establish in-game feature correctness.
 
 ## Commit & Pull Request Guidelines
 

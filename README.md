@@ -13,10 +13,10 @@ GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个
 
 ## 项目结构
 
-- 游戏目录：源码、游戏适配及回归测试。
+- 游戏目录：源码、游戏适配、回归测试和专属 `docs/` 文档；[黑神话文档目录](BlackMythWukong/docs/README.md)。
 - `Scripts/`：构建辅助、清单式安装 / 卸载、发行包生成和校验。
 - `.github/workflows/`：Windows x64 构建、回归与 GitHub Releases 发布。
-- `docs/`：架构、验证与维护文档。
+- `docs/`：跨游戏共用的发布流程等维护文档。
 - `licenses/`：第三方依赖许可。
 
 ## 构建与发布
