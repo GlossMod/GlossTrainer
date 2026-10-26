@@ -11,6 +11,18 @@ GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个
 | -------------------------------------------- | -------------------------------------------- |
 | [BlackMythWukong](BlackMythWukong/readme.md) | 《黑神话：悟空》的功能、安装、使用及适配说明 |
 
+## 关于项目
+
+- **作者：小莫**（By: 小莫）。
+- **当前版本号**：各游戏独立维护，见对应模块 README；运行中的版本号显示在修改器“关于”页。
+- **最新版本号**：在“关于”页检查更新，或查看[按游戏区分的 GitHub Releases](https://github.com/GlossMod/GlossTrainer/releases)。检查失败仅显示“检查更新失败”，不限制使用。
+- **主 LICENSE**：[GNU GPL v3](https://github.com/GlossMod/GlossTrainer/blob/master/LICENSE)。
+- **开源地址**：[GlossMod / GlossTrainer](https://github.com/GlossMod/GlossTrainer)。
+- **赞助作者**：[sponsor.aoe.top](https://sponsor.aoe.top/)。
+- **申请制作游戏修改器**：[GlossMod 委托制作](https://www.glossmod.com/commissions)。
+
+发行包默认提供中文 `README.md`，另附英文 `readme_en.md`；两份说明均包含安装方法、功能、版本与作者信息及完整许可证。
+
 ## 项目结构
 
 - 游戏目录：源码、游戏适配、回归测试和专属 `docs/` 文档；[黑神话文档目录](BlackMythWukong/docs/README.md)。
@@ -38,7 +50,7 @@ xmake project -k compile_commands .vscode
 
 安装 XMake 扩展后，其默认设置会在 `xmake.lua` 变化时自动更新数据库，也可执行 `XMake: UpdateIntellisense` 手动更新。`compile_commands.json` 含本机路径，不提交到 Git。
 
-正式 `<游戏ID>/vX.Y.Z` 标签（例如 `BlackMythWukong/v0.3.5`）只触发对应游戏的 Debug / Release 构建、回归、打包和 Releases 发布。每个游戏独立版本；包名、校验文件、候选产物和输出目录均按游戏隔离。手动运行 workflow 时指定游戏 ID，仅构建验证。注册表、迁移规则和本地打包方式见 [发布说明](docs/releasing.md)。
+正式 `<游戏ID>/vX.Y.Z` 标签（例如 `BlackMythWukong/v1.0.0`）只触发对应游戏的 Debug / Release 构建、回归、打包和 Releases 发布。每个游戏独立版本；包名、校验文件、候选产物和输出目录均按游戏隔离。手动运行 workflow 时指定游戏 ID，仅构建验证。注册表、迁移规则和本地打包方式见 [发布说明](docs/releasing.md)。
 
 更新检查按游戏通道筛选公开 GitHub Releases，不使用仓库全局 Latest，也不自动下载安装。成功确认有新版后要求玩家自行下载；检查失败不限制使用，仅显示“检查更新失败”。
 

@@ -14,6 +14,7 @@
 | [语言审计](localization-followup-audit-20261025.md) | 翻译覆盖及静态核对记录 |
 | [验证记录](verification.md) | 构建、自动测试、发布及用户实测结论 |
 | [版本发布说明](release-notes.md) | 当前黑神话版本的 GitHub Release 内容 |
-| [发行包 README 模板](release-readme.md) | 安装包内的玩家说明与许可证占位 |
+| [发行包中文 README 模板](release-readme.md) | 默认玩家说明、关于信息与许可证占位 |
+| [发行包英文 README 模板](release-readme-en.md) | 完整英文玩家说明及相同许可证占位 |
 
 多游戏共用的注册表、版本标签、构建和打包规则见[仓库发布流程](../../docs/releasing.md)。原始日志、截图和测试结果仍保存在仓库根 `output/`，不放入本目录。

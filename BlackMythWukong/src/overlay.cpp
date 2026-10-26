@@ -8,6 +8,7 @@
 #include "gameplay/transformation_hotkeys.hpp"
 #include <imgui.h>
 #include <imgui_impl_win32.h>
+#include <shellapi.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -255,7 +256,7 @@ namespace gloss::overlay
                 line(15, 9, 12, 10);
                 line(8, 14, 12, 14);
                 break;
-            default:
+            case 5:
                 draw->AddCircle(point(10, 10), 6.5f * scale, color, 0, 1.5f * scale);
                 draw->AddCircle(point(10, 10), 2.5f * scale, color, 0, 1.5f * scale);
                 for (int tooth = 0; tooth < 8; ++tooth)
@@ -264,6 +265,11 @@ namespace gloss::overlay
                     line(10 + std::cos(angle) * 7, 10 + std::sin(angle) * 7,
                          10 + std::cos(angle) * 9.5f, 10 + std::sin(angle) * 9.5f);
                 }
+                break;
+            default:
+                draw->AddCircle(point(10, 10), 8.5f * scale, color, 0, 1.5f * scale);
+                draw->AddCircleFilled(point(10, 5.5f), 1 * scale, color);
+                line(10, 9, 10, 15);
                 break;
             }
         }
@@ -359,7 +365,7 @@ namespace gloss::overlay
             {
             case features::Availability::Ready:
                 return action ? Text("可用") : state.enabled ? Text("已启用")
-                                                       : Text("已关闭");
+                                                             : Text("已关闭");
             case features::Availability::Waiting:
                 return Text("等待游戏");
             case features::Availability::Error:
@@ -422,7 +428,7 @@ namespace gloss::overlay
                                                                                            : ImGui::GetStyleColorVec4(ImGuiCol_Text));
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
             const auto *hotkeyLabel = capturing ? Text("按下按键…") : hotkey.label.empty() ? Text("未绑定")
-                                                                                     : hotkey.label.c_str();
+                                                                                           : hotkey.label.c_str();
             const float hotkeyWidth = ImGui::GetContentRegionAvail().x - (showClear ? 30 * scale : 0);
             ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, .5f));
             const auto hotkeyButton = std::string(hotkeyLabel) + "###feature-hotkey";
@@ -667,7 +673,7 @@ namespace gloss::overlay
             ImGui::SameLine(0, 16 * scale);
             ImGui::TextColored(status.ready ? accent : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
                                "%s", status.pending ? Text("处理中") : status.ready ? Text("已连接")
-                                                                              : Text("等待游戏"));
+                                                                                    : Text("等待游戏"));
             const bool recent = GetTickCount64() - extensionNotice.shownAt < 6000;
             const bool failed = recent && extensionNotice.failed;
             const auto &message = failed || (status.message.empty() && recent) ? extensionNotice.message : status.message;
@@ -1424,7 +1430,8 @@ namespace gloss::overlay
             ImGui::EndChild();
             ImGui::SameLine();
             ImGui::BeginChild("transform-editor", ImVec2(0, 0), ImGuiChildFlags_Borders);
-            const auto found = std::find_if(catalog.begin(), catalog.end(), [&](const auto &entry) { return entry.id == selected; });
+            const auto found = std::find_if(catalog.begin(), catalog.end(), [&](const auto &entry)
+                                            { return entry.id == selected; });
             if (found == catalog.end())
             {
                 Label(Text("技能配置"), 20, ImGui::GetStyleColorVec4(ImGuiCol_Text));
@@ -1445,7 +1452,8 @@ namespace gloss::overlay
                 }
                 if (const auto captured = trans::hotkeys::TakeCaptured(); captured && captured->characterId == selected)
                 {
-                    auto binding = std::find_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &item) { return item.skillId == captured->skillId; });
+                    auto binding = std::find_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &item)
+                                                { return item.skillId == captured->skillId; });
                     if (binding != draft.bindings.end())
                     {
                         binding->key = captured->key;
@@ -1473,9 +1481,9 @@ namespace gloss::overlay
                 if (!status.ready && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 {
                     ImGui::SetTooltip(Text("接口检查：生成 %s / 技能 %s / 输入 %s / 移动 %s / 恢复 %s / 隔离 %s\n需要进入可操作场景，并通过当前游戏版本校验。"),
-                        status.capabilities.spawn ? Text("就绪") : Text("等待"), status.capabilities.skills ? Text("就绪") : Text("等待"),
-                        status.capabilities.input ? Text("就绪") : Text("等待"), status.capabilities.movement ? Text("就绪") : Text("等待"),
-                        status.capabilities.recovery ? Text("就绪") : Text("等待"), status.capabilities.isolation ? Text("就绪") : Text("等待"));
+                                      status.capabilities.spawn ? Text("就绪") : Text("等待"), status.capabilities.skills ? Text("就绪") : Text("等待"),
+                                      status.capabilities.input ? Text("就绪") : Text("等待"), status.capabilities.movement ? Text("就绪") : Text("等待"),
+                                      status.capabilities.recovery ? Text("就绪") : Text("等待"), status.capabilities.isolation ? Text("就绪") : Text("等待"));
                 }
                 const bool skillContext = skillSnapshot.inspected;
                 ImGui::PushID(selected.c_str());
@@ -1490,8 +1498,8 @@ namespace gloss::overlay
                 {
                     cameraCharacter = selected;
                     cameraEditing = false;
-                    cameraMeters = savedCamera > 0.f ? savedCamera :
-                        status.activeId == selected && status.cameraDistanceMeters > 0.f ? status.cameraDistanceMeters : 6.f;
+                    cameraMeters = savedCamera > 0.f ? savedCamera : status.activeId == selected && status.cameraDistanceMeters > 0.f ? status.cameraDistanceMeters
+                                                                                                                                      : 6.f;
                 }
                 if (!cameraEditing && savedCamera == 0.f && status.activeId == selected && status.cameraDistanceMeters > 0.f)
                     cameraMeters = status.cameraDistanceMeters;
@@ -1505,7 +1513,8 @@ namespace gloss::overlay
                 {
                     const auto result = trans::SetCameraDistance(selected, cameraMeters);
                     RecordExtensionResult(result);
-                    if (!result.success) cameraMeters = savedCamera > 0.f ? savedCamera : 6.f;
+                    if (!result.success)
+                        cameraMeters = savedCamera > 0.f ? savedCamera : 6.f;
                 }
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip(Text("每个角色单独保存 · 松开滑块后即时生效\nCtrl+点击可输入 1 至 200 米；自动按体型计算"));
@@ -1514,7 +1523,8 @@ namespace gloss::overlay
                 {
                     const auto result = trans::SetCameraDistance(selected, 0.f);
                     RecordExtensionResult(result);
-                    if (result.success) cameraCharacter.clear();
+                    if (result.success)
+                        cameraCharacter.clear();
                 }
                 ImGui::PushFont(nullptr, 12);
                 ImGui::TextDisabled("%s", Text(savedCamera > 0.f ? "仅此角色 · 已保存视距" : "仅此角色 · 自动按体型"));
@@ -1524,12 +1534,14 @@ namespace gloss::overlay
                 // Keep unknown saved IDs so a temporarily missing skill never erases a name or chord.
                 if (skillContext)
                     for (const auto &skill : skills)
-                        if (std::none_of(draft.bindings.begin(), draft.bindings.end(), [&](const auto &binding) { return binding.skillId == skill.id; }))
+                        if (std::none_of(draft.bindings.begin(), draft.bindings.end(), [&](const auto &binding)
+                                         { return binding.skillId == skill.id; }))
                             draft.bindings.push_back({skill.id, {}, 0, 0});
                 ImGui::SetNextItemWidth(-1);
                 if (ImGui::InputTextWithHint("##skill-search", Text("搜索技能名称、自定义名称或 ID"), skillSearch.InputBuf, sizeof(skillSearch.InputBuf)))
                     skillSearch.Build();
-                const auto bindingCount = std::count_if(draft.bindings.begin(), draft.bindings.end(), [](const auto &binding) { return binding.key != 0; });
+                const auto bindingCount = std::count_if(draft.bindings.begin(), draft.bindings.end(), [](const auto &binding)
+                                                        { return binding.key != 0; });
                 ImGui::PushFont(nullptr, 12);
                 ImGui::TextDisabled(Text("%zu 个技能 · %zu 个按键绑定"), skillContext ? skills.size() : 0, static_cast<std::size_t>(bindingCount));
                 ImGui::PopFont();
@@ -1549,7 +1561,8 @@ namespace gloss::overlay
                         for (std::size_t i = 0; i < skills.size(); ++i)
                         {
                             const auto &skill = skills[i];
-                            const auto binding = std::find_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &item) { return item.skillId == skill.id; });
+                            const auto binding = std::find_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &item)
+                                                              { return item.skillId == skill.id; });
                             const auto text = std::format("{} {} {} {}", skill.id, skill.name, binding->customName, localization::Translate(skill.name));
                             if (skillSearch.PassFilter(text.c_str()))
                                 skillRows.push_back(i);
@@ -1560,7 +1573,8 @@ namespace gloss::overlay
                         for (int row = skillClipper.DisplayStart; row < skillClipper.DisplayEnd; ++row)
                         {
                             const auto &skill = skills[skillRows[row]];
-                            auto &binding = *std::find_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &item) { return item.skillId == skill.id; });
+                            auto &binding = *std::find_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &item)
+                                                          { return item.skillId == skill.id; });
                             ImGui::PushID(skill.id);
                             ImGui::TableNextRow(ImGuiTableRowFlags_None, 52 * scale);
                             ImGui::TableSetColumnIndex(0);
@@ -1611,7 +1625,8 @@ namespace gloss::overlay
                     {
                         ImGui::TableNextRow();
                         ImGui::TableSetColumnIndex(0);
-                        ImGui::TextDisabled("%s", !skillContext ? Text("先检查角色技能") : skills.empty() ? Text("没有可用技能") : Text("没有匹配项"));
+                        ImGui::TextDisabled("%s", !skillContext ? Text("先检查角色技能") : skills.empty() ? Text("没有可用技能")
+                                                                                                          : Text("没有匹配项"));
                     }
                     ImGui::EndTable();
                 }
@@ -1643,9 +1658,9 @@ namespace gloss::overlay
                     ImGui::TextColored(captureResult.success ? accent : Color(220, 100, 90), "%s", localization::Translate(captureResult.message).c_str());
                 else
                     ImGui::TextWrapped("%s", Text("名称留空使用原名 · 切换角色保留未保存的编辑"));
-                const auto missingCount = std::count_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &binding) {
-                    return (binding.key || !binding.customName.empty()) && std::none_of(skills.begin(), skills.end(), [&](const auto &skill) { return skill.id == binding.skillId; });
-                });
+                const auto missingCount = std::count_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &binding)
+                                                        { return (binding.key || !binding.customName.empty()) && std::none_of(skills.begin(), skills.end(), [&](const auto &skill)
+                                                                                                                              { return skill.id == binding.skillId; }); });
                 if (skillContext && missingCount)
                 {
                     ImGui::TextDisabled(Text("%zu 项技能缺失"), static_cast<std::size_t>(missingCount));
@@ -1653,7 +1668,8 @@ namespace gloss::overlay
                     if (ImGui::SmallButton(UiLabel("清除失效按键")))
                     {
                         for (auto &binding : draft.bindings)
-                            if (std::none_of(skills.begin(), skills.end(), [&](const auto &skill) { return skill.id == binding.skillId; }))
+                            if (std::none_of(skills.begin(), skills.end(), [&](const auto &skill)
+                                             { return skill.id == binding.skillId; }))
                                 binding.key = binding.modifiers = 0;
                         draft.dirty = true;
                     }
@@ -1677,12 +1693,12 @@ namespace gloss::overlay
                 RecordExtensionResult(localization::SetPreference(static_cast<localization::Preference>(preference)));
             const auto detection = localization::GetDetection();
             ImGui::TextDisabled("%s: %s", Text("当前界面语言"),
-                localization::GetLanguage() == localization::Language::Chinese ? "简体中文" : "English");
+                                localization::GetLanguage() == localization::Language::Chinese ? "简体中文" : "English");
             if (detection.source == localization::DetectionSource::OperatingSystem)
                 ImGui::TextDisabled("%s · %s", Text("游戏语言"), Text("临时使用系统语言"));
             else
                 ImGui::TextDisabled("%s: %s · %s", Text("游戏语言"), detection.culture.c_str(),
-                    Text(detection.source == localization::DetectionSource::GameRuntime ? "来自游戏运行时" : "来自游戏配置"));
+                                    Text(detection.source == localization::DetectionSource::GameRuntime ? "来自游戏运行时" : "来自游戏配置"));
             ImGui::PushFont(nullptr, 13);
             if (extensionNotice.failed && GetTickCount64() - extensionNotice.shownAt < 6000)
                 ImGui::TextColored(Color(214, 133, 83), "%s", localization::Translate(extensionNotice.message).c_str());
@@ -1800,14 +1816,111 @@ namespace gloss::overlay
             }
             ImGui::PopStyleVar();
         }
-        void UpdateRequiredPage(float scale)
+        void AboutPage(float scale)
         {
-            if (trans::NeedsExclusiveControl())
+            Label(Text("关于"), 28, ImGui::GetStyleColorVec4(ImGuiCol_Text));
+            ImGui::Dummy(ImVec2(0, 2 * scale));
+            const auto state = update::GetSnapshot();
+            BeginCard("about-version", ImVec2(0, 172 * scale), scale);
+            Label(Text("版本信息"), 20, ImGui::GetStyleColorVec4(ImGuiCol_Text));
+            const auto checkWidth = std::max(112 * scale,
+                                             ImGui::CalcTextSize(Text("检查更新")).x + ImGui::GetStyle().FramePadding.x * 2 + 4 * scale);
+            ImGui::SameLine(ImGui::GetWindowWidth() - checkWidth - 22 * scale);
+            ImGui::BeginDisabled(state.status == update::Status::Checking);
+            if (ImGui::Button(UiLabel("检查更新"), ImVec2(checkWidth, 30 * scale)))
+                update::CheckAsync();
+            ImGui::EndDisabled();
+            ImGui::SetCursorPosY(62 * scale);
+            ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0, 0));
+            if (ImGui::BeginTable("about-versions", 2, ImGuiTableFlags_SizingStretchSame))
             {
-                if (ImGui::Button(UiLabel("恢复悟空"), ImVec2(132 * scale, 32 * scale)))
-                    RecordExtensionResult(trans::Restore());
-                ImGui::TextWrapped("%s", localization::Translate(trans::GetStatus().message).c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled(Text("当前版本"));
+                const auto currentVersion = std::format("v{}", Version);
+                Label(currentVersion.c_str(), 24, ImGui::GetStyleColorVec4(ImGuiCol_Text));
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled(Text("最新版本"));
+                // Keep the game channel in the updater; present only its version here.
+                std::string_view latestVersion = state.latestVersion;
+                constexpr std::string_view prefix = "BlackMythWukong/";
+                if (latestVersion.starts_with(prefix))
+                    latestVersion.remove_prefix(prefix.size());
+                const std::string latestLabel = latestVersion.empty() ? "—" : std::string(latestVersion);
+                Label(latestLabel.c_str(), 24, accent);
+                ImGui::EndTable();
             }
+            ImGui::PopStyleVar();
+            ImGui::SetCursorPosY(134 * scale);
+            ImGui::PushFont(nullptr, 13);
+            ImGui::TextDisabled("%s", localization::Translate(state.message).c_str());
+            ImGui::PopFont();
+            EndCard();
+            ImGui::Dummy(ImVec2(0, 2 * scale));
+            BeginCard("about-project", ImVec2(0, 272 * scale), scale);
+            Label(Text("项目信息"), 20, ImGui::GetStyleColorVec4(ImGuiCol_Text));
+            static const char *failedLink{};
+            if (ImGui::BeginTable("about-links", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerH))
+            {
+                ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 216 * scale);
+                ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+                const auto row = [&](const char *label, const char *value, const wchar_t *url = nullptr, const char *displayUrl = nullptr)
+                {
+                    ImGui::PushID(label);
+                    ImGui::TableNextRow(ImGuiTableRowFlags_None, 32 * scale);
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%s", Text(label));
+                    ImGui::TableNextColumn();
+                    if (url)
+                    {
+                        ImGui::PushStyleColor(ImGuiCol_TextLink, accent);
+                        if (ImGui::TextLink(value))
+                        {
+                            const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", url, nullptr, nullptr, SW_SHOWNORMAL));
+                            failedLink = result > 32 ? nullptr : displayUrl;
+                            if (result <= 32)
+                                Log(std::format("About: could not open {} ({})", displayUrl, result));
+                        }
+                        const auto end = ImGui::GetItemRectMax();
+                        const auto top = ImGui::GetItemRectMin();
+                        const ImVec2 icon(end.x + 8 * scale, top.y + 4 * scale);
+                        auto *draw = ImGui::GetWindowDrawList();
+                        const auto color = ImGui::GetColorU32(accent);
+                        draw->AddLine(ImVec2(icon.x, icon.y + 3 * scale), ImVec2(icon.x, icon.y + 11 * scale), color, scale);
+                        draw->AddLine(ImVec2(icon.x, icon.y + 11 * scale), ImVec2(icon.x + 8 * scale, icon.y + 11 * scale), color, scale);
+                        draw->AddLine(ImVec2(icon.x + 8 * scale, icon.y + 11 * scale), ImVec2(icon.x + 8 * scale, icon.y + 8 * scale), color, scale);
+                        draw->AddLine(ImVec2(icon.x + 3 * scale, icon.y), ImVec2(icon.x + 11 * scale, icon.y), color, scale);
+                        draw->AddLine(ImVec2(icon.x + 11 * scale, icon.y), ImVec2(icon.x + 11 * scale, icon.y + 8 * scale), color, scale);
+                        draw->AddLine(ImVec2(icon.x + 4 * scale, icon.y + 7 * scale), ImVec2(icon.x + 11 * scale, icon.y), color, scale);
+                        ImGui::PopStyleColor();
+                        if (ImGui::IsItemHovered() || ImGui::IsItemFocused())
+                            ImGui::SetTooltip("%s", displayUrl);
+                    }
+                    else
+                        ImGui::TextUnformatted(value);
+                    ImGui::PopID();
+                };
+                row("作者", "小莫");
+                row("LICENSE", "GNU GPL v3", L"https://github.com/GlossMod/GlossTrainer/blob/master/LICENSE", "https://github.com/GlossMod/GlossTrainer/blob/master/LICENSE");
+                row("开源地址", "github.com/GlossMod/GlossTrainer", L"https://github.com/GlossMod/GlossTrainer", "https://github.com/GlossMod/GlossTrainer");
+                row("下载地址", "Releases", L"https://github.com/GlossMod/GlossTrainer/releases", "https://github.com/GlossMod/GlossTrainer/releases");
+                row("赞助作者", "sponsor.aoe.top", L"https://sponsor.aoe.top/", "https://sponsor.aoe.top/");
+                row("申请制作游戏修改器", "glossmod.com/commissions", L"https://www.glossmod.com/commissions", "https://www.glossmod.com/commissions");
+                ImGui::EndTable();
+            }
+            EndCard();
+            if (failedLink)
+            {
+                ImGui::TextWrapped("%s", Text("无法打开链接，请手动访问："));
+                ImGui::TextWrapped("%s", failedLink);
+            }
+            if (state.status == update::Status::UpdateRequired)
+            {
+                if (ImGui::Button(UiLabel("前往 GitHub 下载"), ImVec2(220 * scale, 36 * scale)))
+                    update::OpenReleasePage();
+            }
+        }
+        void CancelPendingUiForUpdate()
+        {
             // A modal opened before the asynchronous result must not leave an invisible
             // input blocker above this page, or keep recording the menu shortcut.
             if (features::AnyHotkeyCapture())
@@ -1820,6 +1933,15 @@ namespace gloss::overlay
                     ImGui::CloseCurrentPopup();
                     ImGui::EndPopup();
                 }
+            }
+        }
+        void UpdateRequiredPage(float scale)
+        {
+            if (trans::NeedsExclusiveControl())
+            {
+                if (ImGui::Button(UiLabel("恢复悟空"), ImVec2(132 * scale, 32 * scale)))
+                    RecordExtensionResult(trans::Restore());
+                ImGui::TextWrapped("%s", localization::Translate(trans::GetStatus().message).c_str());
             }
             const auto state = update::GetSnapshot();
             ImGui::Dummy(ImVec2(0, 12 * scale));
@@ -2042,29 +2164,32 @@ namespace gloss::overlay
                           ImVec2(closePosition.x + 10 * scale, closePosition.y + 22 * scale), closeColor, 1.5f * scale);
             ImGui::SetCursorPos(ImVec2(8 * scale, 88 * scale));
             ImGui::BeginGroup();
-            const char *pages[] = {Text("概览"), Text("修改功能"), Text("物品"), Text("传送"), Text("七十二变（实验性）"), Text("设置")};
-            ImGui::BeginDisabled(updateRequired);
+            const char *pages[] = {Text("概览"), Text("修改功能"), Text("物品"), Text("传送"), Text("七十二变（实验性）"), Text("设置"), Text("关于")};
             for (int index = 0; index < static_cast<int>(std::size(pages)); ++index)
             {
+                // About and the update prompt remain accessible while gameplay is gated.
+                ImGui::BeginDisabled(updateRequired && index != 0 && index != 6);
                 ImGui::PushID(index);
                 const bool selected = index == page;
                 if (NavigationItem(pages[index], index, selected, scale))
                     page = index;
                 ImGui::PopID();
+                ImGui::EndDisabled();
             }
-            ImGui::EndDisabled();
             ImGui::EndGroup();
             if (page != 4 || updateRequired)
                 trans::hotkeys::CancelCapture();
             ImGui::SetCursorPos(ImVec2(184 * scale, 88 * scale));
             ImGui::BeginChild("content", ImVec2(752 * scale, 520 * scale), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+            if (updateRequired)
+                CancelPendingUiForUpdate();
             if (!updateRequired && (page == 0 || page == 5))
             {
                 Label(pages[page], 28, ImGui::GetStyleColorVec4(ImGuiCol_Text));
                 ImGui::TextDisabled(page == 0 ? Text("游戏内工具面板") : Text("让界面更合你的习惯"));
                 ImGui::Dummy(ImVec2(0, 10 * scale));
             }
-            if (updateRequired)
+            if (updateRequired && page != 6)
                 UpdateRequiredPage(scale);
             else if (page == 0)
                 Overview(renderer, scale);
@@ -2076,8 +2201,10 @@ namespace gloss::overlay
                 TravelPage(scale);
             else if (page == 4)
                 TransformationPage(scale);
-            else
+            else if (page == 5)
                 SettingsPage(scale);
+            else
+                AboutPage(scale);
             ImGui::EndChild();
             ImGui::SetCursorPos(ImVec2(24 * scale, 643 * scale));
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9 * scale, 4 * scale));
@@ -2100,7 +2227,7 @@ namespace gloss::overlay
                                   3 * scale, ImGui::GetColorU32(hotkeysEnabled ? Color(99, 185, 75) : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)));
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 16 * scale);
             ImGui::TextDisabled("%s", updateRequired ? Text("请更新后使用") : hotkeysEnabled ? Text("快捷键可用")
-                                                                                       : Text("快捷键已禁用"));
+                                                                                             : Text("快捷键已禁用"));
             if (ImGui::IsItemHovered() && !updateRequired)
                 ImGui::SetTooltip(Text("Ctrl+Shift+Home 切换功能快捷键"));
             ImGui::End();

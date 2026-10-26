@@ -25,10 +25,10 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $root "$id/src") -Force | Out-Null
         [IO.File]::WriteAllText((Join-Path $root "$id/src/runtime.hpp"), 'inline constexpr char Version[] = "1.2.3";', $utf8)
         [IO.File]::WriteAllText((Join-Path $root "$id/tests.lua"), ('target("' + $id + 'Tests")'), $utf8)
-        foreach ($file in @('readme.md', 'notes.md', 'package.ps1', 'package-tests.ps1', 'installer-tests.ps1')) {
+        foreach ($file in @('readme.md', 'readme_en.md', 'notes.md', 'package.ps1', 'package-tests.ps1', 'installer-tests.ps1')) {
             [IO.File]::WriteAllText((Join-Path $root "$id/$file"), 'fixture', $utf8)
         }
-        $entries += [ordered]@{ id = $id; name = $id; target = $id; versionFile = "$id/src/runtime.hpp"; validationFile = "$id/tests.lua"; readme = "$id/readme.md"; releaseNotes = "$id/notes.md"; packageScript = "$id/package.ps1"; packageTests = "$id/package-tests.ps1"; installerTests = "$id/installer-tests.ps1"; artifact = "build/release/$id.asi"; format = 'asi-win64' }
+        $entries += [ordered]@{ id = $id; name = $id; target = $id; versionFile = "$id/src/runtime.hpp"; validationFile = "$id/tests.lua"; readme = "$id/readme.md"; readmeEn = "$id/readme_en.md"; releaseNotes = "$id/notes.md"; packageScript = "$id/package.ps1"; packageTests = "$id/package-tests.ps1"; installerTests = "$id/installer-tests.ps1"; artifact = "build/release/$id.asi"; format = 'asi-win64' }
     }
     $registryPath = Join-Path $root 'Scripts/release-games.json'
     function Save-Registry { [IO.File]::WriteAllText($registryPath, ([ordered]@{ schemaVersion = 1; games = $entries } | ConvertTo-Json -Depth 5), $utf8) }
@@ -40,6 +40,12 @@ try {
         Check ($first.$field -cne $second.$field) "same-version games have independent $field"
     }
     Check ($first.tests.Count -eq 1 -and $first.tests[0] -ceq 'FirstGameTests' -and $second.tests[0] -ceq 'SecondGameTests') 'validation target inventories stay in their game'
+    Check ($first.readmeEn -ceq 'FirstGame/readme_en.md' -and $second.readmeEn -ceq 'SecondGame/readme_en.md') 'English README sources stay in their game'
+    $entries[1].readmeEn = 'FirstGame/readme_en.md'; Save-Registry
+    Reject 'cross-game English README rejected' { & $resolver -SourceRoot $root -Game SecondGame } 'must belong to its game directory'
+    $entries[1].readmeEn = 'SecondGame/missing-en.md'; Save-Registry
+    Reject 'missing English README rejected' { & $resolver -SourceRoot $root -Game SecondGame } 'Release source is missing'
+    $entries[1].readmeEn = 'SecondGame/readme_en.md'; Save-Registry
     Reject 'legacy unscoped tag rejected' { & $resolver -SourceRoot $root -Tag v1.2.3 } 'Release tag must be'
     Reject 'cross-game tag rejected' { & $resolver -SourceRoot $root -Game FirstGame -Tag SecondGame/v1.2.3 } 'does not match selected game'
     Reject 'source version mismatch rejected' { & $resolver -SourceRoot $root -Tag FirstGame/v1.2.4 } 'does not match source version'

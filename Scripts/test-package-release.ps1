@@ -87,7 +87,7 @@ try {
     Assert-Condition (Test-Path -LiteralPath $loaderPath -PathType Leaf) "Offline tests require a pinned official Loader ZIP. Pass -LoaderArchive with its cached path: $loaderPath"
     Assert-Condition ((Get-FileHash -LiteralPath $loaderPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $loaderSha256) 'Offline Loader archive does not match the pinned SHA-256'
     Pass 'offline Loader fixture matches the pinned official x64 release'
-    $fixtureInputs = @($sourceRelease.versionFile, $sourceRelease.readme, $sourceRelease.releaseNotes, $sourceRelease.validationFile,
+    $fixtureInputs = @($sourceRelease.versionFile, $sourceRelease.readme, $sourceRelease.readmeEn, $sourceRelease.releaseNotes, $sourceRelease.validationFile,
         'Scripts\release-games.json', 'Scripts\package-release.ps1', 'Scripts\resolve-release.ps1', 'Scripts\test-package-release.ps1', 'Scripts\test-install.ps1', 'LICENSE')
     $fixtureInputs += @(Get-ChildItem -LiteralPath (Join-Path $source 'licenses') -File | ForEach-Object { 'licenses\' + $_.Name })
     foreach ($relative in $fixtureInputs) {
@@ -97,6 +97,7 @@ try {
     }
     [IO.File]::WriteAllText((Join-Path $fixture 'README.md'), 'ROOT README MUST NOT SHIP')
     [IO.File]::AppendAllText((Join-Path $fixture $sourceRelease.readme), "`nRELEASE README FIXTURE`n", $utf8)
+    [IO.File]::AppendAllText((Join-Path $fixture $sourceRelease.readmeEn), "`nENGLISH RELEASE README FIXTURE`n", $utf8)
     # No fixtures access a game, download data, or write outside output/.
     foreach ($relative in @('data\reference.exe', 'data\reference.rar', 'Saved\save.sav', 'scripts\GlossTrainer\ui.ini', 'scripts\GlossTrainer\hotkeys.ini', 'scripts\GlossTrainer\trainer.ini', 'Scripts\install.ps1', 'BlackMythWukong\docs\install.md')) {
         $target = Join-Path $fixture $relative
@@ -116,12 +117,12 @@ try {
     Pass 'external checksum identifies the complete ZIP'
 
     $contents = Read-Zip $zipPath
-    $expected = @('version.dll', 'version.ini', 'README.md', 'scripts/GlossTrainer.asi')
+    $expected = @('version.dll', 'version.ini', 'README.md', 'readme_en.md', 'scripts/GlossTrainer.asi')
     Assert-Condition ($contents.Count -eq $expected.Count) 'ZIP contains files outside the explicit release allowlist'
     foreach ($path in $expected) { Assert-Condition ($contents.ContainsKey($path)) "Release file is missing: $path" }
     Assert-Condition (@($contents.Keys | Where-Object { $_ -match '\.asi$' }).Count -eq 1) 'ASI appears more than once'
     Assert-Condition ((Bytes-Sha256 $contents['scripts/GlossTrainer.asi']) -ceq (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()) 'Packaged ASI differs from the verified input'
-    Pass 'ZIP contains exactly Loader INI README and a single scripts ASI'
+    Pass 'ZIP contains exactly Loader INI bilingual READMEs and a single scripts ASI'
     $officialLoaderContents = Read-Zip $loaderPath
     Assert-Condition ($officialLoaderContents.Count -eq 1 -and $officialLoaderContents.ContainsKey('dinput8.dll')) 'Official Loader layout differs'
     Assert-Condition ((Bytes-Sha256 $contents['version.dll']) -ceq (Bytes-Sha256 $officialLoaderContents['dinput8.dll'])) 'Loader differs from the verified official ZIP'
@@ -149,6 +150,24 @@ try {
         Assert-Condition ($license.Length -gt 0 -and $packagedReadme.Contains($license)) "Full license text missing: $relative"
     }
     Pass 'README contains requested sections version attribution and all complete licenses'
+    $packagedReadmeEn = [Text.Encoding]::UTF8.GetString($contents['readme_en.md'])
+    foreach ($expectedText in @('ENGLISH RELEASE README FIXTURE', "GlossTrainer v$version", 'Black Myth: Wukong In-Game Trainer',
+        '## Installation', '## Features', '## Credits', '## About', '## licenses', 'Current version', 'Latest version', 'Author:',
+        'version.dll', 'scripts', 'GlossTrainer.asi', 'README.md')) {
+        Assert-Condition ($packagedReadmeEn.Contains($expectedText)) "English README required text missing: $expectedText"
+    }
+    foreach ($text in @($packagedReadme, $packagedReadmeEn)) {
+        foreach ($url in @('https://github.com/GlossMod/GlossTrainer/blob/master/LICENSE',
+            'https://github.com/GlossMod/GlossTrainer', 'https://sponsor.aoe.top/', 'https://www.glossmod.com/commissions')) {
+            Assert-Condition ($text.Contains($url)) "Bilingual README URL missing: $url"
+        }
+        foreach ($relative in @('LICENSE') + @($fixtureInputs | Where-Object { $_ -like 'licenses\*.txt' })) {
+            Assert-Condition ($text.Contains([IO.File]::ReadAllText((Join-Path $fixture $relative)))) "Bilingual README full license missing: $relative"
+        }
+        Assert-Condition (-not $text.Contains('ROOT README MUST NOT SHIP') -and $text -notmatch '\{\{[A-Z_]+\}\}') 'Bilingual README contains development text or unresolved placeholders'
+    }
+    Assert-Condition ($packagedReadme.Contains('(readme_en.md)') -and $packagedReadmeEn.Contains('(README.md)')) 'Bilingual README navigation is missing'
+    Pass 'both language READMEs contain about links versions complete licenses and reciprocal navigation'
 
     $manifestPath = Join-Path $releaseDirectory "$stem.manifest.json"
     Assert-Condition (-not $contents.ContainsKey('release-manifest.json')) 'Audit manifest leaked into the install ZIP'
@@ -197,16 +216,18 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $fixture "$secondGame/src") -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $fixture 'BlackMythWukong/src/runtime.hpp') -Destination (Join-Path $fixture "$secondGame/src/runtime.hpp")
     [IO.File]::WriteAllText((Join-Path $fixture "$secondGame/readme.md"), "SECOND GAME README v{{VERSION}}`n{{LICENSES}}", $utf8)
+    [IO.File]::WriteAllText((Join-Path $fixture "$secondGame/readme_en.md"), "SECOND GAME ENGLISH README v{{VERSION}}`n{{LICENSES}}", $utf8)
     [IO.File]::WriteAllText((Join-Path $fixture "$secondGame/tests.lua"), 'target("FixtureGameTests")', $utf8)
     $registryPath = Join-Path $fixture 'Scripts/release-games.json'
     $registry = [IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
-    $registry.games += [pscustomobject]@{ id = $secondGame; name = 'Fixture game'; target = $secondGame; versionFile = "$secondGame/src/runtime.hpp"; validationFile = "$secondGame/tests.lua"; readme = "$secondGame/readme.md"; releaseNotes = "$secondGame/readme.md"; packageScript = 'Scripts/package-release.ps1'; packageTests = 'Scripts/test-package-release.ps1'; installerTests = 'Scripts/test-install.ps1'; artifact = "build/release/$secondGame.asi"; format = 'asi-win64' }
+    $registry.games += [pscustomobject]@{ id = $secondGame; name = 'Fixture game'; target = $secondGame; versionFile = "$secondGame/src/runtime.hpp"; validationFile = "$secondGame/tests.lua"; readme = "$secondGame/readme.md"; readmeEn = "$secondGame/readme_en.md"; releaseNotes = "$secondGame/readme.md"; packageScript = 'Scripts/package-release.ps1'; packageTests = 'Scripts/test-package-release.ps1'; installerTests = 'Scripts/test-install.ps1'; artifact = "build/release/$secondGame.asi"; format = 'asi-win64' }
     [IO.File]::WriteAllText($registryPath, ($registry | ConvertTo-Json -Depth 6), $utf8)
     $secondStem = "GlossTrainer-$secondGame-v$version-win64"
     Invoke-Packager 'second registered game packages independently at the same version' @('-Artifact', $artifactPath, '-Game', $secondGame, '-SourceRoot', $fixture, '-OutputDirectory', $releaseDirectory, '-Tag', "$secondGame/v$version")
     $secondContents = Read-Zip (Join-Path $releaseDirectory "$secondStem.zip")
     $secondManifest = [IO.File]::ReadAllText((Join-Path $releaseDirectory "$secondStem.manifest.json")) | ConvertFrom-Json
     Assert-Condition ([Text.Encoding]::UTF8.GetString($secondContents['README.md']).Contains('SECOND GAME README') -and $secondManifest.game -ceq $secondGame) 'Second game used another games README or receipt'
+    Assert-Condition ([Text.Encoding]::UTF8.GetString($secondContents['readme_en.md']).Contains('SECOND GAME ENGLISH README')) 'Second game used another games English README'
     Assert-Condition ((Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $initialHash -and (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ceq $initialManifestHash) 'Second game overwrote the first game archive or manifest'
     Assert-Condition ([IO.File]::ReadAllText((Join-Path $releaseDirectory "$stem.SHA256SUMS.txt")) -ceq "$initialHash  $([IO.Path]::GetFileName($zipPath))`n") 'Second game overwrote the first game checksum'
     Pass 'same-directory cross-game packaging preserves the first archive checksum and manifest'
@@ -214,6 +235,16 @@ try {
     Invoke-Packager 'unscoped legacy tag cannot publish a game' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'legacy-tag'), '-Tag', "v$version") 1 'Release tag must be'
     Invoke-Packager 'mismatching tag is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-tag'), '-Tag', 'BlackMythWukong/v999.999.999') 1 'does not match source version'
     Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot 'bad-tag'))) 'Rejected tag created output'
+
+    $englishTemplate = Join-Path $fixture $sourceRelease.readmeEn
+    $englishOriginal = [IO.File]::ReadAllText($englishTemplate)
+    try {
+        [IO.File]::WriteAllText($englishTemplate, $englishOriginal.Replace('{{LICENSES}}', ''), $utf8)
+        Invoke-Packager 'English README without complete license placeholder is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-english')) 1 'exactly one LICENSES placeholder'
+        Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot 'bad-english'))) 'Invalid English template created output'
+        [IO.File]::WriteAllText($englishTemplate, $englishOriginal + "`n{{UNRESOLVED}}", $utf8)
+        Invoke-Packager 'English README with unresolved placeholder is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-english-placeholder')) 1 'unresolved placeholders'
+    } finally { [IO.File]::WriteAllText($englishTemplate, $englishOriginal, $utf8) }
 
     $original = [IO.File]::ReadAllBytes($artifactPath)
     $pe = [BitConverter]::ToUInt32($original, 0x3c)

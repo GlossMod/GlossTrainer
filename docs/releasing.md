@@ -1,10 +1,10 @@
 # 按游戏隔离的 GitHub 发布
 
-仓库为 [GlossMod/GlossTrainer](https://github.com/GlossMod/GlossTrainer)。每个游戏有独立版本、标签、构建验证、发行包和更新通道。`v0.3.4` 等历史标签保留，新发布只接受 `<Game>/vX.Y.Z`，例如 `BlackMythWukong/v0.3.5`。其他游戏可以同时使用 `v0.3.5`，互不占用版本号。
+仓库为 [GlossMod/GlossTrainer](https://github.com/GlossMod/GlossTrainer)。每个游戏有独立版本、标签、构建验证、发行包和更新通道。`v0.3.4` 等历史标签保留，新发布只接受 `<Game>/vX.Y.Z`，例如 `BlackMythWukong/v1.0.0`。其他游戏可以同时使用 `v1.0.0`，互不占用版本号。
 
 ## 注册游戏
 
-[Scripts/release-games.json](../Scripts/release-games.json) 是构建与打包入口注册表；[resolve-release.ps1](../Scripts/resolve-release.ps1) 在本地及 CI 中使用同一套解析与校验规则。游戏 ID 区分大小写，只能含字母和数字，以字母开头。每项指定本游戏的 target、版本源码、验证 target 列表所在文件、专用 README、releaseNotes、打包脚本、打包测试、安装测试和 Release ASI 路径。当前仅注册真实存在的 `BlackMythWukong`；第二游戏只在自动测试夹具内出现。
+[Scripts/release-games.json](../Scripts/release-games.json) 是构建与打包入口注册表；[resolve-release.ps1](../Scripts/resolve-release.ps1) 在本地及 CI 中使用同一套解析与校验规则。游戏 ID 区分大小写，只能含字母和数字，以字母开头。每项指定本游戏的 target、版本源码、验证 target 列表所在文件、中文 `readme` 和英文 `readmeEn` 模板、releaseNotes、打包脚本、打包测试、安装测试和 Release ASI 路径。当前仅注册真实存在的 `BlackMythWukong`；第二游戏只在自动测试夹具内出现。
 
 版本的唯一来源仍是各游戏自己的 `src/runtime.hpp` 中的 `Version`。注册表不再存一份版本，修改一个游戏的版本不会改变另一个游戏。解析器拒绝未知或重复游戏、裸标签、跨游戏标签、与源码不一致的版本、非法路径和不匹配的 ASI target。
 
@@ -22,8 +22,8 @@
 3. 审查候选包后，对同一提交推送与源码版本匹配的游戏标签：
 
 ```powershell
-git tag -a BlackMythWukong/v0.3.5 -m "Release BlackMythWukong v0.3.5"
-git push origin BlackMythWukong/v0.3.5
+git tag -a BlackMythWukong/v1.0.0 -m "Release BlackMythWukong v1.0.0"
+git push origin BlackMythWukong/v1.0.0
 ```
 
 不要移动已经发布的标签；修复使用该游戏下一个版本。发布命令不使用覆盖上传，重跑已经成功发布的标签会明确失败。
@@ -34,15 +34,15 @@ git push origin BlackMythWukong/v0.3.5
 
 默认打包输出为 `output/releases/<Game>/v<version>/`，候选 artifact 为 `release-candidate-<Game>-v<version>`。校验文件与清单也带游戏和版本；即使维护者显式让两个游戏写入同一输出目录，也不会覆盖彼此的包、校验或清单。例如：
 
-- `GlossTrainer-BlackMythWukong-v0.3.5-win64.zip`
-- `GlossTrainer-BlackMythWukong-v0.3.5-win64.SHA256SUMS.txt`
-- `GlossTrainer-BlackMythWukong-v0.3.5-win64.manifest.json`（仅候选 artifact / 本地审计）
+- `GlossTrainer-BlackMythWukong-v1.0.0-win64.zip`
+- `GlossTrainer-BlackMythWukong-v1.0.0-win64.SHA256SUMS.txt`
+- `GlossTrainer-BlackMythWukong-v1.0.0-win64.manifest.json`（仅候选 artifact / 本地审计）
 
 正式 Release 仅上传 ZIP 和对应 SHA256SUMS。发布说明从注册表中该游戏的 releaseNotes 文件读取；每次随本游戏版本维护，不使用跨游戏自动汇总提交的 generate-notes。发布前再次校验 game、tag、version、sourceRevision、ZIP 文件名与哈希，两个配置构建验证都通过才发布。Release 标题包含游戏；使用 `--latest=false`，不争用仓库全局 Latest。下载时按游戏名称和标签选择；GitHub 的全局 Latest 不代表任意游戏的最新版本。旧版修改器仍使用全局 Latest 时，应手工下载升级到支持游戏通道的版本。
 
 ## ASI 复制安装包
 
-ZIP 使用明确的四文件清单：
+ZIP 使用明确的五文件清单：
 
 ```text
 version.dll
@@ -50,11 +50,12 @@ version.ini
 scripts/
   GlossTrainer.asi
 README.md
+readme_en.md
 ```
 
 ASI 仅放一份，位于 `scripts/GlossTrainer.asi`。`version.ini` 固定 `DontLoadFromDllMain=1`、`LoadPlugins=1`、`LoadFromScriptsOnly=1` 和 `DebugLog=1`。当前黑神话包复制到实际 `b1/Binaries/Win64`；其他游戏的真实安装目录由对应游戏说明确定，不能因同为 ASI 就混用游戏适配文件。
 
-README 来自注册表指定的游戏模板。打包器替换 `{{VERSION}}`，将根 `LICENSE` 与 `licenses/*.txt` 的完整内容写入 `{{LICENSES}}`。不打包根开发 README、默认用户配置、日志、存档、安装清单、参考样本、安装脚本或额外许可目录。用户配置在运行时创建，覆盖更新 ZIP 不改已有配置。
+`README.md` 为默认中文说明，`readme_en.md` 为完整英文版本，来自注册表 `readme` / `readmeEn` 指定的对应游戏模板。两份说明互相链接，均含安装、功能、当前版本及最新版本获取方式、作者、主许可证、开源地址、赞助和委托制作入口。打包器分别替换 `{{VERSION}}`，并将根 `LICENSE` 与 `licenses/*.txt` 的完整内容写入两份模板的 `{{LICENSES}}`。缺少任一模板、许可占位或存在未替换占位时拒绝打包；解析器也拒绝跨游戏使用英文模板。不打包根开发 README、默认用户配置、日志、存档、安装清单、参考样本、安装脚本或额外许可目录。用户配置在运行时创建，覆盖更新 ZIP 不改已有配置。
 
 打包器固定 [Ultimate ASI Loader v10.0.0 x64 官方归档](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v10.0.0/Ultimate-ASI-Loader_x64.zip)，SHA-256 为 `3d5f2f2a47f456db878d17c1b135b0eae3209a7d8dabb0ff3f84e1b008c4f3a7`。归档只有 `dinput8.dll`，验证后改名 `version.dll`，不从开发机游戏目录读取 Loader。`-LoaderArchive` 允许离线指定同一官方归档，不能绕过固定哈希。Loader 和 ASI 均校验 PE32+ x64 DLL，ASI 须有本地 `InitializeASI` 导出。
 
@@ -64,12 +65,12 @@ README 来自注册表指定的游戏模板。打包器替换 `{{VERSION}}`，�
 # 不传 OutputDirectory 时自动使用游戏和版本目录。
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\package-release.ps1 `
   -Game BlackMythWukong -Artifact .\build\release\BlackMythWukong.asi `
-  -Tag BlackMythWukong/v0.3.5
+  -Tag BlackMythWukong/v1.0.0
 
 # 打包回归离线运行，不访问游戏。
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-package-release.ps1 `
   -Artifact .\build\release\BlackMythWukong.asi `
-  -LoaderArchive .\output\releases\BlackMythWukong\v0.3.5\cache\Ultimate-ASI-Loader\v10.0.0\Ultimate-ASI-Loader_x64.zip `
+  -LoaderArchive .\output\releases\BlackMythWukong\v1.0.0\cache\Ultimate-ASI-Loader\v10.0.0\Ultimate-ASI-Loader_x64.zip `
   -OutputDirectory .\output\game-release-validation
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-release-isolation.ps1 `

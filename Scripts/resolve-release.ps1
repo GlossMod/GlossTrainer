@@ -35,7 +35,7 @@ $ownedTargets = @{}
 $testInventories = @{}
 foreach ($registeredGame in $registry.games) {
     if ($registeredGame.target -cnotmatch '^[A-Za-z][A-Za-z0-9]*$') { throw 'Invalid registered game target.' }
-    foreach ($field in @('versionFile', 'validationFile', 'readme', 'releaseNotes')) {
+    foreach ($field in @('versionFile', 'validationFile', 'readme', 'readmeEn', 'releaseNotes')) {
         $relative = $registeredGame.$field.Replace('\', '/')
         if (-not $relative.StartsWith($registeredGame.id + '/', [StringComparison]::Ordinal)) { throw "Game source field '$field' must belong to its game directory." }
         [void](Resolve-SourceFile $relative)
@@ -58,14 +58,14 @@ if ($versionMatches.Count -ne 1) { throw 'Exactly one formal source version is r
 $version = $versionMatches[0].Groups[1].Value
 $expectedTag = "$Game/v$version"
 if ($Tag -and $Tag -cne $expectedTag) { throw "Release tag '$Tag' does not match source version '$expectedTag'." }
-foreach ($field in @('releaseNotes', 'readme', 'validationFile', 'packageScript', 'packageTests', 'installerTests')) { [void](Resolve-SourceFile $entry.$field) }
+foreach ($field in @('releaseNotes', 'readme', 'readmeEn', 'validationFile', 'packageScript', 'packageTests', 'installerTests')) { [void](Resolve-SourceFile $entry.$field) }
 if ($entry.artifact -cne "build/release/$($entry.target).asi") { throw 'Artifact must match the registered game target.' }
 $tests = $testInventories[$Game]
 $stem = "GlossTrainer-$Game-v$version-win64"
 $result = [pscustomobject][ordered]@{
     game = $Game; name = $entry.name; version = $version; tag = $expectedTag; versionTag = "v$version"
     target = $entry.target; versionFile = $entry.versionFile; validationFile = $entry.validationFile
-    readme = $entry.readme; releaseNotes = $entry.releaseNotes; packageScript = $entry.packageScript; packageTests = $entry.packageTests
+    readme = $entry.readme; readmeEn = $entry.readmeEn; releaseNotes = $entry.releaseNotes; packageScript = $entry.packageScript; packageTests = $entry.packageTests
     installerTests = $entry.installerTests; artifact = $entry.artifact; tests = $tests
     archiveName = "$stem.zip"; checksumName = "$stem.SHA256SUMS.txt"; manifestName = "$stem.manifest.json"
     outputDirectory = "output/releases/$Game/v$version"; candidateName = "release-candidate-$Game-v$version"

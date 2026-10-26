@@ -6,7 +6,7 @@
 
 namespace gloss
 {
-    inline constexpr char Version[] = "0.3.5";
+    inline constexpr char Version[] = "1.0.0";
     void SetModule(HMODULE module);
     HMODULE Module();
     const std::filesystem::path &DataDirectory();

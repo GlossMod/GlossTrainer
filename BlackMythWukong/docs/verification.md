@@ -1,6 +1,31 @@
 # 本机验证记录
 
-最近更新：2026-10-26。Windows 11 x64、Visual Studio 2022、RTX 5080，游戏 Steam build 21393610。
+最近更新：2026-10-27。Windows 11 x64、Visual Studio 2022、RTX 5080，游戏 Steam build 21393610。
+
+## 黑神话 v1.0.0 发布验证（2026-10-27）
+
+用户要求将当前关于页和双语发行包版本提升为 `1.0.0` 并发布。源码版本、模块 README 和发布说明已同步；版本标签为 `BlackMythWukong/v1.0.0`，继续使用独立游戏更新通道。
+
+本地 Debug / Release ASI 及注册的 19 个验证 target 均构建成功，两个配置共 38 次执行通过；安装器 18 项夹具回归通过，未访问真实游戏安装。[两配置测试结果](../../output/release-1.0.0-20261027/local-tests.json)、[本地构建哈希汇总](../../output/release-1.0.0-20261027/local-summary.json)、[安装回归日志](../../output/release-1.0.0-20261027/installer-tests.log)。本地 PowerShell 7 打包回归 29 项通过，验证双语五文件结构、完整许可、固定 Loader 及拒绝错误输入等路径；[打包日志](../../output/release-1.0.0-20261027/local-packaging-tests.log)。
+
+界面结构和输入逻辑沿用下节已验证实现，本轮仅改变版本与发布文档；未重复游戏内验证。正式发布使用 GitHub 对已提交源码的干净构建及附件校验结果。
+
+## 关于页面与双语发行说明（2026-10-27）
+
+新增“关于”导航，按现有亮暗主题显示版本信息和项目信息两张带内边距的卡片。当前版本来自 `Version`，最新版本复用本游戏更新检查结果，不把随包版本冒充在线最新版本；尚未获取结果时显示占位，失败时只显示“检查更新失败”，不限制使用。作者为小莫，主 LICENSE、源码、下载、赞助和委托制作入口均可点击，并在悬停时显示完整地址。保留工作区同时新增的下载地址，将卡片调整为六行，避免最后一行裁切。成功确认新版后，关于页和更新提示仍可访问，功能层的强制更新限制保持生效。
+
+实现前使用 `custom-imagegen`，固定 `model_providers.custom` / `gpt-image-2.5`，生成并查看[亮暗原型](../../output/about-page-20261027/about-prototype.png)；[最终提示词](../../output/about-page-20261027/prototype-prompt.txt)记录页面、文本、颜色和留白要求。
+
+项目及游戏 README 已加入关于信息。发行包默认中文 `README.md`，另附完整英文 `readme_en.md`，两份均含当前版本、最新版本获取方式、安装、功能、作者、四个链接及项目和依赖的完整许可证。注册表、打包器和跨游戏隔离校验同步支持独立英文模板；包内精确五文件，审计清单继续留在 ZIP 外。
+
+- Debug / Release 最终 ASI、LocalizationTests 和 UpdateTests 构建及测试通过；覆盖翻译完整性和占位符、游戏版本通道、可信下载地址、分页和网络失败后的恢复。[Debug 测试结果](../../output/about-page-20261027/tests-debug-final.json)、[Release 测试结果](../../output/about-page-20261027/tests-release-final.json)。
+- Windows PowerShell 5.1 与 PowerShell 7 的打包回归各 29 项、发行隔离回归各 29 项通过；覆盖双语互链、完整许可证、精确五文件、英文模板缺失 / 坏占位及跨游戏模板拒绝等。[打包及隔离汇总](../../output/about-page-20261027/packaging-results.json)。
+- DX11 可视夹具的 8 组截图通过，覆盖亮暗 × 中英文的当前版本状态，以及空闲、检查中、失败、强制更新；版本检查结果由夹具提供，没有请求线上版本。英文按钮按文本宽度自适应，六行信息及底部留白完整。[实际亮暗截图](../../output/about-page-20261027/about-light-dark.png)、[状态矩阵和独立代码审查](../../output/about-page-20261027/visual-validation.json)。可视夹具直接控制显示，不将截图成功当作输入验证通过；源文件归档在根 `output/about-page-20261027/fixture-sources/`。
+- 前台窗口条件下的单次输入宿主测试通过显示 / 隐藏、按住键再开菜单、尺寸变化、最小化及恢复；[原始日志](../../output/about-page-20261027/screenshots/single-visible/GlossTrainer.Host.log)。后台启动下曾因前台校验拒绝菜单键而失败，失败证据保留在同一截图目录的 `attempt-hidden-foreground/` 和 `attempt-stale-parity/`；可视矩阵与输入测试分开记录。本轮没有新增 DX12 宿主测试，也不据此宣称游戏实测通过。
+
+最终本地[测试包](../../output/about-page-20261027/package-final/GlossTrainer-BlackMythWukong-v0.3.5-win64.zip)含五个文件，ZIP SHA-256 为 `ef310406be6e1ea281ee42ff81aa7b7222160ba94cd5c2492742570d4c0a9771`。包内 Release ASI 为 x64，导出 `InitializeASI`，哈希与最终构建一致；最终打包回归在 PowerShell 5.1 / 7 各复验 29 项。[最终源码 / 构建哈希与测试汇总](../../output/about-page-20261027/results.json)、[包回执](../../output/about-page-20261027/package-final/GlossTrainer-BlackMythWukong-v0.3.5-win64.manifest.json)。清单的源码提交为 null，表明它来自当前未提交工作区。
+
+本轮为本地待发布变更，沿用源码版本 v0.3.5，未安装游戏、未分配新标签，也未创建或覆盖 GitHub Release。游戏内显示与浏览器打开效果未作为本次实机通过项。
 
 ## 游戏专属文档归档（2026-10-26）
 

@@ -198,14 +198,19 @@ foreach ($license in $licenseFiles) {
 foreach ($requiredLicense in @('imgui.txt', 'minhook.txt', 'nlohmann_json.txt', 'ultimate_asi_loader.txt')) {
     if ($requiredLicense -cnotin @($licenseFiles | ForEach-Object { $_.Name })) { throw "Required license is missing: $requiredLicense" }
 }
-$readmeFile = Join-Path $source $release.readme
-Assert-RegularFile $readmeFile
-$readme = [IO.File]::ReadAllText($readmeFile)
-if ([regex]::Matches($readme, '\{\{VERSION\}\}').Count -eq 0 -or [regex]::Matches($readme, '\{\{LICENSES\}\}').Count -ne 1) {
-    throw 'Release README requires VERSION and exactly one LICENSES placeholder.'
+function Read-ReleaseReadme([string]$Relative) {
+    $readmeFile = Join-Path $source $Relative
+    Assert-RegularFile $readmeFile
+    $readme = [IO.File]::ReadAllText($readmeFile)
+    if ([regex]::Matches($readme, '\{\{VERSION\}\}').Count -eq 0 -or [regex]::Matches($readme, '\{\{LICENSES\}\}').Count -ne 1) {
+        throw "Release README requires VERSION and exactly one LICENSES placeholder: $Relative"
+    }
+    $readme = $readme.Replace('{{VERSION}}', $version).Replace('{{LICENSES}}', $licenses.ToString())
+    if ($readme -match '\{\{[A-Z_]+\}\}') { throw "Release README has unresolved placeholders: $Relative" }
+    return $readme
 }
-$readme = $readme.Replace('{{VERSION}}', $version).Replace('{{LICENSES}}', $licenses.ToString())
-if ($readme -match '\{\{[A-Z_]+\}\}') { throw 'Release README has unresolved placeholders.' }
+$readme = Read-ReleaseReadme $release.readme
+$readmeEn = Read-ReleaseReadme $release.readmeEn
 $utf8 = New-Object Text.UTF8Encoding($false)
 if (Test-Path -LiteralPath $destination) { Assert-RegularDirectory $destination }
 else { New-Item -ItemType Directory -Path $destination -Force | Out-Null }
@@ -228,6 +233,7 @@ Assert-X64Dll $loaderBytes
 $loaderIni = "[GlobalSets]`r`nDontLoadFromDllMain=1`r`nLoadPlugins=1`r`nLoadFromScriptsOnly=1`r`nDebugLog=1`r`n"
 $payload = @(
     [pscustomobject]@{ path = 'README.md'; bytes = $utf8.GetBytes($readme) }
+    [pscustomobject]@{ path = 'readme_en.md'; bytes = $utf8.GetBytes($readmeEn) }
     [pscustomobject]@{ path = 'scripts/GlossTrainer.asi'; bytes = $artifactBytes }
     [pscustomobject]@{ path = 'version.dll'; bytes = $loaderBytes }
     [pscustomobject]@{ path = 'version.ini'; bytes = [Text.Encoding]::ASCII.GetBytes($loaderIni) }

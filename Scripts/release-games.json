@@ -8,6 +8,7 @@
       "versionFile": "BlackMythWukong/src/runtime.hpp",
       "validationFile": "BlackMythWukong/validation/xmake.lua",
       "readme": "BlackMythWukong/docs/release-readme.md",
+      "readmeEn": "BlackMythWukong/docs/release-readme-en.md",
       "releaseNotes": "BlackMythWukong/docs/release-notes.md",
       "packageScript": "Scripts/package-release.ps1",
       "packageTests": "Scripts/test-package-release.ps1",

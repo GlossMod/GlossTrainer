@@ -2,6 +2,8 @@
 
 GlossTrainer v{{VERSION}} · Windows x64
 
+[简体中文（默认）](README.md) · [English](readme_en.md)
+
 ## 安装方法
 
 1. 正常退出游戏，解压发行包。
@@ -44,7 +46,15 @@ BlackMythWukong/
 
 **By: 小莫**
 
-项目：[GlossMod / GlossTrainer](https://github.com/GlossMod/GlossTrainer)
+## 关于
+
+- **当前版本号**：v{{VERSION}}。
+- **最新版本号**：打开修改器“关于”页查看检查结果，或访问[本游戏 GitHub Releases](https://github.com/GlossMod/GlossTrainer/releases?q=BlackMythWukong%2Fv&expanded=true)。本文记录随包版本，不将它标记为在线最新版本。
+- **作者：小莫**。
+- **主 LICENSE**：[GNU GPL v3](https://github.com/GlossMod/GlossTrainer/blob/master/LICENSE)。
+- **开源地址**：[GlossMod / GlossTrainer](https://github.com/GlossMod/GlossTrainer)。
+- **赞助作者**：[sponsor.aoe.top](https://sponsor.aoe.top/)。
+- **申请制作游戏修改器**：[GlossMod 委托制作](https://www.glossmod.com/commissions)。
 
 ## licenses
 

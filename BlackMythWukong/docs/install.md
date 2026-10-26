@@ -2,7 +2,7 @@
 
 ## 发行包复制安装
 
-新的发行打包流程将 `version.dll`、`version.ini`、`scripts/GlossTrainer.asi` 和 `README.md` 放入 ZIP。正常退出游戏，将 DLL、INI 和 scripts 文件夹复制到实际 `b1/Binaries/Win64`（与 `b1-Win64-Shipping.exe` 同级），然后启动游戏即可；Loader 已随包提供，无需安装时联网。历史发行包以各自包内 README 为准。
+新的发行打包流程将 `version.dll`、`version.ini`、`scripts/GlossTrainer.asi`、默认中文 `README.md` 和英文 `readme_en.md` 放入 ZIP。正常退出游戏，将 DLL、INI 和 scripts 文件夹复制到实际 `b1/Binaries/Win64`（与 `b1-Win64-Shipping.exe` 同级），然后启动游戏即可；Loader 已随包提供，无需安装时联网。历史发行包以各自包内 README 为准。
 
 更新也需先退出游戏；包内不含用户配置，不会覆盖 `scripts/GlossTrainer` 中已有设置。同名 DLL / INI 若来自其他插件，应先核对归属。复制安装不创建安装清单，卸载时先移除 `scripts/GlossTrainer.asi`，确认 Loader 文件仅供本项目使用后再移除 `version.dll` 和 `version.ini`，不要删除整个 scripts 目录。
 
