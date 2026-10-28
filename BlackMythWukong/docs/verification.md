@@ -12,6 +12,12 @@
 
 本轮没有安装或启动游戏；本地仍有游戏进程记录，安装器脚本的安全前置条件不满足，未终止进程或强行执行安装器回归。GitHub 干净构建将独立执行安装器回归。此前逐项实机与 UI 证据的覆盖范围及限制保留在下文，不将本轮单元测试作为新增角色的游戏内验收。
 
+GitHub 候选构建 [40655613488](https://github.com/GlossMod/GlossTrainer/actions/runs/40655613488) 已成功，源码提交 `f21ffe590eecfe09cbe504567fbfe0883a966d65`。Debug / Release 全部验证程序、安装器及 PowerShell 5.1 / 7 打包和发布通道隔离检查通过；候选包下载后完成五文件结构、逐文件大小及 SHA-256、PE 架构与导出、版本和完整许可核验。[候选包核验](../../output/release-1.1.0-20261028/manual-candidate-verification.json)、[CI 作业](../../output/release-1.1.0-20261028/manual-jobs-final.json)。
+
+同一提交已推送标签 `BlackMythWukong/v1.1.0`；[正式流水线 40656568699](https://github.com/GlossMod/GlossTrainer/actions/runs/40656568699) 的构建、测试、安装器、打包与发布全部成功。正式版于北京时间 **2026-10-28 16:30:14** 发布：[v1.1.0 下载页](https://github.com/GlossMod/GlossTrainer/releases/tag/BlackMythWukong/v1.1.0)。Release 标题、用户提供的四条更新日志及附件列表回读一致；已完整下载线上 ZIP 和校验文件，逐项校验与该次 CI 产物清单一致。[正式候选核验](../../output/release-1.1.0-20261028/formal-candidate-verification.json)、[线上附件核验](../../output/release-1.1.0-20261028/published-verification.json)、[发布作业](../../output/release-1.1.0-20261028/formal-jobs-final.json)。
+
+正式 ZIP SHA-256：`66490ba766b56c8b245aa66c2890824e208ea25fcd7d047c97b57971dd718f7b`。发布源码标签保持不动，本段属于发布完成后的验证记录。
+
 ## FModel PAK 角色目录与翻译扩展（2026-10-28，已安装，待游戏实测）
 
 通过 FModel MCP 的 Asset Registry 元数据和真实 PAK 文件交叉核对，扫描到 649 个 `BUTamerActor` 父类 Tamer 包；剔除 5 个明确的模板、空对象或测试包，生成 644 条离线候选。与旧参考 246 个唯一路径有 242 条重叠，合并为 648 个离线路径，净新增 **402 个目录路径**；其中 123 个新增路径来自 `/Game/00MainHZ/BossRush/Tamer`。目录计数包含阶段、连战、召唤和 NPC 变体，不能称为新增 402 个独立角色或已验证可玩角色。旧参考路径和稳定 ID 保持优先；被新表排除的旧参考测试资源仍保留兼容。[统计](../../output/transformation-catalog-fmodel-20261028/pak-catalog-report.json)、[逐路径覆盖](../../output/transformation-catalog-fmodel-20261028/coverage.csv)、[分析](../../output/transformation-catalog-fmodel-20261028/analysis.md)。
