@@ -35,9 +35,14 @@ namespace
     std::map<int, Binding> bindings;
     DWORD gameThreadId = GetCurrentThreadId();
     int failures{}, setterCalls{}, targetCalls{}, clearTargetCalls{}, inputParameter{};
+    int inputSpeedMode{2}, sprintInputFailureStage{};
+    std::uintptr_t sprintMethodAddress{};
     int findRefCalls{}, getEventCollectionCalls{}, getClearEventCalls{}, rpcReflectionAttempts{}, clearFailureStage{};
     std::uintptr_t eventCollectionManaged{}, clearCallbackManaged{};
     std::array<std::uintptr_t, 24> clearCallbackObject{};
+    std::array<std::uintptr_t, 4> facingCallbackObject{}, facingSubscriberObject{};
+    int facingCalls{}, facingFailureStage{};
+    gloss::gameplay::engine::Rotator facingRotation{};
     std::array<std::uintptr_t, 4> masterCallbackObject{}, activeCallbackObject{};
     std::array<std::uintptr_t, 4> masterSubscriberObject{}, activeSubscriberObject{};
     int weaponReadyCalls{}, weaponReadyFailure{}, weaponReadyFlipCall{};
@@ -50,7 +55,7 @@ namespace
     std::array<bool, 9> mmKeys{};
     std::vector<std::uint32_t> mmQueriedStates;
     bool mmReflection{}, mmMovePresent{true}, mmNodePresent{true}, mmGraphChanged{};
-    int mmReflectionFailure{}, mmQueryFailure{}, mmChangeStage{}, mmGraphCalls{};
+    int mmReflectionFailure{}, mmQueryFailure{}, mmChangeStage{}, mmGraphCalls{}, mmQueryEffectAt{};
     constexpr int animationMeshIndex = 100, mmNodeIndex = 101;
     std::vector<std::vector<gloss::gameplay::engine::Arg>> weaponRecords;
     std::map<int, Object *> weaponByIndex;
@@ -250,7 +255,11 @@ namespace gloss::gameplay
 namespace gloss::gameplay::aot
 {
     bool Ready() { return false; }
-    std::uintptr_t Method(std::uint32_t rid) { return simulateHookInstall ? 0x10000000ull + rid * 16ull : 0; }
+    std::uintptr_t Method(std::uint32_t rid)
+    {
+        if (rid == 0x11c09 && sprintMethodAddress) return sprintMethodAddress;
+        return simulateHookInstall ? 0x10000000ull + rid * 16ull : 0;
+    }
     std::uintptr_t RuntimeMethod(std::uint32_t) { return 0; }
     std::uintptr_t EngineMethod(std::uint32_t rid) { return simulateHookInstall ? 0x20000000ull + rid * 16ull : 0; }
 }
@@ -286,8 +295,9 @@ namespace gloss::gameplay::engine
         const auto it = bindings.find(weak.index);
         return it != bindings.end() && it->second.serial == weak.serial;
     }
-    bool Property(std::uintptr_t object, Arg &arg, bool)
+    bool Property(std::uintptr_t object, Arg &arg, bool write)
     {
+        CHECK(!write);
         if (mmReflection && object == proxy.Address() && std::string_view(arg.name) == "Mesh")
         {
             if (mmReflectionFailure == 1) return false;
@@ -422,9 +432,14 @@ namespace
         native::animationProbeMethods = {};
         native::motionMatchingSelectorReady.store(false);
         native::motionMatchingMethods = {};
+        native::facingEventReady.store(true);
+        native::sprintInputReady.store(true);
+        sprintMethodAddress = 0;
+        inputSpeedMode = 2;
+        sprintInputFailureStage = 0;
         animationMmData = {}; mmKeys = {}; mmQueriedStates.clear();
         mmReflection = mmGraphChanged = false; mmMovePresent = mmNodePresent = true;
-        mmReflectionFailure = mmQueryFailure = mmChangeStage = mmGraphCalls = 0;
+        mmReflectionFailure = mmQueryFailure = mmChangeStage = mmGraphCalls = mmQueryEffectAt = 0;
         animationSetting = animationCommon = animationMatching = animationEcs = {};
         animationGetterCalls = animationFailureStage = animationChangeStage = animationOwnerCalls = animationModeCalls = 0;
         animationRetire = animationDetach = animationNewSession = false;
@@ -446,8 +461,16 @@ namespace
         native::methods.receiveAction = reinterpret_cast<std::uintptr_t>(+[](std::uintptr_t, int) { CHECK(gcUnsafe); return battleAllowed ? 1 : 0; });
         native::methods.actionDesc = reinterpret_cast<std::uintptr_t>(+[](int id) { CHECK(gcUnsafe); return id == 42 ? reinterpret_cast<std::uintptr_t>(descriptor.data()) : 0; });
         native::methods.firstParam = reinterpret_cast<std::uintptr_t>(+[](std::uintptr_t value, int index) {
-            CHECK(gcUnsafe && value == reinterpret_cast<std::uintptr_t>(parameters.data()) && index == 0);
-            return inputParameter;
+            CHECK(gcUnsafe && value == reinterpret_cast<std::uintptr_t>(parameters.data()) && (index == 0 || index == 1));
+            if (index == 1)
+            {
+                if (sprintInputFailureStage == 1) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+                if (sprintInputFailureStage == 2) native::ResetSprintInput();
+                if (sprintInputFailureStage == 3) CHECK(native::SetProxy({1, 7}));
+                if (sprintInputFailureStage == 4) ++bindings[2].serial;
+                if (sprintInputFailureStage == 5) CHECK(native::SetInputOwner({2, 9}));
+            }
+            return index ? inputSpeedMode : inputParameter;
         });
         native::methods.getAxis = reinterpret_cast<std::uintptr_t>(+[](std::uintptr_t) { CHECK(gcUnsafe); return inputAxis; });
         native::methods.getEventCollection = reinterpret_cast<std::uintptr_t>(+[](std::uintptr_t value) {
@@ -455,6 +478,19 @@ namespace
             CHECK(gcUnsafe && (value == proxy.Managed() || value == player.Managed()));
             if (clearFailureStage == 1) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
             return eventCollectionManaged;
+        });
+        native::methods.forceFacingEvent = reinterpret_cast<std::uintptr_t>(+[](std::uintptr_t value) {
+            CHECK(gcUnsafe && value == other.Managed());
+            if (facingFailureStage == 2) ++bindings[1].serial;
+            if (facingFailureStage == 3) CHECK(native::SetProxy({1, 7}));
+            return reinterpret_cast<std::uintptr_t>(facingCallbackObject.data());
+        });
+        native::methods.invokeFacing = reinterpret_cast<std::uintptr_t>(+[](std::uintptr_t value, const gloss::gameplay::engine::Rotator *rotation) {
+            CHECK(gcUnsafe && value == reinterpret_cast<std::uintptr_t>(facingCallbackObject.data()) && rotation);
+            ++facingCalls;
+            facingRotation = *rotation;
+            if (facingFailureStage == 1) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+            if (facingFailureStage == 4) CHECK(native::SetProxy({1, 7}));
         });
         native::methods.clearTargetEvent = reinterpret_cast<std::uintptr_t>(+[](std::uintptr_t value) {
             ++getClearEventCalls;
@@ -486,6 +522,13 @@ namespace
         clearCallbackObject[0] = 1; // Plain managed GSDel_Void: no UObject Address.
         eventCollectionManaged = other.Managed();
         clearCallbackManaged = reinterpret_cast<std::uintptr_t>(clearCallbackObject.data());
+        facingCallbackObject = {};
+        facingCallbackObject[0] = 1;
+        facingSubscriberObject = {};
+        facingSubscriberObject[0] = 1;
+        facingCallbackObject[0x10 / 8] = reinterpret_cast<std::uintptr_t>(facingSubscriberObject.data());
+        facingCalls = facingFailureStage = 0;
+        facingRotation = {};
         weaponRecords.clear();
         weaponByIndex.clear();
         weaponExtent = weaponFailureStage = weaponMasterCalls = weaponActiveCalls = weaponLookupCalls = 0;
@@ -875,19 +918,22 @@ namespace
             CHECK(gcUnsafe && data == reinterpret_cast<std::uintptr_t>(animationMmData.data()) && setting == reinterpret_cast<std::uintptr_t>(animationMatching.data()));
             CHECK(state >= 3 && state <= 8); // Full register value, never None or uninitialized high bits.
             mmQueriedStates.push_back(state);
-            if (mmQueryFailure == 1) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
-            if (mmQueryFailure == 2) return 2;
-            if (mmChangeStage == 1) child.managed[0xb0 / 8] = 0;
-            if (mmChangeStage == 2) animationSetting[0x10 / 8] = 0;
-            if (mmChangeStage == 3) animationSetting[0x20 / 8] = 0;
-            if (mmChangeStage == 4) mmNode.managed[0xd0 / 8] = 0;
-            if (mmChangeStage == 5) reinterpret_cast<std::uint8_t *>(animationCommon.data())[0x41] = 10;
-            if (mmChangeStage == 6) ++bindings.at(mmNodeIndex).serial;
-            if (mmChangeStage == 7) mmNode.owner = &player;
-            if (mmChangeStage == 8) CHECK(native::SetProxy({1, 7}));
-            if (mmChangeStage == 9) mmGraphChanged = true;
-            if (mmChangeStage == 10) ++bindings[4].serial;
-            if (mmChangeStage == 11) ++bindings.at(animationMeshIndex).serial;
+            if (!mmQueryEffectAt || mmQueriedStates.size() == static_cast<std::size_t>(mmQueryEffectAt))
+            {
+                if (mmQueryFailure == 1) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+                if (mmQueryFailure == 2) return 2;
+                if (mmChangeStage == 1) child.managed[0xb0 / 8] = 0;
+                if (mmChangeStage == 2) animationSetting[0x10 / 8] = 0;
+                if (mmChangeStage == 3) animationSetting[0x20 / 8] = 0;
+                if (mmChangeStage == 4) mmNode.managed[0xd0 / 8] = 0;
+                if (mmChangeStage == 5) reinterpret_cast<std::uint8_t *>(animationCommon.data())[0x41] = 10;
+                if (mmChangeStage == 6) ++bindings.at(mmNodeIndex).serial;
+                if (mmChangeStage == 7) mmNode.owner = &player;
+                if (mmChangeStage == 8) CHECK(native::SetProxy({1, 7}));
+                if (mmChangeStage == 9) mmGraphChanged = true;
+                if (mmChangeStage == 10) ++bindings[4].serial;
+                if (mmChangeStage == 11) ++bindings.at(animationMeshIndex).serial;
+            }
             return mmKeys[state] || mmKeys[state >= 6 ? 1 : 2] ? 1 : 0;
         });
     }
@@ -936,13 +982,94 @@ namespace
         CHECK(missing.current && missing.required && !missing.valid && !missing.usesLocked && missing.state == -1);
         CHECK(mmQueriedStates == std::vector<std::uint32_t>({8, 5}));
         Reset(); SeedMotionMatchingSelector(); mmKeys[7] = true;
-        const auto freeOnly = native::SelectMotionMatching(proxy.Address(), 1, false);
-        CHECK(freeOnly.current && freeOnly.required && !freeOnly.valid && mmQueriedStates == std::vector<std::uint32_t>({4}));
+        const auto freeToLock = native::SelectMotionMatching(proxy.Address(), 1, false);
+        CHECK(freeToLock.current && freeToLock.required && freeToLock.valid && freeToLock.usesLocked && freeToLock.state == 7);
+        CHECK(mmQueriedStates == std::vector<std::uint32_t>({4, 7}));
         Reset(); SeedMotionMatchingSelector();
         reinterpret_cast<std::uint8_t *>(animationCommon.data())[0x41] = 10;
         animationSetting[0x20 / 8] = 0; mmMovePresent = mmNodePresent = false;
         const auto otherMode = native::SelectMotionMatching(proxy.Address(), 1, true);
         CHECK(otherMode.current && !otherMode.required && !otherMode.valid && otherMode.state == -1 && !mmGraphCalls && mmQueriedStates.empty());
+    }
+    void TestMotionMatchingSelectorFreeInputFallsBackToOwnLockStates()
+    {
+        for (int speed = 0; speed <= 2; ++speed)
+            for (const bool genericLock : {false, true})
+            {
+                Reset(); SeedMotionMatchingSelector();
+                const auto freeState = static_cast<std::uint32_t>(3 + speed), lockState = static_cast<std::uint32_t>(6 + speed);
+                mmKeys[genericLock ? 1 : lockState] = true;
+                const auto setting = animationSetting, common = animationCommon, matching = animationMatching, data = animationMmData;
+                const auto selection = native::SelectMotionMatching(proxy.Address(), speed, false);
+                CHECK(selection.available && selection.current && selection.required && selection.valid && selection.usesLocked);
+                CHECK(selection.state == static_cast<int>(lockState) && mmQueriedStates == std::vector<std::uint32_t>({freeState, lockState}));
+                CHECK(animationSetting == setting && animationCommon == common && animationMatching == matching && animationMmData == data);
+                CHECK(gcEnterCalls == 1 && gcExitCalls == 1 && !gcUnsafe && gcEntries.empty());
+                CHECK(!setterCalls && !propSetterCalls && !propResetCalls && !propApplyCalls && !weaponMasterCalls && !weaponActiveCalls);
+                CHECK(!targetCalls && !clearTargetCalls && !getEventCollectionCalls && !getClearEventCalls);
+            }
+        Reset(); SeedMotionMatchingSelector(); mmKeys[1] = true; gcUnsafe = true;
+        const auto nested = native::SelectMotionMatching(proxy.Address(), 1, false);
+        CHECK(nested.current && nested.valid && nested.usesLocked && nested.state == 7);
+        CHECK(mmQueriedStates == std::vector<std::uint32_t>({4, 7}));
+        CHECK(gcEnterCalls == 1 && gcExitCalls == 1 && gcUnsafe && gcEntries.empty());
+        CHECK(!setterCalls && !propSetterCalls && !weaponMasterCalls && !weaponActiveCalls && !targetCalls && !clearTargetCalls);
+        gcUnsafe = false;
+    }
+    void TestMotionMatchingSelectorFreeInputPrefersFreeAndRejectsDifferentSpeeds()
+    {
+        for (int speed = 0; speed <= 2; ++speed)
+        {
+            const auto freeState = static_cast<std::uint32_t>(3 + speed), lockState = static_cast<std::uint32_t>(6 + speed);
+            for (const bool genericFree : {false, true})
+            {
+                Reset(); SeedMotionMatchingSelector();
+                mmKeys[genericFree ? 2 : freeState] = mmKeys[1] = mmKeys[lockState] = true;
+                const auto setting = animationSetting, common = animationCommon, matching = animationMatching, data = animationMmData;
+                const auto selection = native::SelectMotionMatching(proxy.Address(), speed, false);
+                CHECK(selection.available && selection.current && selection.required && selection.valid && !selection.usesLocked);
+                CHECK(selection.state == static_cast<int>(freeState) && mmQueriedStates == std::vector<std::uint32_t>({freeState}));
+                CHECK(animationSetting == setting && animationCommon == common && animationMatching == matching && animationMmData == data);
+                CHECK(gcEnterCalls == 1 && gcExitCalls == 1 && !gcUnsafe && gcEntries.empty());
+                CHECK(!setterCalls && !propSetterCalls && !propResetCalls && !propApplyCalls && !weaponMasterCalls && !weaponActiveCalls);
+                CHECK(!targetCalls && !clearTargetCalls && !getEventCollectionCalls && !getClearEventCalls);
+            }
+            for (int otherSpeed = 0; otherSpeed <= 2; ++otherSpeed)
+                if (otherSpeed != speed)
+                    for (const bool locked : {false, true})
+                    {
+                        Reset(); SeedMotionMatchingSelector();
+                        mmKeys[3 + otherSpeed] = mmKeys[6 + otherSpeed] = true;
+                        const auto setting = animationSetting, common = animationCommon, matching = animationMatching, data = animationMmData;
+                        const auto selection = native::SelectMotionMatching(proxy.Address(), speed, locked);
+                        const auto expected = locked ? std::vector<std::uint32_t>({lockState, freeState}) : std::vector<std::uint32_t>({freeState, lockState});
+                        CHECK(selection.available && selection.current && selection.required && !selection.valid && !selection.usesLocked && selection.state == -1);
+                        CHECK(mmQueriedStates == expected);
+                        CHECK(animationSetting == setting && animationCommon == common && animationMatching == matching && animationMmData == data);
+                        CHECK(gcEnterCalls == 1 && gcExitCalls == 1 && !gcUnsafe && gcEntries.empty());
+                        CHECK(!setterCalls && !propSetterCalls && !propResetCalls && !propApplyCalls && !weaponMasterCalls && !weaponActiveCalls);
+                        CHECK(!targetCalls && !clearTargetCalls && !getEventCollectionCalls && !getClearEventCalls);
+                    }
+        }
+    }
+    void TestMotionMatchingSelectorSecondQueryFailuresRemainUnknown()
+    {
+        for (const bool locked : {false, true})
+            for (const int failure : {1, 2})
+            {
+                Reset(); SeedMotionMatchingSelector();
+                mmKeys[locked ? 2 : 1] = true;
+                mmQueryEffectAt = 2; mmQueryFailure = failure;
+                const auto setting = animationSetting, common = animationCommon, matching = animationMatching, data = animationMmData;
+                const auto selection = native::SelectMotionMatching(proxy.Address(), 1, locked);
+                const auto expected = locked ? std::vector<std::uint32_t>({7, 4}) : std::vector<std::uint32_t>({4, 7});
+                CHECK(selection.available && !selection.current && !selection.required && !selection.valid && !selection.usesLocked && selection.state == -1);
+                CHECK(mmQueriedStates == expected);
+                CHECK(animationSetting == setting && animationCommon == common && animationMatching == matching && animationMmData == data);
+                CHECK(gcEnterCalls == 1 && gcExitCalls == 1 && !gcUnsafe && gcEntries.empty());
+                CHECK(!setterCalls && !propSetterCalls && !propResetCalls && !propApplyCalls && !weaponMasterCalls && !weaponActiveCalls);
+                CHECK(!targetCalls && !clearTargetCalls && !getEventCollectionCalls && !getClearEventCalls);
+            }
     }
     void TestMotionMatchingSelectorMissingDataAndFailuresRemainUnknown()
     {
@@ -981,13 +1108,18 @@ namespace
     }
     void TestMotionMatchingSelectorRejectsReferenceAndLifetimeReplacement()
     {
-        for (int changed = 1; changed <= 11; ++changed)
-        {
-            Reset(); SeedMotionMatchingSelector(); mmKeys[1] = true; mmChangeStage = changed;
-            const auto selection = native::SelectMotionMatching(proxy.Address(), 1, true);
-            CHECK(selection.available && !selection.current && !selection.valid && selection.state == -1);
-            CHECK(gcEnterCalls == gcExitCalls && !gcUnsafe && gcEntries.empty());
-        }
+        for (const int query : {1, 2})
+            for (int changed = 1; changed <= 11; ++changed)
+            {
+                Reset(); SeedMotionMatchingSelector(); mmKeys[1] = true; mmChangeStage = changed; mmQueryEffectAt = query;
+                const auto selection = native::SelectMotionMatching(proxy.Address(), 1, query == 1);
+                CHECK(selection.available && !selection.current && !selection.required && !selection.valid && !selection.usesLocked && selection.state == -1);
+                const auto expected = query == 1 ? std::vector<std::uint32_t>({7}) : std::vector<std::uint32_t>({4, 7});
+                CHECK(mmQueriedStates == expected);
+                CHECK(gcEnterCalls == 1 && gcExitCalls == 1 && !gcUnsafe && gcEntries.empty());
+                CHECK(!setterCalls && !propSetterCalls && !propResetCalls && !propApplyCalls && !weaponMasterCalls && !weaponActiveCalls);
+                CHECK(!targetCalls && !clearTargetCalls && !getEventCollectionCalls && !getClearEventCalls);
+            }
     }
     void TestAnimationProbeOptionalFingerprintsNeverDisableGameplay()
     {
@@ -1709,6 +1841,55 @@ namespace
         CHECK(!native::SetTarget(proxy.Address(), 0));
         CHECK(getEventCollectionCalls == 0 && getClearEventCalls == 0 && clearTargetCalls == 0 && rpcReflectionAttempts == 0);
     }
+    void TestLocomotionFacingDispatchUsesHorizontalYawAndRestoresGc()
+    {
+        Reset();
+        const gloss::gameplay::extensions::Vec3 direction{0.0, 2.0, 99.0};
+        CHECK(native::SetLocomotionFacing(proxy.Address(), direction));
+        CHECK(facingCalls == 1 && std::abs(facingRotation.pitch) < 1e-9 &&
+              std::abs(facingRotation.yaw - 90.0) < 1e-9 && std::abs(facingRotation.roll) < 1e-9);
+        CHECK(!gcUnsafe && gcEntries.empty());
+        CHECK(!native::SetLocomotionFacing(proxy.Address(), gloss::gameplay::extensions::Vec3{0.0, 0.0, 1.0}));
+        CHECK(!native::SetLocomotionFacing(proxy.Address(), gloss::gameplay::extensions::Vec3{std::numeric_limits<double>::quiet_NaN(), 1.0, 0.0}));
+        CHECK(facingCalls == 1);
+
+        Reset();
+        facingCallbackObject[0x10 / 8] = 0;
+        CHECK(!native::SetLocomotionFacing(proxy.Address(), gloss::gameplay::extensions::Vec3{1.0, 0.0, 0.0}));
+        CHECK(facingCalls == 0 && !gcUnsafe && gcEntries.empty());
+
+        Reset();
+        facingFailureStage = 1;
+        CHECK(!native::SetLocomotionFacing(proxy.Address(), gloss::gameplay::extensions::Vec3{-1.0, 0.0, 0.0}));
+        CHECK(facingCalls == 1 && !gcUnsafe && gcEntries.empty());
+
+        Reset();
+        native::facingEventReady.store(false);
+        CHECK(!native::SetLocomotionFacing(proxy.Address(), gloss::gameplay::extensions::Vec3{1.0, 0.0, 0.0}));
+        CHECK(facingCalls == 0 && !gcUnsafe && gcEntries.empty());
+    }
+    void TestLocomotionFacingRejectsReusedIdentityAndReentrantSessionChanges()
+    {
+        for (int stage : {2, 3, 4})
+        {
+            Reset(); facingFailureStage = stage;
+            CHECK(!native::SetLocomotionFacing(proxy.Address(), {1., 1., 0.}));
+            CHECK(facingCalls == (stage == 4 ? 1 : 0));
+            CHECK(!gcUnsafe && gcEntries.empty() && gcEnterCalls == gcExitCalls);
+        }
+        Reset();
+        CHECK(!native::SetLocomotionFacing(player.Address(), {1., 0., 0.}));
+        CHECK(!native::SetLocomotionFacing(other.Address(), {1., 0., 0.}));
+        CHECK(!facingCalls && !getEventCollectionCalls);
+        Reset(); simulateHookInstall = true;
+        CHECK(native::VerifyFacingEvent() && native::Ready());
+        for (auto rid : {0x30afu, 0x15313u})
+        {
+            rejectedFingerprint = gloss::gameplay::aot::Method(rid);
+            CHECK(!native::VerifyFacingEvent() && native::Ready());
+            CHECK(!native::facingEventReady && !native::methods.forceFacingEvent && !native::methods.invokeFacing);
+        }
+    }
     void TestOwnedChildIsolationAndDeathCleanup()
     {
         Reset();
@@ -2051,11 +2232,148 @@ namespace
         native::ClearProxy();
         CHECK(native::MovementAxes().forward == 0.f && native::MovementAxes().right == 0.f);
     }
+    void TestMappedSprintHoldReleaseResetAndPrediction()
+    {
+        Reset(); CHECK(native::SetInputOwner({2, 9}));
+        struct Frame { Context context{}; std::array<std::byte, 64> stack{}; } frame;
+        frame.context.rdx = 42; frame.context.r8 = 2;
+        inputParameter = 2; inputSpeedMode = 2;
+        native::SprintInput(frame.context, nullptr);
+        CHECK(frame.context.resume == native::returnStub && frame.context.rax == 1 && native::MovementAxes().sprint);
+        native::movement.forward = .75f; native::movement.right = -.5f;
+        native::movementTime = {GetTickCount64() - 251, GetTickCount64() - 251};
+        CHECK(native::MovementAxes().sprint && native::MovementAxes().forward == 0.f); // Hold does not expire with axes.
+        frame.context.r8 = 0;
+        native::SprintInput(frame.context, nullptr);
+        CHECK(native::MovementAxes().sprint);
+        for (const auto releaseEvent : {4, 5})
+        {
+            frame.context.r8 = 2; native::SprintInput(frame.context, nullptr);
+            battleAllowed = false;
+            frame.context.r8 = releaseEvent; native::SprintInput(frame.context, nullptr);
+            CHECK(!native::MovementAxes().sprint && frame.context.resume == native::returnStub);
+            battleAllowed = true;
+        }
+        frame.context.r8 = 2; native::SprintInput(frame.context, nullptr);
+        CHECK(native::MovementAxes().sprint);
+        std::uintptr_t prediction = 1;
+        CHECK(gloss::gameplay::Write(frame.context.rsp() + 0x28, prediction));
+        frame.context.r8 = 5; native::SprintInput(frame.context, nullptr);
+        CHECK(native::MovementAxes().sprint && frame.context.rax == 0); // Replayed release cannot clear live hold.
+        native::ResetSprintInput();
+        CHECK(!native::MovementAxes().sprint && native::movement.forward == .75f && native::movement.right == -.5f);
+        frame.context.r8 = 2; native::SprintInput(frame.context, nullptr);
+        CHECK(!native::MovementAxes().sprint); // Replayed press cannot re-enable after suppression.
+        prediction = 0; CHECK(gloss::gameplay::Write(frame.context.rsp() + 0x28, prediction));
+        native::SprintInput(frame.context, nullptr);
+        CHECK(native::MovementAxes().sprint); // A fresh live press resumes normally.
+        CHECK(native::SetInputOwner({}));
+        CHECK(!native::MovementAxes().sprint && !native::movement.sprint);
+        CHECK(!gcUnsafe && gcEntries.empty() && gcEnterCalls == gcExitCalls);
+    }
+    void TestMappedSprintToggleFollowsConfiguredEventsAndRejectsForeignActors()
+    {
+        Reset(); CHECK(native::SetInputOwner({2, 9}));
+        struct Frame { Context context{}; std::array<std::byte, 64> stack{}; } frame;
+        frame.context.rdx = 42; inputParameter = 2; inputSpeedMode = 1;
+        for (const auto configuredEvent : {2, 1, 5})
+        {
+            frame.context.r8 = configuredEvent;
+            native::SprintInput(frame.context, nullptr);
+            CHECK(native::MovementAxes().sprint);
+            const std::uintptr_t prediction = 1;
+            CHECK(gloss::gameplay::Write(frame.context.rsp() + 0x28, prediction));
+            native::SprintInput(frame.context, nullptr);
+            CHECK(native::MovementAxes().sprint && frame.context.rax == 0);
+            const std::uintptr_t live = 0;
+            CHECK(gloss::gameplay::Write(frame.context.rsp() + 0x28, live));
+            native::SprintInput(frame.context, nullptr);
+            CHECK(!native::MovementAxes().sprint); // Match the DB-selected callback, not hardcoded key/event.
+        }
+        inputManaged = other.Managed(); frame.context.resume = 0x7777;
+        native::SprintInput(frame.context, nullptr);
+        CHECK(frame.context.resume == 0x7777 && !native::MovementAxes().sprint);
+        inputManaged = player.Managed();
+        CHECK(native::SetInputOwner({})); frame.context.resume = 0x7777;
+        native::SprintInput(frame.context, nullptr);
+        CHECK(frame.context.resume == 0x7777 && !native::MovementAxes().sprint); // Ordinary retained-player behavior is untouched.
+        CHECK(native::SetInputOwner({2, 9}));
+        std::thread foreign([&] { native::SprintInput(frame.context, nullptr); }); foreign.join();
+        CHECK(frame.context.resume == 0x7777 && !native::MovementAxes().sprint);
+        native::SprintInput(frame.context, nullptr);
+        CHECK(native::MovementAxes().sprint);
+        std::thread resetForeign([] { native::ResetSprintInput(); }); resetForeign.join();
+        CHECK(native::MovementAxes().sprint);
+        native::ready.store(false); native::ResetSprintInput(); native::ready.store(true);
+        CHECK(!native::MovementAxes().sprint); // Cleanup remains usable if the adapter has failed.
+        native::SprintInput(frame.context, nullptr); CHECK(native::MovementAxes().sprint);
+        CHECK(native::SetProxy({1, 7})); CHECK(!native::MovementAxes().sprint && !native::movement.sprint);
+    }
+    void TestMappedSprintRejectsUnknownDescriptorsAndReentrantLifetimes()
+    {
+        for (int failure = 0; failure < 12; ++failure)
+        {
+            Reset(); CHECK(native::SetInputOwner({2, 9}));
+            struct Frame { Context context{}; std::array<std::byte, 64> stack{}; } frame;
+            frame.context.rdx = 42; frame.context.r8 = 2;
+            inputParameter = 2; inputSpeedMode = 2;
+            native::SprintInput(frame.context, nullptr); CHECK(native::MovementAxes().sprint);
+            native::ResetSprintInput();
+            if (failure == 0) inputParameter = 1; // Walk cannot modify the hidden player.
+            if (failure == 1) inputParameter = 9;
+            if (failure == 2) frame.context.rdx = 43;
+            if (failure == 3) parameters[0x18 / 8] = 1;
+            if (failure == 4) parameters[0x18 / 8] = 33;
+            if (failure == 5) descriptor[0x20 / 8] = 0;
+            if (failure >= 6 && failure <= 10) sprintInputFailureStage = failure - 5;
+            if (failure == 11) battleAllowed = false;
+            frame.context.resume = 0x7777;
+            native::SprintInput(frame.context, nullptr);
+            CHECK(!native::MovementAxes().sprint && !native::movement.sprint);
+            CHECK(frame.context.resume == native::returnStub && frame.context.rax == 0);
+            CHECK(!gcUnsafe && gcEntries.empty() && gcEnterCalls == gcExitCalls);
+        }
+        Reset(); CHECK(native::SetInputOwner({2, 9}));
+        struct Frame { Context context{}; std::array<std::byte, 64> stack{}; } frame;
+        frame.context.rdx = 42; frame.context.r8 = 2; inputParameter = 2;
+        native::sprintInputReady.store(false); frame.context.resume = 0x7777;
+        native::SprintInput(frame.context, nullptr);
+        CHECK(frame.context.resume == 0x7777 && !native::MovementAxes().sprint);
+        CHECK(native::Ready()); // Optional input failure cannot disable transformation/facing.
+    }
+    void TestSprintOptionalHookFingerprintAndInstallationIsolation()
+    {
+        CHECK(std::strlen(native::sprintInputFingerprint) == 1076 * 3 - 1);
+        for (int failure = 0; failure < 4; ++failure)
+        {
+            Reset(); simulateHookInstall = true;
+            CHECK(native::InstallHooks() && native::Hooks().size() == 21);
+            std::array<std::uint8_t, 1076> code{};
+            sprintMethodAddress = reinterpret_cast<std::uintptr_t>(code.data());
+            native::methods.firstParam = sprintMethodAddress + 0x300;
+            for (const auto call : {0x12c, 0x153})
+            {
+                code[call] = 0xe8;
+                const auto relative = static_cast<std::int32_t>(0x300 - (call + 5));
+                std::memcpy(code.data() + call + 1, &relative, sizeof(relative));
+            }
+            if (failure == 0) rejectedFingerprint = sprintMethodAddress;
+            if (failure == 1) code[0x153] = 0;
+            if (failure == 2) failHookAt = hookCreateCalls;
+            CHECK(native::InstallSprintInputHook() == (failure == 3));
+            CHECK(native::sprintInputReady.load() == (failure == 3));
+            CHECK(native::Ready() && native::Hooks().size() == (failure == 3 ? 22 : 21));
+            if (failure == 3) CHECK(native::Hooks().back()->callback == native::SprintInput);
+        }
+    }
 }
 int main()
 {
     TestMotionMatchingSelectorOptionalFingerprintIsolation();
     TestMotionMatchingSelectorUsesOnlyRoleSpecificValidSpeedStates();
+    TestMotionMatchingSelectorFreeInputFallsBackToOwnLockStates();
+    TestMotionMatchingSelectorFreeInputPrefersFreeAndRejectsDifferentSpeeds();
+    TestMotionMatchingSelectorSecondQueryFailuresRemainUnknown();
     TestMotionMatchingSelectorMissingDataAndFailuresRemainUnknown();
     TestMotionMatchingSelectorRejectsReferenceAndLifetimeReplacement();
     TestAnimationProbeOptionalFingerprintsNeverDisableGameplay();
@@ -2086,6 +2404,8 @@ int main()
     TestIsolationAndWeakSerialReuse();
     TestManagedIdentityAndOwnedWrites();
     TestClearTargetManagedGetterAbiAndFailures();
+    TestLocomotionFacingDispatchUsesHorizontalYawAndRestoresGc();
+    TestLocomotionFacingRejectsReusedIdentityAndReentrantSessionChanges();
     TestOwnedChildIsolationAndDeathCleanup();
     TestChildOwnershipRejectsCyclesForeignActorsAndReuse();
     TestChildOwnerTraversalBound();
@@ -2094,6 +2414,10 @@ int main()
     TestMappedSkillSlotsAndUnknownActions();
     TestReleaseInputPreservesProxyIsolation();
     TestMappedMovementExpiryAndRelease();
+    TestMappedSprintHoldReleaseResetAndPrediction();
+    TestMappedSprintToggleFollowsConfiguredEventsAndRejectsForeignActors();
+    TestMappedSprintRejectsUnknownDescriptorsAndReentrantLifetimes();
+    TestSprintOptionalHookFingerprintAndInstallationIsolation();
     CHECK(!gcUnsafe && gcEntries.empty());
     std::cout << "Transformation native tests: " << failures << " failure(s)\n";
     return failures ? 1 : 0;

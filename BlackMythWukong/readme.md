@@ -2,7 +2,7 @@
 
 [文档目录](docs/README.md) · [安装说明](docs/install.md) · [验证记录](docs/verification.md)
 
-《黑神话：悟空》Windows x64 游戏内修改器，当前源码版本为 **v1.0.0**。使用 C++20、Dear ImGui 1.92.9 和 MinHook 1.3.4，支持 DX11 / DX12 覆盖层，通过 [Ultimate ASI Loader v10.0.0](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v10.0.0) 自动加载。
+《黑神话：悟空》Windows x64 游戏内修改器，当前源码版本为 **v1.1.0**。使用 C++20、Dear ImGui 1.92.9 和 MinHook 1.3.4，支持 DX11 / DX12 覆盖层，通过 [Ultimate ASI Loader v10.0.0](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/v10.0.0) 自动加载。
 
 本版包含 **64 项功能**，采用支持搜索和分类的紧凑列表，适配亮色 / 暗色主题；另有 1,160 条物品、32 个场景和 284 个地标的物品与传送工具。影神图可选择故事阶段（0–5）和画像阶段（0–1），按场景传送使用游戏默认出生点。精魄、法术和影神图的单项删除尚未实现，界面中已禁用。新增功能的游戏效果仍待用户手测；操作和验证范围见 [功能说明](docs/gameplay.md) 和 [验证记录](docs/verification.md)。
 
@@ -18,6 +18,8 @@
 
 功能快捷键初始全部未绑定。菜单内点击功能行的快捷键按钮可录制；Esc 取消，Backspace 或 Delete 清除；冲突绑定会被拒绝。界面开关默认 **Insert**，可在“设置 → 快捷键”点击“修改”录制按键或 Ctrl / Shift / Alt 组合键，支持恢复默认，不能留空。菜单键始终可用，独立于功能快捷键总开关；当前菜单组合和 **Ctrl+Shift+Home** 不能再分配给功能。两类绑定保存在 `scripts\GlossTrainer\hotkeys.ini`，主题、缩放和窗口位置保存在 `scripts\GlossTrainer\ui.ini`。
 
+
+修改项的开关、数值和功能快捷键总开关会自动保存到 `scripts\GlossTrainer\features.ini`。下次启动游戏时先读取配置，进入存档且对应功能就绪后自动恢复已启用项；等待中的开关可以手动关闭以取消恢复。数值输入与已应用参数分别保存：尚未点击“应用”的输入不会在重启时直接写入游戏。“增加经验”“解锁”等一次性动作只记住输入值，启动时不会再次执行。
 
 作者：**By: 小莫**。
 
@@ -62,6 +64,7 @@ xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" 
 - “设置游戏速度”使用进程内 QPC 计时缩放，会影响同进程使用该时钟的世界逻辑、界面动画及其他组件。
 - 菜单打开时接管键鼠、释放鼠标限位；关闭菜单或游戏失焦时恢复输入。支持 Alt+Tab 和窗口尺寸变化。
 - 配置：游戏 EXE 目录下的 `scripts\GlossTrainer\ui.ini`（主题、缩放、窗口位置）与 `scripts\GlossTrainer\hotkeys.ini`（功能快捷键和 `[Menu]` 的 `Toggle=虚拟键码,修饰键掩码`）。
+- 修改项配置：`scripts\GlossTrainer\features.ini`，记录开关、输入值、上次成功应用值及功能快捷键总开关。恢复遇到队列繁忙会稍后重试，实际执行失败保留错误和配置；不会反复强制启用。更新限制解除后不自动恢复，本次待恢复项已取消；下次启动仍读取保留的偏好。退出游戏后删除此文件可将这些偏好恢复为默认。
 - 变身技能配置：`scripts\GlossTrainer\transformation-bindings.cfg`，按角色稳定标识和实际技能 ID 保存自定义名称及按键。角色检查后显示完整技能列表，可搜索、选填名称、录制单键或 Ctrl/Shift/Alt 组合键，再点“保存技能配置”；名称留空使用原名。旧 `transformation-slots.cfg` 保留游戏动作/手柄映射。“试招”需关闭菜单并返回游戏才施放，30 秒未执行则取消。
 - 技能可绑定鼠标左键、右键、中键、两个侧键，也可组合 Ctrl/Shift/Alt；绑定命中时消费对应游戏点击。
 - 变身角色详情提供“角色视距”：拖动滑块或 Ctrl+点击输入 1–200 米，结束编辑后自动保存；变身中即时应用。每个目录角色单独配置，“自动”恢复按体型计算，保存在 `scripts\GlossTrainer\transformation-camera.cfg`，退出变身恢复悟空原相机。
@@ -82,6 +85,8 @@ xmake bi --exedir="E:\steam\steamapps\common\BlackMythWukong\b1\Binaries\Win64" 
 ## 测试与适配范围
 
 ```powershell
+xmake build GlossTrainerFeatureSettingsTests
+.\build\release\GlossTrainerFeatureSettingsTests.exe .\output\feature-settings-tests
 xmake build GlossTrainerGameplayTests
 .\build\release\GlossTrainerGameplayTests.exe
 xmake build GlossTrainerTransformationTests GlossTrainerEngineBridgeTests GlossTrainerExtensionLifecycleTests

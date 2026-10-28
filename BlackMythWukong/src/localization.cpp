@@ -27,6 +27,7 @@ namespace gloss::localization
         constexpr Translation translations[] = {
 #include "localization_strings.inc"
 #include "localization_catalog.inc"
+#include "localization_transformation_pak.inc"
         };
         constexpr Translation patterns[] = {
 #include "localization_patterns.inc"

@@ -67,6 +67,7 @@ namespace fixture
     constexpr std::uintptr_t ProxyController = 0x6500;
     constexpr std::uintptr_t ProxyMesh = 0x6501, ProxyAnim = 0x6502, ProxyABPSetting = 0x6503;
     constexpr std::uintptr_t ProxyMoveAnim = 0x6504, ProxyLocomotionAnim = 0x6505;
+    constexpr std::uintptr_t AssetRegistry = 0x6800;
 
     struct Object
     {
@@ -105,6 +106,7 @@ namespace fixture
     int skillRequests{};
     int failures{};
     std::vector<int> availableSkillIds{41001, 41002, 41003};
+    std::function<std::string(unsigned, unsigned)> hotkeyConflictProbe;
     std::vector<int> instanceSkillIds{41001, 41002, 41003};
     bool useInstanceSkillIds{};
     std::vector<int> requestedSkillIds;
@@ -115,8 +117,21 @@ namespace fixture
     std::unordered_map<std::uintptr_t, int> deferredDestroyCalls;
     std::unordered_map<std::uintptr_t, std::uintptr_t> spawnChildOnDestroy;
     native::MoveInput movementInput{};
+    float customSpeedMultiplier{1.f};
+    std::vector<float> speedMultiplierWrites;
+    int failSpeedMultiplierCalls{};
+    eng::CallState speedFailureState{eng::CallState::NotCalled};
     struct MovementRequest { Vec3 destination; std::uint8_t speedType{}, moveAIType{}; int id{}; int mmState{-1}; };
     std::vector<MovementRequest> movementRequests;
+    struct DirectionInput { Vec3 direction; float scale; };
+    std::vector<DirectionInput> directionInputs;
+    std::vector<Vec3> facingDirections;
+    int failFacingCalls{};
+    bool moverFacingOverride{};
+    double observedActorYaw{37.};
+    Vec3 lastMovementInput{};
+    int failDirectionInputCalls{}, lastInputReads{};
+    bool lastInputAvailable{true}, failLastInputRead{};
     std::vector<int> cancelledMovementRequests;
     int nextMovementRequest{1}, activeMovementRequest{}, movementReturnOverride{-1}, failMovementRequestCalls{}, failMovementCancelCalls{};
     int controlledPawnReads{};
@@ -138,6 +153,7 @@ namespace fixture
     int lastAnimationSpeed{-1};
     bool lastAnimationLocked{};
     std::uintptr_t lockedTarget{};
+    std::vector<std::uintptr_t> forwardedTargets;
     int diagnosticLinkedProbes{}, diagnosticLinkedCalls{}, diagnosticOwnerCalls{}, diagnosticLinkedPropertyReads{};
     int diagnosticNodeMode{10};
     int castingSkillId{};
@@ -183,6 +199,14 @@ namespace fixture
     int capsuleCollision{3}, meshCollision{3};
     bool isolationShadowValid{}, isolationShadowHidden{};
     bool invalidTamerResource{};
+    struct RegistryRoot
+    {
+        bool success{true};
+        std::vector<std::vector<eng::Arg>> records;
+    };
+    bool registryAvailable{}, registryLoading{}, registryLoadingKnown{true};
+    std::map<std::wstring, RegistryRoot> registryRoots;
+    std::vector<std::wstring> queriedRegistryRoots;
 
 #define CHECK(...)                                                                                         \
     do                                                                                                     \
@@ -374,6 +398,14 @@ namespace fixture
     }
     void InitializeWorld()
     {
+        registryAvailable = registryLoading = false;
+        registryLoadingKnown = true;
+        registryRoots.clear();
+        queriedRegistryRoots.clear();
+        customSpeedMultiplier = 1.f;
+        speedMultiplierWrites.clear();
+        failSpeedMultiplierCalls = 0;
+        speedFailureState = eng::CallState::NotCalled;
         objects.clear();
         immuneLayers.clear();
         playerHealth = 500.f;
@@ -392,9 +424,13 @@ namespace fixture
         spawnChildOnDestroy.clear();
         movementInput = {};
         movementRequests.clear();
+        directionInputs.clear(); lastMovementInput = {};
+        facingDirections.clear(); failFacingCalls = 0; moverFacingOverride = false; observedActorYaw = 37.;
+        failDirectionInputCalls = lastInputReads = 0; lastInputAvailable = true; failLastInputRead = false;
         movementAnimationChoice = {true, true, false};
         movementAnimationQueries = 0; lastAnimationSpeed = -1; lastAnimationLocked = false;
         lockedTarget = 0;
+        forwardedTargets.clear();
         cancelledMovementRequests.clear();
         nextMovementRequest = 1;
         activeMovementRequest = 0;
@@ -621,6 +657,7 @@ namespace gloss::gameplay::engine
     }
     std::uintptr_t Find(std::wstring_view path)
     {
+        if (path == L"/Script/Engine.Pawn:GetLastMovementInputVector") return fixture::lastInputAvailable ? 0x7200 : 0;
         if (path == L"/Script/Engine.CharacterMovementComponent:GetCurrentAcceleration" || path == L"/Script/Engine.CharacterMovementComponent:GetMaxAcceleration")
         { ++fixture::diagnosticProbes; return fixture::diagnosticInterfacesAvailable ? 0x7200 : 0; }
         if (path == L"/Script/Engine.SkeletalMeshComponent:GetAnimInstance" || path == L"/Script/b1-Managed.BUAnimHumanoidCS" || path == L"/Script/b1-Managed.BUAnimInstanceBase")
@@ -784,7 +821,43 @@ namespace gloss::gameplay::engine
             Output(args, "ReturnValue", diagnosticMaximum);
             return {true, {}};
         }
-        if (function.ends_with(L":GetAssetRegistry")) return {false, "fixture does not model Asset Registry"};
+        if (function.ends_with(L":GetAssetRegistry"))
+        {
+            constexpr std::array contract{ParameterContract{"ReturnValue", Type::Interface, sizeof(ScriptInterface), true}};
+            CHECK(MatchesContract(args, contract));
+            if (!registryAvailable) return {false, "fixture Asset Registry unavailable"};
+            Output(args, "ReturnValue", ScriptInterface{AssetRegistry, AssetRegistry + 1});
+            return {true, {}};
+        }
+        if (function == L"/Script/AssetRegistry.AssetRegistry:IsLoadingAssets")
+        {
+            constexpr std::array contract{ParameterContract{"ReturnValue", Type::Bool, sizeof(std::int32_t), true}};
+            CHECK(MatchesContract(args, contract) && instance == AssetRegistry);
+            if (!registryLoadingKnown) return {false, "fixture loading state unavailable"};
+            Output(args, "ReturnValue", std::int32_t(registryLoading));
+            return {true, {}};
+        }
+        if (function == L"/Script/AssetRegistry.AssetRegistry:GetAssetsByPath")
+        {
+            constexpr std::array contract{
+                ParameterContract{"PackagePath", Type::Name, sizeof(NameValue)},
+                ParameterContract{"OutAssetData", Type::StructArray, 0, true},
+                ParameterContract{"bRecursive", Type::Bool, sizeof(std::int32_t)},
+                ParameterContract{"bIncludeOnlyOnDiskAssets", Type::Bool, sizeof(std::int32_t)},
+                ParameterContract{"ReturnValue", Type::Bool, sizeof(std::int32_t), true}};
+            CHECK(MatchesContract(args, contract) && instance == AssetRegistry);
+            CHECK(Named(args, "bRecursive")->Get<std::int32_t>() != 0);
+            CHECK(Named(args, "bIncludeOnlyOnDiskAssets")->Get<std::int32_t>() == 0);
+            const auto path = Named(args, "PackagePath")->text;
+            queriedRegistryRoots.push_back(path);
+            const auto root = registryRoots.find(path);
+            if (root == registryRoots.end()) return {false, "fixture root unavailable"};
+            auto *output = Named(args, "OutAssetData");
+            CHECK(output->structPath == L"/Script/CoreUObject.AssetData" && output->fields.size() == 3);
+            output->records = root->second.records;
+            Output(args, "ReturnValue", std::int32_t(root->second.success));
+            return {true, {}};
+        }
         if (function.ends_with(L":GetActorLocationSimple"))
         {
             const auto actor = Named(args, "Actor")->Get<std::uintptr_t>();
@@ -985,8 +1058,24 @@ namespace gloss::gameplay::engine
         }
         if (function.ends_with(L":AddMovementInput"))
         {
-            CHECK(false); // Raw Pawn input bypasses this character's movement/animation chain.
-            return {false, "unexpected raw movement input"};
+            const std::array contract{
+                ParameterContract{"WorldDirection", Type::Vector, sizeof(Vec3), false},
+                ParameterContract{"ScaleValue", Type::Float, sizeof(float), false},
+                ParameterContract{"bForce", Type::Bool, sizeof(std::int32_t), false}};
+            CHECK(MatchesContract(args, contract) && instance == Proxy());
+            if (!MatchesContract(args, contract) || instance != Proxy()) return {false, "invalid directional input signature"};
+            CHECK(!Named(args, "bForce")->Get<std::int32_t>());
+            // Input supplements an existing MM mover, never replaces it or
+            // bypasses pause/skill/state checks. Physics is not mocked here.
+            CHECK(activeMovementRequest > 0 && !movementRequests.empty() && movementRequests.back().mmState > 0);
+            CHECK(!playingMovie && !overlayVisible && foreground && castingSkillId <= 0);
+            const auto direction = Named(args, "WorldDirection")->Get<Vec3>();
+            const float scale = Named(args, "ScaleValue")->Get<float>();
+            CHECK(std::abs(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z - 1.) < .00001);
+            CHECK(scale > 0.f && scale <= 1.f);
+            if (failDirectionInputCalls > 0) { --failDirectionInputCalls; return {false, "directional input failed"}; }
+            directionInputs.push_back({direction, scale});
+            return {true, {}};
         }
         if (function == L"/Script/Engine.Pawn:GetController")
         {
@@ -1018,9 +1107,28 @@ namespace gloss::gameplay::engine
             const int id = movementReturnOverride >= 0 ? movementReturnOverride : nextMovementRequest++;
             movementRequests.push_back({Named(args, "Position")->Get<Vec3>(), Named(args, "SpeedRateType")->Get<std::uint8_t>(), Named(args, "MoveAIType")->Get<std::uint8_t>(), id,
                 mm ? Named(args, "MotionMatchingState")->Get<std::uint8_t>() : -1});
-            if (id > 0) activeMovementRequest = id;
+            if (id > 0) { activeMovementRequest = id; moverFacingOverride = false; }
             Output(args, "ReturnValue", id);
             return {true, {}};
+        }
+        if (function == L"/Script/b1-Managed.BGUFunctionLibraryCS:BGUAISetSpeedRate")
+        {
+            const std::array contract{ParameterContract{"Unit", Type::Object, sizeof(std::uintptr_t)}, ParameterContract{"SpeedRate", Type::Float, sizeof(float)}};
+            CHECK(MatchesContract(args, contract));
+            CHECK(Named(args, "Unit")->Get<std::uintptr_t>() == Proxy());
+            const auto multiplier = Named(args, "SpeedRate")->Get<float>();
+            CHECK(std::isfinite(multiplier) && multiplier >= .1f && multiplier <= 5.f);
+            if (failSpeedMultiplierCalls > 0)
+            {
+                --failSpeedMultiplierCalls;
+                if (speedFailureState != CallState::NotCalled) customSpeedMultiplier = multiplier;
+                return {false, "injected speed multiplier failure", speedFailureState};
+            }
+            if (multiplier != 1.f)
+                CHECK(!playingMovie && !overlayVisible && foreground && castingSkillId <= 0 && activeMovementRequest > 0);
+            customSpeedMultiplier = multiplier;
+            speedMultiplierWrites.push_back(multiplier);
+            return {true, {}, CallState::Completed};
         }
         if (function == L"/Script/b1-Managed.BGUFuncLibAICS:BGUCancelAIMoveTo")
         {
@@ -1031,17 +1139,27 @@ namespace gloss::gameplay::engine
             CHECK(id > 0);
             cancelledMovementRequests.push_back(id);
             if (failMovementCancelCalls > 0) { --failMovementCancelCalls; return {false, "movement cancellation failed"}; }
-            if (activeMovementRequest == id) activeMovementRequest = 0; // Real StopMoveWithRequestIdx contract.
+            if (activeMovementRequest == id) { activeMovementRequest = 0; moverFacingOverride = false; } // Real StopMoveWithRequestIdx contract.
             return {true, {}};
         }
         if (function.ends_with(L":GetLastMovementInputVector"))
         {
-            Output(args, "ReturnValue", Vec3{});
+            const std::array contract{ParameterContract{"ReturnValue", Type::Vector, sizeof(Vec3), true}};
+            CHECK(MatchesContract(args, contract) && instance == Proxy());
+            ++lastInputReads;
+            if (failLastInputRead) return {false, "last input unreadable"};
+            Output(args, "ReturnValue", lastMovementInput);
             return {true, {}};
         }
         if (function.ends_with(L":GetControlRotation"))
         {
             Output(args, "ReturnValue", eng::Rotator{0., controlYaw, 0.});
+            return {true, {}};
+        }
+        if (function == L"/Script/Engine.Actor:K2_GetActorRotation")
+        {
+            CHECK(instance == Proxy() && args.size() == 1 && args[0].type == Type::Rotator && args[0].output);
+            Output(args, "ReturnValue", eng::Rotator{0., observedActorYaw, 0.});
             return {true, {}};
         }
         if (function.ends_with(L":BGUGetCastingSkillID"))
@@ -1249,6 +1367,18 @@ namespace gloss::gameplay::engine
 
 namespace gloss::gameplay::transformation::native
 {
+    void ResetSprintInput() { fixture::movementInput.sprint = false; }
+    bool SetLocomotionFacing(std::uintptr_t actor, const extensions::Vec3 &direction)
+    {
+        using namespace fixture;
+        CHECK(actor == Proxy() && activeMovementRequest > 0 && !movementRequests.empty());
+        CHECK(movementRequests.back().moveAIType == 1 && movementRequests.back().mmState > 0);
+        CHECK(!lockedTarget && !playingMovie && !overlayVisible && foreground && castingSkillId <= 0);
+        if (failFacingCalls > 0) { --failFacingCalls; return false; }
+        facingDirections.push_back(direction);
+        moverFacingOverride = true;
+        return true;
+    }
     MotionMatchingSelection SelectMotionMatching(std::uintptr_t actor, int speedType, bool locked)
     {
         CHECK(actor == fixture::Proxy() && speedType >= 0 && speedType <= 2);
@@ -1373,6 +1503,7 @@ namespace gloss::gameplay::transformation::native
     }
     bool SetTarget(std::uintptr_t, std::uintptr_t target)
     {
+        fixture::forwardedTargets.push_back(target);
         if (target == 0)
         {
             ++fixture::targetClearCalls;
@@ -1437,7 +1568,7 @@ namespace gloss::features
             return {false, "injected feature hotkey conflict"};
         return {true, {}};
     }
-    void RegisterHotkeyConflictProbe(std::function<std::string(unsigned, unsigned)>) {}
+    void RegisterHotkeyConflictProbe(std::function<std::string(unsigned, unsigned)> probe) { fixture::hotkeyConflictProbe = std::move(probe); }
     Result RunHotkeyTransaction(std::function<Result()> operation) { return operation(); }
 }
 namespace gloss
@@ -2506,6 +2637,325 @@ namespace fixture
         CHECK(trans::Restore().success); Tick();
         std::cout << "PASS MM to missing/unknown animation fallback and back, validated free gait, typed ABI and rejected-request retry\n";
     }
+    void RoleLockAnalyzerWithoutTargetKeepsFreeMovementAndRestoresNormally()
+    {
+        for (int speed = 0; speed <= 1; ++speed)
+        {
+            InitializeWorld(); StartAndReachActivation();
+            movementAnimationChoice = {true, true, true, true, true, 6 + speed};
+            movementInput = {speed == 0 ? .5f : 1.f, 0.f};
+            Tick();
+            CHECK(!lockedTarget && !lastAnimationLocked && lastAnimationSpeed == speed);
+            CHECK(activeMovementRequest > 0 && movementRequests.size() == 1);
+            CHECK(movementRequests.back().mmState == 6 + speed && movementRequests.back().speedType == speed);
+            CHECK(movementRequests.back().moveAIType == 1 && actorRotationCalls == 0);
+            CHECK(facingDirections.size() == 1 && directionInputs.empty() && moverFacingOverride);
+            CHECK(facingDirections.back().x == 1. && facingDirections.back().y == 0.);
+            CHECK(std::all_of(forwardedTargets.begin(), forwardedTargets.end(), [](auto target) { return target == 0; }));
+            const auto selection = LastDiagnosticLog("Transformation MM selection:");
+            CHECK(selection.find("locked=false") != std::string::npos && selection.find("usesLocked=true") != std::string::npos);
+            for (int frame = 0; frame < 120; ++frame) Tick();
+            CHECK(movementRequests.size() == 1 && movementAnimationQueries == 1 && cancelledMovementRequests.empty());
+            CHECK(facingDirections.size() == 121 && directionInputs.empty()); // Update facing without resetting the AI mover or adding input twice.
+            controlYaw = 90.; Tick(50);
+            CHECK(movementRequests.size() == 2 && movementRequests.back().mmState == 6 + speed && movementRequests.back().moveAIType == 1);
+            CHECK(actorRotationCalls == 0 && !lockedTarget);
+            CHECK(std::abs(facingDirections.back().x) < .00001 && std::abs(facingDirections.back().y - 1.) < .00001);
+            movementInput = {}; Tick();
+            CHECK(activeMovementRequest == 0 && cancelledMovementRequests.size() == 1 && !moverFacingOverride);
+            CHECK(trans::Restore().success); Tick();
+            CHECK(trans::GetStatus().phase == trans::Phase::Idle);
+        }
+        std::cout << "PASS Lock-only roles receive native desired facing alongside continuous indexed jog/run requests, steering, stopping and restoration\n";
+    }
+    void MotionMatchingFacingRespectsIntentAndEveryPause()
+    {
+        // Root-motion velocity can point away from intent. Neither movement
+        // facing nor its telemetry may be synthesized from that velocity.
+        InitializeWorld(); StartAndReachActivation();
+        movementAnimationChoice = {true, true, true, true, true, 7};
+        Put(ProxyMovement, eng::Arg::Vector("Velocity", {-120., -80., 0.}));
+        for (const double yaw : {0., 90., 180., -90.})
+        {
+            controlYaw = yaw;
+            for (const auto axes : {native::MoveInput{1.f, 0.f}, {-1.f, 0.f}, {0.f, 1.f}, {0.f, -1.f}, {1.f, 1.f}})
+            {
+                const auto before = facingDirections.size();
+                movementInput = axes; Tick(50);
+                CHECK(facingDirections.size() == before + 1 && directionInputs.empty());
+                const auto input = facingDirections.back();
+                constexpr double radians = .017453292519943295;
+                const double length = std::sqrt(axes.forward * axes.forward + axes.right * axes.right);
+                const double expectedX = (std::cos(yaw * radians) * axes.forward - std::sin(yaw * radians) * axes.right) / length;
+                const double expectedY = (std::sin(yaw * radians) * axes.forward + std::cos(yaw * radians) * axes.right) / length;
+                CHECK(std::abs(input.x - expectedX) < .00001 && std::abs(input.y - expectedY) < .00001);
+                CHECK(input.z == 0. && !lockedTarget && actorRotationCalls == 0);
+            }
+        }
+        CHECK(trans::Restore().success); Tick();
+        for (int pause = 0; pause != 7; ++pause)
+        {
+            InitializeWorld(); StartAndReachActivation();
+            movementAnimationChoice = {true, true, true, true, true, 7};
+            movementInput = {1.f, 0.f}; Tick();
+            CHECK(facingDirections.size() == 1 && activeMovementRequest > 0);
+            const int request = activeMovementRequest;
+            if (pause == 0) movementInput = {};
+            if (pause == 1) overlayVisible = true;
+            if (pause == 2) foreground = false;
+            if (pause == 3) simpleStates[Proxy()].insert(3);
+            if (pause == 4) castingSkillId = 41001;
+            if (pause == 5) playingMovie = true;
+            if (pause == 6) CHECK(trans::Restore().success);
+            Tick();
+            CHECK(facingDirections.size() == 1 && activeMovementRequest == 0 && !moverFacingOverride && directionInputs.empty());
+            CHECK(cancelledMovementRequests == std::vector<int>{request});
+            if (pause != 6) { CHECK(trans::Restore().success); Tick(); }
+            CHECK(trans::GetStatus().phase == trans::Phase::Idle);
+        }
+        // Ordinary, unknown, and volume paths retain their existing driver.
+        for (int path = 0; path != 5; ++path)
+        {
+            InitializeWorld(); StartAndReachActivation();
+            movementInput = {1.f, 0.f};
+            if (path == 1) movementAnimationChoice = {true, false, true};
+            if (path == 2 || path == 3)
+            {
+                movementAnimationChoice = {true, true, true, true, true, 7};
+                Put(ProxyMovement, eng::Arg::Byte("MovementMode", path == 2 ? 4 : 5));
+            }
+            if (path == 4) movementAnimationChoice = {true, true, true, false, true, 4};
+            Tick(); Tick(50);
+            CHECK(activeMovementRequest > 0 && directionInputs.empty() && facingDirections.empty() && !moverFacingOverride);
+            CHECK(trans::Restore().success); Tick();
+        }
+        InitializeWorld(); StartAndReachActivation();
+        movementAnimationChoice = {true, true, true, true, true, 7}; movementInput = {1.f, 0.f};
+        movementReturnOverride = 0; Tick();
+        CHECK(facingDirections.empty() && trans::GetStatus().phase == trans::Phase::Active);
+        movementReturnOverride = -1; failFacingCalls = 1; Tick(250);
+        CHECK(facingDirections.empty() && trans::GetStatus().phase == trans::Phase::Restoring);
+        Tick();
+        CHECK(trans::GetStatus().phase == trans::Phase::Idle && !activeMovementRequest && cancelledMovementRequests.size() == 1);
+        std::cout << "PASS MM desired facing uses camera-relative intent in all quadrants, preserves pause/skill/state gates, and cleans up failed requests\n";
+    }
+    void FacingOverrideTransitionsCancelBeforeRealLocksAndOtherMovers()
+    {
+        for (int transition = 0; transition != 4; ++transition)
+        {
+            InitializeWorld(); StartAndReachActivation();
+            movementAnimationChoice = {true, true, true, true, true, 7}; movementInput = {1.f, 0.f}; Tick();
+            const int oldRequest = activeMovementRequest;
+            CHECK(moverFacingOverride && facingDirections.size() == 1);
+            if (transition == 0)
+            {
+                constexpr std::uintptr_t enemy = 0x31000;
+                Add(enemy); objects[enemy].locations["actor"] = {500., 500., 0.}; lockedTarget = enemy;
+            }
+            if (transition == 1) Put(ProxyMovement, eng::Arg::Byte("MovementMode", 5));
+            if (transition == 2)
+            {
+                // An animation cache change can occur before the mover's next
+                // 33ms refresh; force a resource query via a gait change.
+                movementInput.forward = .5f;
+                movementAnimationChoice = {true, true, true, false, true, 3};
+            }
+            if (transition == 3) { movementInput.forward = .5f; movementAnimationChoice = {true, false, true}; }
+            Tick(1);
+            CHECK(cancelledMovementRequests == std::vector<int>{oldRequest});
+            CHECK(activeMovementRequest > 0 && activeMovementRequest != oldRequest);
+            CHECK(!moverFacingOverride && facingDirections.size() == 1 && directionInputs.empty());
+            lockedTarget = 0;
+            Put(ProxyMovement, eng::Arg::Byte("MovementMode", 1));
+            movementAnimationChoice = {true, true, true, true, true, 6}; movementInput.forward = .5f;
+            // Stop resets the selector deadline; returning to input facing
+            // must establish a new mover before reapplying its override.
+            Tick(250);
+            CHECK(moverFacingOverride && facingDirections.size() == 2 && !lockedTarget);
+            CHECK(trans::Restore().success); Tick();
+            CHECK(!moverFacingOverride && !activeMovementRequest);
+        }
+        InitializeWorld(); StartAndReachActivation();
+        movementAnimationChoice = {true, true, true, true, true, 7}; movementInput = {1.f, 0.f}; Tick();
+        constexpr std::uintptr_t enemy = 0x31000;
+        Add(enemy); objects[enemy].locations["actor"] = {500., 500., 0.}; lockedTarget = enemy;
+        failMovementCancelCalls = 1; Tick(1);
+        CHECK(trans::GetStatus().phase == trans::Phase::Restoring && movementRequests.size() == 1 && facingDirections.size() == 1);
+        Tick(); CHECK(trans::GetStatus().phase == trans::Phase::Idle && !moverFacingOverride);
+        InitializeWorld(); StartAndReachActivation(); CHECK(ConfigureTestSkillSlot());
+        movementAnimationChoice = {true, true, true, true, true, 7}; movementInput = {1.f, 0.f}; Tick();
+        pendingActions.push_back(trans::Action::LightAttack); Tick();
+        CHECK(skillRequests == 1 && !moverFacingOverride && !activeMovementRequest && directionInputs.empty());
+        castingSkillId = 41001; const auto facingCount = facingDirections.size(); Tick(50);
+        CHECK(facingDirections.size() == facingCount);
+        castingSkillId = 0; Tick(50);
+        CHECK(moverFacingOverride && activeMovementRequest > 0);
+        CHECK(trans::Restore().success); Tick();
+        std::cout << "PASS input-facing ownership changes cancel immediately before native lock/free/volume requests, with retryable failure restoration\n";
+    }
+    void MappedSprintSelectsRoleSprintGaitAndReturnsToAnalogWalking()
+    {
+        InitializeWorld(); StartAndReachActivation();
+        movementAnimationChoice = {true, true, true, true, true, 6}; movementInput = {.4f, 0.f}; Tick();
+        CHECK(lastAnimationSpeed == 0 && movementRequests.back().speedType == 0 && moverFacingOverride);
+        movementInput.sprint = true; movementAnimationChoice.state = 8; Tick(50);
+        CHECK(lastAnimationSpeed == 2 && movementRequests.back().speedType == 2 && movementRequests.back().mmState == 8);
+        CHECK(moverFacingOverride && directionInputs.empty());
+        const auto requests = movementRequests.size();
+        for (int i = 0; i != 100; ++i) Tick();
+        CHECK(movementRequests.size() == requests);
+        CHECK(LastDiagnosticLog("Transformation movement sample:").find("sprintInput=true") != std::string::npos);
+        movementInput.sprint = false; movementAnimationChoice.state = 6; Tick(50);
+        CHECK(lastAnimationSpeed == 0 && movementRequests.back().speedType == 0 && movementRequests.back().mmState == 6);
+        movementInput.forward = 1.f; movementAnimationChoice.state = 7; Tick(50);
+        CHECK(lastAnimationSpeed == 1 && movementRequests.back().speedType == 1);
+        CHECK(trans::Restore().success); Tick();
+
+        // Sprint can be held before any directional input, and releasing it
+        // does not discard the current camera-relative movement axes.
+        InitializeWorld(); StartAndReachActivation();
+        movementInput = {0.f, 0.f, true}; Tick();
+        CHECK(movementRequests.empty() && movementInput.sprint);
+        movementAnimationChoice = {true, true, true, true, true, 8}; movementInput.forward = 1.f; Tick(50);
+        CHECK(movementRequests.back().speedType == 2 && moverFacingOverride);
+        overlayVisible = true; Tick();
+        CHECK(!movementInput.sprint && !activeMovementRequest && !moverFacingOverride);
+        overlayVisible = false; movementAnimationChoice.state = 7; Tick(50);
+        CHECK(movementRequests.back().speedType == 1 && moverFacingOverride);
+        movementInput.sprint = true; movementAnimationChoice.state = 8; Tick(50);
+        castingSkillId = 41001; Tick();
+        CHECK(!movementInput.sprint && !activeMovementRequest);
+        castingSkillId = 0; movementAnimationChoice.state = 7; Tick(50);
+        CHECK(movementRequests.back().speedType == 1);
+        CHECK(trans::Restore().success); Tick();
+        std::cout << "PASS mapped sprint selects role SPRINT/MM resources without changing analog direction, and pause/skill clears stale latches\n";
+    }
+    void PerCharacterSpeedMultipliersPreserveNativeGaitsAndPersistAtomically()
+    {
+        InitializeWorld(); StartAndReachActivation();
+        const auto id = trans::GetStatus().activeId;
+        CHECK(trans::GetMovementSpeed(id) == trans::MovementSpeedSettings{});
+        movementInput = {1.f, 0.f}; Tick();
+        CHECK(speedMultiplierWrites.empty()); // Default must not require the optional speed API.
+        const trans::MovementSpeedSettings configured{1.5f, 2.5f};
+        CHECK(trans::SetMovementSpeed(id, configured).success);
+        CHECK(!trans::SetMovementSpeed("unknown", configured).success);
+        for (auto invalid : {0.f, -1.f, 5.1f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+            CHECK(!trans::SetMovementSpeed(id, {invalid, 1.f}).success);
+        CHECK(trans::GetMovementSpeed(id) == configured);
+        CHECK(trans::GetMovementSpeed("another-role") == trans::MovementSpeedSettings{});
+        const auto requests = movementRequests.size();
+        Tick(); CHECK(customSpeedMultiplier == 1.5f && movementRequests.size() == requests);
+        customSpeedMultiplier = 1.f; // A native configuration/buff reset can clear Custom.
+        Tick(); CHECK(customSpeedMultiplier == 1.5f);
+        movementInput.sprint = true; Tick(50);
+        CHECK(customSpeedMultiplier == 2.5f && movementRequests.back().speedType == 2);
+        movementInput = {.4f, 0.f}; Tick(50);
+        CHECK(customSpeedMultiplier == 1.5f && movementRequests.back().speedType == 0);
+        CHECK(Get<float>(Movement, "MaxWalkSpeed") == 600.f && Get<float>(ProxyMovement, "MaxWalkSpeed") == 600.f);
+
+        const auto file = gloss::DataDirectory() / L"transformation-speed.cfg";
+        std::string savedText;
+        {
+            std::ifstream in(file, std::ios::binary);
+            savedText.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+        trans::speed::Config decoded;
+        CHECK(trans::speed::Parse(savedText, decoded).success && decoded.at(id) == configured);
+        // Reload through the production loader, as a new application session would.
+        trans::speedConfig.clear();
+        trans::LoadSpeedFile();
+        CHECK(trans::GetMovementSpeed(id) == configured);
+        auto backup = file; backup += L".before-failure";
+        std::filesystem::rename(file, backup);
+        std::filesystem::create_directory(file);
+        CHECK(!trans::SetMovementSpeed(id, {3.f, 4.f}).success);
+        CHECK(trans::GetMovementSpeed(id) == configured);
+        std::filesystem::remove(file);
+        std::filesystem::rename(backup, file);
+        CHECK(trans::SetMovementSpeed(id, {}).success);
+        Tick(); CHECK(customSpeedMultiplier == 1.f);
+        const auto writes = speedMultiplierWrites.size(); Tick();
+        CHECK(speedMultiplierWrites.size() == writes);
+        CHECK(trans::Restore().success); Tick();
+        std::cout << "PASS role-scoped speed multipliers preserve native gait, survive reload and roll back failed saves\n";
+    }
+    void MovementSpeedMultiplierReleasesOnEveryPauseAndFailedWrite()
+    {
+        for (int pause = 0; pause != 9; ++pause)
+        {
+            InitializeWorld(); StartAndReachActivation();
+            const auto id = trans::GetStatus().activeId;
+            CHECK(trans::SetMovementSpeed(id, {2.f, 3.f}).success);
+            CHECK(ConfigureTestSkillSlot());
+            movementInput = {1.f, 0.f}; Tick();
+            CHECK(customSpeedMultiplier == 2.f);
+            if (pause == 0) movementInput = {};
+            if (pause == 1) overlayVisible = true;
+            if (pause == 2) foreground = false;
+            if (pause == 3) simpleStates[Proxy()].insert(3);
+            if (pause == 4) castingSkillId = 41001;
+            if (pause == 5) playingMovie = true;
+            if (pause == 6) CHECK(trans::Restore().success);
+            if (pause == 7) pendingActions.push_back(trans::Action::LightAttack);
+            if (pause == 8) { movementInput.right = 1.f; movementReturnOverride = 0; }
+            Tick(50);
+            CHECK(customSpeedMultiplier == 1.f && !speedMultiplierWrites.empty() && speedMultiplierWrites.back() == 1.f);
+            if (pause != 6) { CHECK(trans::Restore().success); Tick(); }
+            CHECK(trans::GetStatus().phase == trans::Phase::Idle);
+            CHECK(trans::SetMovementSpeed(id, {}).success);
+        }
+        for (const auto state : {eng::CallState::NotCalled, eng::CallState::Completed, eng::CallState::Indeterminate})
+        {
+            InitializeWorld(); StartAndReachActivation();
+            const auto id = trans::GetStatus().activeId;
+            CHECK(trans::SetMovementSpeed(id, {2.f, 3.f}).success);
+            movementInput = {1.f, 0.f}; failSpeedMultiplierCalls = 1; speedFailureState = state;
+            Tick(); Tick();
+            CHECK(customSpeedMultiplier == 1.f && trans::GetStatus().phase == trans::Phase::Idle);
+            CHECK(speedMultiplierWrites.size() == (state == eng::CallState::NotCalled ? 0u : 1u));
+            CHECK(trans::SetMovementSpeed(id, {}).success);
+        }
+        InitializeWorld(); StartAndReachActivation();
+        const auto id = trans::GetStatus().activeId;
+        CHECK(trans::SetMovementSpeed(id, {2.f, 3.f}).success);
+        movementInput = {1.f, 0.f}; Tick();
+        failSpeedMultiplierCalls = 2;
+        CHECK(trans::Restore().success); Tick();
+        CHECK(trans::GetStatus().phase == trans::Phase::RecoveryRequired && customSpeedMultiplier == 2.f && Proxy());
+        Tick(); CHECK(trans::GetStatus().phase == trans::Phase::RecoveryRequired);
+        Tick(); CHECK(trans::GetStatus().phase == trans::Phase::Idle && customSpeedMultiplier == 1.f);
+        CHECK(trans::SetMovementSpeed(id, {}).success);
+
+        InitializeWorld(); StartAndReachActivation();
+        CHECK(trans::SetMovementSpeed(id, {2.f, 3.f}).success);
+        movementInput = {1.f, 0.f}; Tick();
+        const auto writes = speedMultiplierWrites.size();
+        ++objects[Proxy()].serial; // Same address is now a different actor.
+        CHECK(trans::Restore().success); Tick();
+        CHECK(speedMultiplierWrites.size() == writes && trans::GetStatus().phase == trans::Phase::Idle);
+        CHECK(trans::SetMovementSpeed(id, {}).success);
+        std::cout << "PASS speed overrides release for pauses, rejected moves and skills; failed cleanup retries without writing reused actors\n";
+    }
+    void LastMovementInputTelemetryReadsThePawnAndRemainsOptional()
+    {
+        for (int state = 0; state != 3; ++state)
+        {
+            InitializeWorld();
+            lastInputAvailable = state != 1; failLastInputRead = state == 2;
+            lastMovementInput = {0., -1., 0.};
+            StartAndReachActivation();
+            movementAnimationChoice = {true, true, true, true, true, 7}; movementInput = {1.f, 0.f}; Tick(); Tick(50);
+            const auto sample = LastDiagnosticLog("Transformation movement sample:");
+            CHECK(sample.find("desiredDirection=(1.000,0.000,0.000)") != std::string::npos);
+            CHECK(sample.find(state == 0 ? "lastInputRead=true lastInput=(0.000,-1.000,0.000)" : "lastInputRead=false lastInput=unknown") != std::string::npos);
+            CHECK(lastInputReads == (state == 1 ? 0 : 1));
+            CHECK(directionInputs.empty() && facingDirections.size() == 2 && trans::GetStatus().phase == trans::Phase::Active && diagnosticWrites == 0);
+            CHECK(sample.find("inputFacing=true actorYawRead=true actorYaw=37.000") != std::string::npos);
+            CHECK(trans::Restore().success); Tick();
+        }
+        std::cout << "PASS LastMovementInput telemetry reads actual Pawn state, and missing/failed optional reads cannot block movement\n";
+    }
     void MissingOrUnknownAnimationsKeepNativeJogAndLockedMovementContinuous()
     {
         const std::array choices{
@@ -3404,18 +3854,150 @@ namespace fixture
         runtimeInitialized = true;
         Tick();
         const auto entries = trans::Catalog();
+        static constexpr trans::pak_catalog::Record references[] = {
+#include "../src/gameplay/transformation_catalog.inc"
+        };
+        std::vector<trans::CharacterEntry> expected;
+        for (const auto &record : references)
+        {
+            trans::CharacterEntry entry;
+            entry.name = record.name;
+            entry.path = record.path;
+            entry.category = trans::model::CatalogCategory(record.category);
+            trans::model::MergeCatalog(expected, std::move(entry));
+        }
+        CHECK(expected.size() == 246); // The old source and stable IDs stay intact.
+        const auto oldEntries = expected;
+        trans::pak_catalog::Seed(expected);
         std::unordered_set<std::string> paths, ids;
         for (const auto &entry : entries)
         {
             CHECK(entry.support == trans::Support::Unverified);
+            CHECK(!entry.discovered);
             CHECK(entry.id == gloss::gameplay::transformation::model::StableId(entry.path, entry.form));
             CHECK(paths.insert(entry.path).second);
             CHECK(ids.insert(entry.id).second);
         }
-        CHECK(entries.size() == 246);
-        CHECK(paths.size() == 246);
-        CHECK(ids.size() == 246);
-        std::cout << "PASS compiled reference catalog keeps 246 stable unique paths unverified\n";
+        CHECK(entries.size() == expected.size());
+        CHECK(entries.size() > 246);
+        CHECK(paths.size() == expected.size());
+        CHECK(ids.size() == expected.size());
+        for (std::size_t i = 0; i < oldEntries.size(); ++i)
+        {
+            CHECK(entries[i].id == oldEntries[i].id);
+            CHECK(entries[i].name == oldEntries[i].name);
+            CHECK(entries[i].path == oldEntries[i].path);
+        }
+        std::cout << "PASS reference source keeps 246 stable paths and PAK candidates expand the unverified catalog to " << entries.size() << " entries\n";
+    }
+
+    void RegistryScanIncludesBossRushAndRetainsPartialRootResults()
+    {
+        InitializeWorld();
+        registryAvailable = true;
+        constexpr auto unitsRoot = L"/Game/00Main/Design/Units";
+        constexpr auto bossRoot = L"/Game/00MainHZ/BossRush/Tamer";
+        const auto before = trans::Catalog();
+        const auto candidate = std::find_if(before.begin(), before.end(), [](const auto &entry)
+        {
+            return entry.path.starts_with("/Game/00MainHZ/BossRush/Tamer/");
+        });
+        CHECK(candidate != before.end());
+        if (candidate == before.end()) return;
+        const auto existingId = candidate->id;
+        const auto originalName = candidate->name;
+        const auto record = [](std::string_view classPath, const wchar_t *assetName, const wchar_t *assetClass = L"Blueprint")
+        {
+            std::wstring path(classPath.begin(), classPath.end());
+            if (path.ends_with(L"_C")) path.resize(path.size() - 2);
+            return std::vector<eng::Arg>{eng::Arg::Name("ObjectPath", path), eng::Arg::Name("AssetName", assetName), eng::Arg::Name("AssetClass", assetClass)};
+        };
+        const std::string newPath = "/Game/00MainHZ/BossRush/Tamer/BRT_fixture_runtime_only.BRT_fixture_runtime_only_C";
+        registryRoots[unitsRoot].success = false; // BossRush must still be queried.
+        registryRoots[bossRoot].records = {
+            record(candidate->path, L"BRT_OfflineDuplicate"),
+            record(newPath, L"BRT_fixture_runtime_only"),
+            record(newPath, L"brt_fixture_runtime_only", L"BlueprintGeneratedClass"),
+            record("/Game/Fixture/SK_skip.SK_skip_C", L"SK_skip"),
+            record("/Game/Fixture/BRT_material.BRT_material_C", L"BRT_material", L"Material"),
+            {eng::Arg::Name("ObjectPath", L"invalid")}};
+        CHECK(trans::RequestCatalogRefresh().success);
+        Tick(); Tick();
+        CHECK(queriedRegistryRoots == std::vector<std::wstring>{unitsRoot, bossRoot});
+        auto entries = trans::Catalog();
+        CHECK(entries.size() == before.size() + 1);
+        const auto offline = std::find_if(entries.begin(), entries.end(), [&](const auto &entry) { return entry.id == existingId; });
+        CHECK(offline != entries.end());
+        CHECK(offline->name == originalName && offline->discovered && offline->support == trans::Support::Unverified);
+        const auto dynamicId = trans::model::StableId(newPath);
+        const auto dynamic = std::find_if(entries.begin(), entries.end(), [&](const auto &entry) { return entry.id == dynamicId; });
+        CHECK(dynamic != entries.end());
+        CHECK(dynamic->discovered && dynamic->support == trans::Support::Unverified);
+        CHECK(!trans::GetStatus().catalogComplete);
+        CHECK(trans::GetStatus().catalogMessage.find("部分目录枚举失败") != std::string::npos);
+        CHECK(trans::GetStatus().catalogMessage.find("2 个 Tamer") != std::string::npos);
+        queriedRegistryRoots.clear();
+        CHECK(trans::RequestCatalogRefresh().success);
+        Tick(); Tick();
+        CHECK(trans::Catalog().size() == entries.size());
+        CHECK(queriedRegistryRoots == std::vector<std::wstring>{unitsRoot, bossRoot});
+
+        // Reverse the failure: a missing BossRush root must also retain Units.
+        registryRoots[unitsRoot].success = true;
+        registryRoots[unitsRoot].records = {record("/Game/00Main/Design/Units/TAMER_fixture_extra.TAMER_fixture_extra_C", L"TAMER_fixture_extra")};
+        registryRoots[bossRoot].success = false;
+        queriedRegistryRoots.clear();
+        CHECK(trans::RequestCatalogRefresh().success);
+        Tick(); Tick();
+        CHECK(trans::Catalog().size() == entries.size() + 1);
+        CHECK(queriedRegistryRoots == std::vector<std::wstring>{unitsRoot, bossRoot});
+        CHECK(!trans::GetStatus().catalogComplete);
+        CHECK(trans::GetStatus().catalogMessage.find("部分目录枚举失败") != std::string::npos);
+
+        // Both available roots still make no claim to a complete form catalog.
+        registryRoots[bossRoot].success = true;
+        registryLoadingKnown = false;
+        CHECK(trans::RequestCatalogRefresh().success);
+        Tick(); Tick();
+        CHECK(trans::Catalog().size() == entries.size() + 1);
+        CHECK(!trans::GetStatus().catalogComplete);
+        CHECK(trans::GetStatus().catalogMessage.find("部分目录枚举失败") == std::string::npos);
+        CHECK(trans::GetStatus().catalogMessage.find("资源仍可能加载中") != std::string::npos);
+
+        // Restore the seeded list so the independent gameplay fixtures below
+        // do not inherit registry-only synthetic assets or live discovery flags.
+        trans::catalog = before;
+        registryAvailable = false;
+        std::cout << "PASS Asset Registry scans Units and BossRush independently, preserves PAK names, deduplicates repeated assets, and reports partial coverage\n";
+    }
+
+    void PakOnlyBossRushCandidateUsesTheNormalInitializationAndRestorePipeline()
+    {
+        InitializeWorld();
+        const auto entries = trans::Catalog();
+        const auto candidate = std::find_if(entries.begin(), entries.end(), [](const auto &entry)
+        {
+            return entry.path.starts_with("/Game/00MainHZ/BossRush/Tamer/");
+        });
+        CHECK(candidate != entries.end());
+        if (candidate == entries.end()) return;
+        const auto id = candidate->id;
+        CHECK(candidate->support == trans::Support::Unverified && !candidate->discovered);
+        StartAndReachActivation(candidate->path);
+        CHECK(trans::GetStatus().phase == trans::Phase::Active && trans::GetStatus().activeId == id);
+        CHECK(validSpawnRequests == 2 && weaponInitializeCalls == 1);
+        const auto proxy = Proxy(), tamer = Tamer();
+        CHECK(proxy && tamer);
+        CHECK(trans::Restore().success);
+        Tick();
+        CHECK(trans::GetStatus().phase == trans::Phase::Idle);
+        CHECK(!Alive(proxy) && !Alive(tamer));
+        CHECK(Get<std::int32_t>(Player, "bHidden") == 0);
+        CHECK(objects[Player].collision["enabled"]);
+        const auto after = trans::Catalog();
+        const auto entry = std::find_if(after.begin(), after.end(), [&](const auto &item) { return item.id == id; });
+        CHECK(entry != after.end() && entry->support != trans::Support::Verified);
+        std::cout << "PASS PAK-only BossRush candidate reaches the real driver initialization and restore pipeline through mocked engine boundaries; this is not in-game validation\n";
     }
 
     void BeginCanBeAttemptedWithoutInspectionForUnverifiedOrUnavailableEntries()
@@ -3621,6 +4203,13 @@ namespace fixture
         CHECK(trans::GetStatus().phase == trans::Phase::Active);
         const auto id = trans::GetStatus().activeId;
         CHECK(SameSkillIds(trans::SkillsFor(id).skills, instanceSkillIds));
+        const auto defaults = trans::Bindings(id);
+        CHECK(defaults.size() == 2);
+        if (defaults.size() == 2)
+        {
+            CHECK(defaults[0].skillId == 42001 && defaults[0].key == 1);
+            CHECK(defaults[1].skillId == 42002 && defaults[1].key == 2);
+        }
         CHECK(ConfigureTestSkillSlot({42002}));
         CHECK(!trans::TriggerSkill(41001).success);
         CHECK(trans::TriggerSkill(42002).success);
@@ -3668,6 +4257,18 @@ namespace fixture
         CHECK(SameSkillIds(trans::Skills(), {42011, 42012, 42013, 42014}));
         CHECK(!trans::SkillsFor("not-inspected").inspected);
         CHECK(trans::SkillsFor("not-inspected").skills.empty());
+        CHECK(trans::Bindings("not-inspected").empty());
+        const auto yangBindings = trans::Bindings(yangjian->id);
+        const auto dashengBindings = trans::Bindings(dasheng->id);
+        CHECK(yangBindings.size() == 2 && dashengBindings.size() == 4);
+        if (yangBindings.size() == 2 && dashengBindings.size() == 4)
+        {
+            CHECK(yangBindings[0].skillId == 41011 && yangBindings[0].key == 1);
+            CHECK(dashengBindings[0].skillId == 42011 && dashengBindings[0].key == 1);
+            CHECK(dashengBindings[3].skillId == 42014 && dashengBindings[3].key == '2');
+        }
+        CHECK(hotkeyConflictProbe && !hotkeyConflictProbe(1, 0).empty());
+        CHECK(hotkeyConflictProbe && hotkeyConflictProbe(1, gloss::features::Ctrl).empty());
         std::cout << "PASS inspected skill snapshots remain keyed to each character while the current list changes\n";
     }
 
@@ -3678,6 +4279,65 @@ namespace fixture
             if (left[i].skillId != right[i].skillId || left[i].customName != right[i].customName ||
                 left[i].key != right[i].key || left[i].modifiers != right[i].modifiers) return false;
         return true;
+    }
+
+    void DefaultBindingsPreserveSavedEditsAndExplicitEmptyConfigurations()
+    {
+        InitializeWorld();
+        availableSkillIds.clear();
+        for (int i = 0; i < 14; ++i) availableSkillIds.push_back(51014 - i);
+        StartAndReachActivation();
+        CHECK(trans::GetStatus().phase == trans::Phase::Active);
+        const auto id = trans::GetStatus().activeId;
+        const auto defaults = trans::Bindings(id);
+        constexpr std::array<unsigned, 14> expected{1, 2, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 0, 0};
+        CHECK(defaults.size() == expected.size());
+        for (std::size_t i = 0; i < defaults.size() && i < expected.size(); ++i)
+        {
+            CHECK(defaults[i].skillId == availableSkillIds[i]);
+            CHECK(defaults[i].key == expected[i] && defaults[i].modifiers == 0);
+            CHECK(defaults[i].customName.empty());
+        }
+        // Use the effective binding directly, without first saving the editor.
+        CHECK(trans::TriggerSkillHotkey(id, defaults.front().skillId).success);
+        Tick();
+        CHECK(requestedSkillIds == std::vector<int>{51014});
+        CHECK(trans::Restore().success);
+        Tick();
+
+        auto custom = defaults;
+        custom[0].customName = "保留自定义名称与留空";
+        custom[0].key = 0;
+        custom[2].key = 'Q';
+        custom[2].modifiers = gloss::features::Ctrl;
+        CHECK(trans::SetBindings(id, custom).success);
+        std::reverse(availableSkillIds.begin(), availableSkillIds.end());
+        availableSkillIds.push_back(59999);
+        CHECK(trans::Inspect(id).success);
+        Tick();
+        CHECK(SameBindings(trans::Bindings(id), custom));
+        // Reordering or extending the game list must never reassign saved IDs.
+        const auto file = gloss::DataDirectory() / L"transformation-bindings.cfg";
+        {
+            std::ifstream in(file, std::ios::binary);
+            const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+            binding_model::Config decoded;
+            CHECK(binding_model::Parse(text, decoded).success);
+            CHECK(decoded.contains(id) && SameBindings(decoded.at(id), custom));
+        }
+        CHECK(trans::SetBindings(id, {}).success);
+        CHECK(trans::Bindings(id).empty());
+        CHECK(trans::Inspect(id).success);
+        Tick();
+        CHECK(trans::Bindings(id).empty());
+        {
+            std::ifstream in(file, std::ios::binary);
+            const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+            binding_model::Config decoded;
+            CHECK(binding_model::Parse(text, decoded).success);
+            CHECK(decoded.contains(id) && decoded.at(id).empty());
+        }
+        std::cout << "PASS defaults work before save and saved names, cleared keys and empty configurations take priority\n";
     }
 
     void PerSkillRequestsWaitForMenuAndFocusAndDispatchOnlyOnce()
@@ -3850,6 +4510,8 @@ namespace fixture
 int main()
 {
     fixture::CompiledReferenceCatalogDeduplicatesPathsWithoutPromotingSupport();
+    fixture::RegistryScanIncludesBossRushAndRetainsPartialRootResults();
+    fixture::PakOnlyBossRushCandidateUsesTheNormalInitializationAndRestorePipeline();
     fixture::BeginCanBeAttemptedWithoutInspectionForUnverifiedOrUnavailableEntries();
     fixture::ActivationFailureRestoresPartialChanges();
     fixture::WeaponInitializationRunsOnceAfterOwnerVisibilityAndFailureRestores();
@@ -3868,6 +4530,11 @@ int main()
     fixture::LocomotionGraphDiagnosticsReadRealMirrorsAndRespectAllGates();
     fixture::NativeMovementContractsUseDeclaredNamesTypesAndControllerOriginalName();
     fixture::MotionMatchingMovementRequestsChooseRoleResourcesAndKeepUnknownDistinct();
+    fixture::RoleLockAnalyzerWithoutTargetKeepsFreeMovementAndRestoresNormally();
+    fixture::MotionMatchingFacingRespectsIntentAndEveryPause();
+    fixture::FacingOverrideTransitionsCancelBeforeRealLocksAndOtherMovers();
+    fixture::MappedSprintSelectsRoleSprintGaitAndReturnsToAnalogWalking();
+    fixture::LastMovementInputTelemetryReadsThePawnAndRemainsOptional();
     fixture::MissingOrUnknownAnimationsKeepNativeJogAndLockedMovementContinuous();
     fixture::AnimationFallbackStillHonorsGameplayPausesAndCancelsOnlyItsOwnMovement();
     fixture::NativeLocomotionKeepsRequestsContinuousAndStopsOnlyItsOwnIndex();
@@ -3892,6 +4559,7 @@ int main()
     fixture::QueuedSkillSlotIsCancelledOnWorldGenerationChange();
     fixture::InitializedProxySkillSnapshotOverridesClassDefaults();
     fixture::SkillSnapshotsStayScopedToTheInspectedCharacter();
+    fixture::DefaultBindingsPreserveSavedEditsAndExplicitEmptyConfigurations();
     fixture::PerSkillRequestsWaitForMenuAndFocusAndDispatchOnlyOnce();
     fixture::PerSkillBindingsValidateIdsAndRollbackMemoryAndFileFailures();
     fixture::PerCharacterCameraPersistsUpdatesAtomicallyAndRestoresThePlayerBaseline();
@@ -3903,6 +4571,8 @@ int main()
     fixture::UnreadableCinematicStateRestoresWithoutTeleportingTheRetainedPlayer();
     fixture::CinematicActivationIsRejectedBeforePlayerMutation();
     fixture::NonCinematicIsolationChangesAreReassertedOnlyWhenRequired();
+    fixture::PerCharacterSpeedMultipliersPreserveNativeGaitsAndPersistAtomically();
+    fixture::MovementSpeedMultiplierReleasesOnEveryPauseAndFailedWrite();
     if (fixture::failures)
     {
         std::cerr << fixture::failures << " transformation runtime assertion(s) failed\n";

@@ -43,6 +43,11 @@ namespace gloss::gameplay::transformation
         std::string customName;
         unsigned key{}, modifiers{};
     };
+    struct MovementSpeedSettings
+    {
+        float normal{1.f}, sprint{1.f};
+        friend bool operator==(const MovementSpeedSettings &, const MovementSpeedSettings &) = default;
+    };
     struct Capabilities
     {
         bool catalog{}, spawn{}, skills{}, input{}, movement{}, recovery{}, isolation{};
@@ -75,12 +80,18 @@ namespace gloss::gameplay::transformation
     features::Result TriggerSlot(std::size_t index);
     // Per-character records use actual skill IDs. Empty names preserve the game
     // name, and key == 0 leaves a skill unbound. No fixed action-slot limit.
+    // Without a saved character record, the inspected list defaults to mouse
+    // left/right, top-row 1..9/0, then unbound. Saved records always take priority.
     std::vector<SkillBinding> Bindings(std::string_view id);
     features::Result SetBindings(std::string_view id, std::vector<SkillBinding> bindings);
     // Zero selects automatic sizing. Overrides are per stable character ID and
     // persist separately from skill names/chords; engine writes occur in Tick.
     float CameraDistance(std::string_view id);
     features::Result SetCameraDistance(std::string_view id, float meters);
+    // Per-character gait multipliers, 0.10..5.00. One retains the role's native
+    // speed. Applied only to owned locomotion; skill/cinematic movement is native.
+    MovementSpeedSettings GetMovementSpeed(std::string_view id);
+    features::Result SetMovementSpeed(std::string_view id, MovementSpeedSettings settings);
     features::Result TriggerSkill(int skillId);
     bool IsActive();
     bool NeedsExclusiveControl();

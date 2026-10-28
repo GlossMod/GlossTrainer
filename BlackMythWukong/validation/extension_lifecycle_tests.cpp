@@ -333,6 +333,39 @@ namespace fixture
         CHECK(gmCalls == 1); // Restoration work is allowed during exclusive control.
     }
 
+    void PendingSettingsReceiveTerminalResults()
+    {
+        Reset();
+        const auto queued = ex::SetEnabled(Id::NoGravity, true, 0);
+        CHECK(queued.success && queued.pending);
+        const auto busy = ex::SetEnabled(Id::HidePlayer, true, 0);
+        CHECK(!busy.success && busy.retryable && !busy.pending);
+        now += 30001;
+        Frame();
+        CHECK(!ex::GetStatus().pending);
+        CHECK(!ex::Query(Id::NoGravity).enabled);
+        CHECK(completed.size() == 1);
+        if (!completed.empty()) {
+            CHECK(completed.back().first == Id::NoGravity);
+            CHECK(!completed.back().second.success);
+        }
+
+        Reset();
+        const auto throwing = ex::Queue([]() -> gloss::features::Result {
+            throw std::runtime_error("synthetic backend failure");
+        }, Id::NoGravity);
+        CHECK(throwing.success && throwing.pending);
+        Frame();
+        CHECK(!ex::GetStatus().pending);
+        CHECK(!ex::request);
+        CHECK(completed.size() == 1);
+        if (!completed.empty()) {
+            CHECK(completed.back().first == Id::NoGravity);
+            CHECK(!completed.back().second.success);
+        }
+        Toggle(Id::NoGravity, true); // The failed slot is reusable.
+    }
+
     void UpdateBarrierCancelsQueuedEnableAcrossFailedRetry()
     {
         Reset();
@@ -1099,6 +1132,7 @@ namespace gloss
 
 int main()
 {
+    fixture::PendingSettingsReceiveTerminalResults();
     fixture::TransformationExclusivitySuspendsConflictsAndRestoresThem();
     fixture::TransformationCancelsAlreadyQueuedConflictingEnable();
     fixture::UpdateBarrierRestoresMultipleSwitchesAndCancelsOldAction();

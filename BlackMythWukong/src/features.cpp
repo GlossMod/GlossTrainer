@@ -1,4 +1,5 @@
 #include "features.hpp"
+#include "feature_settings.hpp"
 #include "runtime.hpp"
 #include <Windows.h>
 #include <algorithm>
@@ -129,6 +130,130 @@ namespace gloss::features
         Result menuHotkeyResult{true, {}};
         std::recursive_mutex hotkeyFileMutex;
         std::function<std::string(unsigned, unsigned)> externalHotkeyConflict;
+        // Lock order: operationMutex -> settingsFileMutex -> modelMutex. No code
+        // holds modelMutex during backend calls, disk I/O, or logging. Completion
+        // callbacks never acquire operationMutex (they can run on the game thread).
+        std::mutex settingsFileMutex;
+        bool settingsInitialized{};
+        std::uint64_t settingsRevision{}, persistedSettingsRevision{};
+        ULONGLONG nextSaveAttempt{};
+        settings::Data savedSettings;
+        enum class RestorePhase { None, Waiting, InFlight, Cleanup };
+        struct RestoreState
+        {
+            RestorePhase phase{};
+            ULONGLONG nextAttempt{};
+            unsigned cleanupAttempts{};
+        };
+        struct PendingWrite
+        {
+            bool active{}, restoring{}, enabled{}, cancelled{};
+            double value{};
+        };
+        std::array<RestoreState, Count> restorations{};
+        std::array<PendingWrite, Count> pendingWrites{};
+        std::size_t restoreCursor{};
+        Result Record(Id id, Result result);
+        void LogResult(Id id, const Result &result)
+        {
+            Log(std::format("Feature {}: {}{}", static_cast<unsigned>(id), result.success ? "success" : "failed", result.message.empty() ? "" : ": " + result.message));
+        }
+        void SaveSettings()
+        {
+            std::lock_guard fileLock(settingsFileMutex);
+            settings::Data data;
+            std::uint64_t revision{};
+            {
+                std::lock_guard lock(modelMutex);
+                if (!settingsInitialized || settingsRevision == persistedSettingsRevision) return;
+                data = savedSettings;
+                revision = settingsRevision;
+                nextSaveAttempt = GetTickCount64() + 5000;
+            }
+            try {
+                if (settings::Save(DataDirectory() / L"features.ini", data)) {
+                    std::lock_guard lock(modelMutex);
+                    persistedSettingsRevision = revision;
+                    return;
+                }
+            }
+            catch (...) {}
+            Log("Feature settings save failed; original features.ini retained");
+        }
+        void CancelRestoration(std::size_t index, bool cancelUserWrite = false)
+        {
+            auto &restore = restorations[index];
+            auto &pending = pendingWrites[index];
+            if (pending.active && pending.enabled && (pending.restoring || cancelUserWrite)) {
+                pending.cancelled = true;
+                restore.phase = RestorePhase::Cleanup;
+                restore.nextAttempt = 0;
+            }
+            else if (restore.phase != RestorePhase::Cleanup)
+                restore.phase = RestorePhase::None;
+        }
+        // Called with modelMutex. The request is installed BEFORE invoking the
+        // backend, so an unusually fast CompleteAction cannot lose its result.
+        bool FinishWrite(std::size_t index, const Result &result, bool completion)
+        {
+            auto &pending = pendingWrites[index];
+            if (!pending.active) return false;
+            if (!completion && result.success && result.pending) return false;
+            const auto finished = pending;
+            pending = {};
+            auto &restore = restorations[index];
+            if (finished.cancelled) {
+                restore.phase = RestorePhase::Cleanup;
+                restore.nextAttempt = 0;
+                return false;
+            }
+            if (finished.restoring) {
+                if (!finished.enabled) {
+                    // Cancellation compensation is bounded as well. A failed
+                    // shutdown is reported, never converted back into an enable.
+                    if (!result.success && !result.retryable) ++restore.cleanupAttempts;
+                    restore.phase = !result.success && (result.retryable || restore.cleanupAttempts < 5) ? RestorePhase::Cleanup : RestorePhase::None;
+                }
+                else restore.phase = !result.success && result.retryable ? RestorePhase::Waiting : RestorePhase::None;
+                restore.nextAttempt = GetTickCount64() + 1000;
+                return false; // Runtime failure never overwrites saved startup intent.
+            }
+            if (!result.success) return false;
+            auto &saved = savedSettings.features[index];
+            saved.enabled = finished.enabled;
+            if (finished.enabled) saved.appliedValue = finished.value;
+            ++settingsRevision;
+            return true;
+        }
+        Result SubmitWrite(const Backend &current, Id id, bool enabled, double value, bool restoring)
+        {
+            const auto index = static_cast<std::size_t>(id);
+            {
+                std::lock_guard lock(modelMutex);
+                if (settingsInitialized) {
+                    if (pendingWrites[index].active) return {false, "上一项操作尚未完成", false, true};
+                    pendingWrites[index] = {true, restoring, enabled, false, value};
+                }
+            }
+            Result result;
+            try { result = current.setEnabled(id, enabled, value); }
+            catch (...) { result = {false, "切换功能失败；请查看日志"}; }
+            bool save{}, record{};
+            {
+                std::lock_guard lock(modelMutex);
+                record = !settingsInitialized || pendingWrites[index].active;
+                save = FinishWrite(index, result, false);
+                if (record) {
+                    editors[index].message = result.message;
+                    editors[index].actionFailed = !result.success;
+                }
+            }
+            if (save) SaveSettings();
+            // Completion has already recorded a more precise result. Do not let
+            // the caller replace it with a late "queued" acknowledgement.
+            if (record) LogResult(id, result);
+            return result;
+        }
         std::string ExternalHotkeyConflict(unsigned key, unsigned modifiers)
         {
             std::function<std::string(unsigned, unsigned)> probe;
@@ -237,7 +362,7 @@ namespace gloss::features
                 editors[Index(id)].message = result.message;
                 editors[Index(id)].actionFailed = !result.success;
             }
-            Log(std::format("Feature {}: {}{}", static_cast<unsigned>(id), result.success ? "success" : "failed", result.message.empty() ? "" : ": " + result.message));
+            LogResult(id, result);
             return result;
         }
         Result Unavailable(Id id, const BackendState &state)
@@ -283,6 +408,75 @@ namespace gloss::features
         if (updateRequired.load())
             DisableEnabledFeatures(GetBackend());
     }
+    void InitializeSettings()
+    {
+        std::lock_guard operationLock(operationMutex);
+        std::lock_guard fileLock(settingsFileMutex);
+        auto loaded = settings::Defaults();
+        bool valid{};
+        try { valid = settings::Load(DataDirectory() / L"features.ini", loaded); }
+        catch (...) {}
+        {
+            std::lock_guard lock(modelMutex);
+            savedSettings = loaded;
+            hotkeysEnabled = loaded.hotkeysEnabled;
+            settingsInitialized = true;
+            settingsRevision = persistedSettingsRevision = 0;
+            nextSaveAttempt = 0;
+            restorations = {};
+            pendingWrites = {};
+            restoreCursor = 0;
+            for (std::size_t i = 0; i < Count; ++i) {
+                editors[i].value = loaded.features[i].value;
+                editors[i].message.clear();
+                editors[i].actionFailed = false;
+                if (loaded.features[i].enabled && !updateRequired.load()) restorations[i].phase = RestorePhase::Waiting;
+            }
+        }
+        Log(valid ? "Feature settings loaded" : "Feature settings missing or invalid; using defaults");
+    }
+    void RestoreSettings()
+    {
+        std::lock_guard operationLock(operationMutex);
+        const auto now = GetTickCount64();
+        bool save{};
+        {
+            std::lock_guard lock(modelMutex);
+            if (!settingsInitialized) return;
+            save = settingsRevision != persistedSettingsRevision && now >= nextSaveAttempt;
+        }
+        if (save) SaveSettings();
+        const auto current = GetBackend();
+        if (!current.setEnabled) return;
+        // Fairly examine every feature; synchronous restores can all finish in
+        // one poll, while a single-slot asynchronous backend applies one at a time.
+        const auto first = restoreCursor++ % Count;
+        for (std::size_t offset = 0; offset < Count; ++offset) {
+            const auto index = (first + offset) % Count;
+            const auto id = definitions[index].id;
+            bool cleanup{};
+            double value{};
+            {
+                std::lock_guard lock(modelMutex);
+                auto &restore = restorations[index];
+                cleanup = restore.phase == RestorePhase::Cleanup;
+                if ((!cleanup && (restore.phase != RestorePhase::Waiting || updateRequired.load())) ||
+                    pendingWrites[index].active || now < restore.nextAttempt) continue;
+                value = savedSettings.features[index].appliedValue;
+            }
+            // Query is observational; not-ready features keep their intent for
+            // a future player capture or engine initialization.
+            if (!cleanup && Query(current, id).availability != Availability::Ready) continue;
+            {
+                std::lock_guard lock(modelMutex);
+                auto &restore = restorations[index];
+                restore.phase = cleanup ? RestorePhase::Cleanup : RestorePhase::InFlight;
+                restore.nextAttempt = now + 1000;
+            }
+            const auto result = SubmitWrite(current, id, !cleanup, value, true);
+            if (result.pending) break; // Do not compete with the accepted queue slot.
+        }
+    }
     void SetUpdateRequired(bool required)
     {
         std::lock_guard operationLock(operationMutex);
@@ -291,6 +485,10 @@ namespace gloss::features
         if (required)
         {
             updateGeneration.fetch_add(1);
+            {
+                std::lock_guard lock(modelMutex);
+                for (std::size_t i = 0; i < Count; ++i) CancelRestoration(i, true);
+            }
             DisableEnabledFeatures(GetBackend());
         }
     }
@@ -312,20 +510,31 @@ namespace gloss::features
         std::lock_guard lock(modelMutex);
         const auto &editor = editors[index];
         return {state.availability, state.enabled, editor.value,
-                editor.actionFailed || state.message.empty() ? editor.message : state.message, editor.actionFailed};
+                editor.actionFailed || state.message.empty() ? editor.message : state.message, editor.actionFailed,
+                restorations[index].phase == RestorePhase::Waiting || restorations[index].phase == RestorePhase::InFlight};
     }
     bool SetValue(Id id, double value)
     {
+        std::lock_guard operationLock(operationMutex);
         const auto &definition = GetDefinition(id);
         if (definition.kind == K::Toggle || !std::isfinite(value))
             return false;
         value = std::clamp(value, definition.minimum, definition.maximum);
         if (definition.integer)
             value = std::round(value);
-        std::lock_guard lock(modelMutex);
-        editors[Index(id)].value = value;
-        editors[Index(id)].message.clear();
-        editors[Index(id)].actionFailed = false;
+        {
+            std::lock_guard lock(modelMutex);
+            const auto index = Index(id);
+            editors[index].value = value;
+            editors[index].message.clear();
+            editors[index].actionFailed = false;
+            CancelRestoration(index);
+            if (settingsInitialized) {
+                savedSettings.features[index].value = value;
+                ++settingsRevision;
+            }
+        }
+        SaveSettings();
         return true;
     }
     Result SetEnabled(Id id, bool enabled)
@@ -336,8 +545,46 @@ namespace gloss::features
             return Record(id, {false, "请下载最新版本后使用"});
         if (definition.kind == K::Action)
             return Record(id, {false, "该功能需要点击应用"});
+        bool cancelledIntent{}, stillPending{}, savedEnabled{};
+        {
+            std::lock_guard lock(modelMutex);
+            const auto index = Index(id);
+            // Cancelling a saved switch is a valid local operation even before
+            // the engine is ready. An accepted old enable is compensated later.
+            savedEnabled = settingsInitialized && savedSettings.features[index].enabled;
+            cancelledIntent = settingsInitialized && !enabled &&
+                (restorations[index].phase != RestorePhase::None ||
+                 (pendingWrites[index].active && pendingWrites[index].enabled));
+            stillPending = pendingWrites[index].active;
+            if (cancelledIntent) {
+                CancelRestoration(index, true);
+                savedSettings.features[index].enabled = false;
+                ++settingsRevision;
+            }
+            else if (!stillPending) {
+                CancelRestoration(index);
+                // A new explicit enable supersedes an old compensation request
+                // once its previous asynchronous write has finished.
+                if (enabled) restorations[index] = {};
+            }
+        }
+        if (cancelledIntent) SaveSettings();
+        if (stillPending) {
+            if (cancelledIntent) return Record(id, {true, "已关闭"});
+            return Record(id, {false, "上一项操作尚未完成", false, true});
+        }
         const auto current = GetBackend();
         const auto state = Query(current, id);
+        if (cancelledIntent && !state.enabled) return Record(id, {true, "已关闭"});
+        if (!enabled && savedEnabled && !state.enabled) {
+            {
+                std::lock_guard lock(modelMutex);
+                savedSettings.features[Index(id)].enabled = false;
+                ++settingsRevision;
+            }
+            SaveSettings();
+            return Record(id, {true, "已关闭"});
+        }
         // A previously enabled feature must remain switchable off even if the target disappeared.
         const bool canDisable = !enabled && (state.enabled || UpdateRequired()) && static_cast<bool>(current.setEnabled);
         if (!canDisable && (state.availability != Availability::Ready || !current.setEnabled))
@@ -347,14 +594,7 @@ namespace gloss::features
             std::lock_guard lock(modelMutex);
             value = editors[Index(id)].value;
         }
-        try
-        {
-            return Record(id, current.setEnabled(id, enabled, value));
-        }
-        catch (...)
-        {
-            return Record(id, {false, "切换功能失败；请查看日志"});
-        }
+        return SubmitWrite(current, id, enabled, value, false);
     }
     Result Apply(Id id)
     {
@@ -364,6 +604,19 @@ namespace gloss::features
             return Record(id, {false, "请下载最新版本后使用"});
         if (definition.kind == K::Toggle)
             return Record(id, {false, "该功能不需要参数"});
+        if (definition.kind == K::ToggleValue) {
+            bool busy{};
+            {
+                std::lock_guard lock(modelMutex);
+                const auto index = Index(id);
+                busy = pendingWrites[index].active;
+                if (!busy) {
+                    CancelRestoration(index);
+                    restorations[index] = {}; // An explicit apply supersedes old cancellation cleanup.
+                }
+            }
+            if (busy) return Record(id, {false, "上一项操作尚未完成", false, true});
+        }
         const auto current = GetBackend();
         const auto state = Query(current, id);
         if (state.availability != Availability::Ready)
@@ -380,7 +633,7 @@ namespace gloss::features
                 if (!state.enabled)
                     return Record(id, {false, "请先启用功能，再应用新参数"});
                 if (current.setEnabled)
-                    return Record(id, current.setEnabled(id, true, value));
+                    return SubmitWrite(current, id, true, value, false);
             }
             else if (current.apply)
                 return Record(id, current.apply(id, value));
@@ -459,7 +712,10 @@ namespace gloss::features
             if (definition.kind == K::Action)
                 Apply(definition.id);
             else
-                SetEnabled(definition.id, !GetSnapshot(definition.id).enabled);
+            {
+                const auto state = GetSnapshot(definition.id);
+                SetEnabled(definition.id, !(state.enabled || state.restorePending));
+            }
             return true;
         }
         return false;
@@ -474,7 +730,12 @@ namespace gloss::features
         {
             std::lock_guard lock(modelMutex);
             hotkeysEnabled = enabled;
+            if (settingsInitialized) {
+                savedSettings.hotkeysEnabled = enabled;
+                ++settingsRevision;
+            }
         }
+        SaveSettings();
         Log(enabled ? "Feature hotkeys enabled" : "Feature hotkeys disabled");
     }
     void InitializeHotkeys()
@@ -669,5 +930,17 @@ namespace gloss::features
         std::lock_guard lock(hotkeyFileMutex);
         return operation();
     }
-    void CompleteAction(Id id, Result result) { Record(id, std::move(result)); }
+    void CompleteAction(Id id, Result result)
+    {
+        bool save{};
+        {
+            std::lock_guard lock(modelMutex);
+            const auto index = Index(id);
+            save = FinishWrite(index, result, true);
+            editors[index].message = result.message;
+            editors[index].actionFailed = !result.success;
+        }
+        LogResult(id, result);
+        if (save) SaveSettings();
+    }
 }

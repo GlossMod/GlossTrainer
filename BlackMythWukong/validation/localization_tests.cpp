@@ -3,6 +3,7 @@
 #include "../src/runtime.hpp"
 #include "../src/gameplay/transformation_adapter.hpp"
 #include "../src/gameplay/transformation_bindings.hpp"
+#include "../src/gameplay/transformation_pak_catalog.hpp"
 #include <Windows.h>
 #include <algorithm>
 #include <array>
@@ -65,6 +66,7 @@ namespace
     const std::vector<Entry> entries = {
 #include "../src/localization_strings.inc"
 #include "../src/localization_catalog.inc"
+#include "../src/localization_transformation_pak.inc"
     };
     const std::vector<Entry> patterns = {
 #include "../src/localization_patterns.inc"
@@ -293,6 +295,19 @@ namespace
         std::set<std::string_view> keys;
         for (const auto &entry : entries) keys.emplace(entry.source);
         for (const auto &pattern : patterns) keys.emplace(pattern.source);
+        // Generated PAK candidates are data, not .cpp sources; verify every
+        // visible Chinese label has a complete translation, including variants.
+        for (const auto &record : gloss::gameplay::transformation::pak_catalog::Records)
+        {
+            for (const auto value : {record.name, record.category})
+            {
+                if (ContainsCjk(value) && !keys.contains(value))
+                {
+                    std::cerr << "Missing PAK catalog translation: " << value << '\n';
+                    ++test_state::failures;
+                }
+            }
+        }
         CheckSourceTranslationKeys(sourceDirectory / "overlay.cpp", "overlay.cpp", keys, true);
         // Feature result strings are translated after the model returns them to the UI.
         CheckSourceTranslationKeys(sourceDirectory / "features.cpp", "features.cpp", keys, false);

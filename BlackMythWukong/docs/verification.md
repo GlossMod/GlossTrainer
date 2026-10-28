@@ -1,6 +1,122 @@
 # 本机验证记录
 
-最近更新：2026-10-27。Windows 11 x64、Visual Studio 2022、RTX 5080，游戏 Steam build 21393610。
+最近更新：2026-10-28。Windows 11 x64、Visual Studio 2022、RTX 5080，游戏 Steam build 21393610。
+
+## v1.1.0 发布验证（2026-10-28）
+
+版本更新为 `1.1.0`，使用独立标签 `BlackMythWukong/v1.1.0`。发行说明按用户提供的四项更新维护：七十二变基础操作、记住修改项、扩展角色及翻译、角色技能快捷键设置窗口；中英文玩家说明同步更新。
+
+- 本机重新配置并构建 Debug / Release ASI，注册表内全部 21 个验证目标在两个配置中共运行 42 次，全部 exit 0。[执行结果](../../output/release-1.1.0-20261028/local-tests.json)、[Debug 构建](../../output/release-1.1.0-20261028/build-debug.log)、[Release 构建](../../output/release-1.1.0-20261028/build-release.log)、[产物 SHA-256](../../output/release-1.1.0-20261028/local-artifact-hashes.json)。
+- 首次运行发现新增 FeatureSettingsTests 强制要求输出目录参数，与 CI 无参数运行契约不兼容；现允许可选参数，默认输出至当前工作目录下的 `output/feature-settings-validation`。CI 的当前工作目录已位于仓库根 `output/validation` 内；最终 42 次执行均使用无参数入口。首次失败日志保留于[首次执行](../../output/release-1.1.0-20261028/first-attempt/)。
+- PowerShell 5.1 / 7 各通过 29 项便携包回归与 29 项发布通道隔离回归，合计 116 项检查；包仅包含规定的五个文件，不包含用户配置。[脚本原始证据](../../output/release-1.1.0-20261028/script-tests/)。
+
+本轮没有安装或启动游戏；本地仍有游戏进程记录，安装器脚本的安全前置条件不满足，未终止进程或强行执行安装器回归。GitHub 干净构建将独立执行安装器回归。此前逐项实机与 UI 证据的覆盖范围及限制保留在下文，不将本轮单元测试作为新增角色的游戏内验收。
+
+## FModel PAK 角色目录与翻译扩展（2026-10-28，已安装，待游戏实测）
+
+通过 FModel MCP 的 Asset Registry 元数据和真实 PAK 文件交叉核对，扫描到 649 个 `BUTamerActor` 父类 Tamer 包；剔除 5 个明确的模板、空对象或测试包，生成 644 条离线候选。与旧参考 246 个唯一路径有 242 条重叠，合并为 648 个离线路径，净新增 **402 个目录路径**；其中 123 个新增路径来自 `/Game/00MainHZ/BossRush/Tamer`。目录计数包含阶段、连战、召唤和 NPC 变体，不能称为新增 402 个独立角色或已验证可玩角色。旧参考路径和稳定 ID 保持优先；被新表排除的旧参考测试资源仍保留兼容。[统计](../../output/transformation-catalog-fmodel-20261028/pak-catalog-report.json)、[逐路径覆盖](../../output/transformation-catalog-fmodel-20261028/coverage.csv)、[分析](../../output/transformation-catalog-fmodel-20261028/analysis.md)。
+
+运行时启动合并离线 PAK 种子，在线刷新分别枚举 `/Game/00Main/Design/Units` 和 `/Game/00MainHZ/BossRush/Tamer`；任一根失败不会丢弃另一根结果。新增 `BRT_` 候选识别，但仍校验资源类型。离线条目保持 `Unverified`、`discovered=false`，`catalogComplete=false`；未验证角色可以直接尝试，仍走原有 CDO、技能、移动、隔离与初始化链。显示变体后缀不写入 `form`，旧名称、按键、视距、普通/疾跑倍率的稳定配置键与格式不变。
+
+242 项沿用旧路径名称；137 项根据原始 UAsset NameMap 的精确 UNIT 类引用、3 项根据去除 `TAMER_`/`BRT_` 后完全一致的资源名继承旧参考名称，并用完整资源名区分变体。这些是旧参考名称的关联线索，不能证明官方身份、相同动作或阶段。剩余 262 项保留技术名，大圣残躯/P2等歧义未强行合并。中文 StringTable 严格解析 38,822 个唯一键值，按 namespace/key 与英文 locres 对应得到 393 个基础 `UnitName`（含别名 1,572 项）；新增 154 个翻译键，包括 140 个变体完整标签和 14 个基础译名，官方英文只在中文源文本完全相等时使用，其余已确认描述沿用旧词典。[源表布局及哈希](../../output/transformation-catalog-fmodel-20261028/official-character-names-manifest.json)、[逐包名称依据](../../output/transformation-catalog-fmodel-20261028/pak-catalog-metadata.json)。
+
+Debug / Release 的 `GlossTrainerTransformationTests`、`GlossTrainerTransformationRuntimeTests`、`GlossTrainerLocalizationTests` 各执行一次，6 次运行全部通过；两配置 ASI 构建通过。配置、构建、执行合计 16 步均 exit 0，[原始命令与日志](../../output/transformation-catalog-fmodel-20261028/test-results.json)。新增回归覆盖离线目录去重、保留旧 ID/名称及配置关联、重复播种不覆盖已有诊断、BRT 名称过滤、双根部分失败与加载状态，以及所有中文标签的翻译覆盖。生产驱动从真实离线表选取 PAK-only BRT 路径，在模拟引擎边界下完成 Begin→Active→Restore，并断言未提升为 Verified；这是后端合成测试，没有在游戏中生成或操控该角色。[Runtime Debug](../../output/transformation-catalog-fmodel-20261028/debug-GlossTrainerTransformationRuntimeTests-run.log) / [Release](../../output/transformation-catalog-fmodel-20261028/release-GlossTrainerTransformationRuntimeTests-run.log)。
+
+新增数据另通过 644 个包的哈希/NameMap/映射来源复验、中文标签翻译完整性、7 个损坏或越界 FString 拒绝，以及 5 个生成文件逐字节确定性比较。[数据验证](../../output/transformation-catalog-fmodel-20261028/pak-catalog-validation.json)。缺少 `.usmap`，本轮不能完整解析 Tamer 属性；StringTable 自身不含资产路径，不以描述符数字推测 `ResID`/`OverrideID`，也没有修改游戏资源。
+
+DX11 隔离可视宿主 6/6 场景通过：中英文×亮暗的四个场景实际输入搜索并点击精确 BRT 稳定 ID，另有中英文两项全目录只读场景。[汇总](../../output/transformation-catalog-fmodel-20261028/catalog-ui-results.json)、[暗色中文](../../output/transformation-catalog-fmodel-20261028/ui/catalog-dark-zh/GlossTrainer.Host-open.png)、[亮色中文](../../output/transformation-catalog-fmodel-20261028/ui/catalog-light-zh/GlossTrainer.Host-open.png)、[暗色英文](../../output/transformation-catalog-fmodel-20261028/ui/catalog-dark-en/GlossTrainer.Host-open.png)、[亮色英文](../../output/transformation-catalog-fmodel-20261028/ui/catalog-light-en/GlossTrainer.Host-open.png)。四组截图已查看；英文名称中的逗号沿用 `ImGuiTextFilter` 的 OR 语义，可能显示多个结果，目标仍可选择；较长英文详情标题仍受卡片边界裁切，本轮未修改布局。宿主使用真实离线目录和模拟游戏边界，没有启动游戏；本项不代表生产 DX12 宿主、游戏内搜索或新增角色变身效果通过。
+
+用户确认文件占用解除后，于北京时间 15:45 仅替换已知 ASI，安装 Release `B764662D15D4C812F76285097191DFFE00E560E46F2458D6B8FFC9BFF8CF73F1`；构建、留档和安装三份哈希一致，上一版 `5E6F18F3` 已备份为 `previous-installed.asi`，加载器及既有配置哈希完全一致。[安装回执](../../output/transformation-catalog-fmodel-20261028/delivery.json)。此前停止残留进程的尝试失败，不能称进程记录已彻底清除；主流程没有停止持有其句柄的网络服务。本轮未进入或操作游戏，未新增任何角色的游戏内验收。
+
+## 修改项配置保存与启动恢复（2026-10-28）
+
+新增 `GlossTrainer/features.ini`：按稳定英文功能名记录开关、编辑值、上次成功应用值和功能快捷键总开关。启动在输入/图形 Hook 暴露控件之前读取配置；后台等待各功能就绪后恢复一次。仅暂存的数值保持在输入框，游戏恢复使用上次已应用值；一次性动作不重放。现有快捷键、界面、语言、书签和变身配置继续使用各自文件。等待中的开关可关闭；已入队开启若来不及取消，则完成后补发关闭。新手动开启或应用可取代尚未执行的关闭补偿。
+
+配置采用版本检查、有限数值与范围校验、同目录临时文件刷新后替换。写入失败保留旧文件并每五秒重试；实际恢复失败保留配置与失败信息，不循环启用。更新限制取消本次恢复并关闭活动项，解除限制不会重新开启；偏好保留供下次启动读取。扩展队列明确区分已排队、可重试繁忙、实际完成，并补齐超时和异常完成通知。
+
+Debug / Release 均编译 ASI，并执行 FeatureSettings、Gameplay、ExtensionLifecycle、TransformationHotkey、Update、Localization 六个测试目标（共 12 次），全部通过。新增测试使用真实配置文件 I/O 与模型、模拟后端及确定性时钟，覆盖配置往返、暂存/应用分离、动作不重放、Unavailable/Waiting→Ready、等待取消、已排队取消及补关闭、忙队列重试、异步失败、即时完成竞态、同 ID 重复写拒绝、取消后重新启用/应用、更新屏障、非法配置、原文件保护和失败后补写。扩展生命周期测试执行真实队列实现，验证超时及异常通知后槽位可复用。原始命令、退出码与日志见[验证结果](../../output/feature-settings-20261028/results.json)，构建产物见[SHA-256](../../output/feature-settings-20261028/artifact-hashes.json)。
+
+本轮未安装到游戏目录、未进行游戏重启实测；测试通过只确认配置与恢复调度契约，不替代各功能在真实存档中的效果验收。已有变身改动保留。
+
+## 技能名称与按键绑定独立窗口（2026-10-28）
+
+针对角色视距和速度控件挤压技能表，将技能搜索、名称编辑、按键录制、清除、试招及保存/重载移入独立顶层窗口。主变身页只保留入口和统计。默认 `820×600`，可拖动缩放，当前 1280×720 夹具能看到 7 行（含底部部分行）；窗口标题固定显示正在编辑的角色，编辑目标只随入口点击改变。草稿按角色保留，关闭窗口、折叠、关主菜单先合并已经完成的录制，再取消尚未完成的录制。保存失败不清草稿，失败原因在窗口内可见。`SetVisible` 使用既有递归 `OverlayMutex`，与渲染和输入序列化草稿变更。
+
+按要求尝试 `custom-imagegen`，仍返回 `429 model_cooldown`，没有生成图可查看；沿用用户此前明确授权的现有亮暗样式，保留[提示词](../../output/transformation-skill-window-20261028/ui-prototype-prompt.txt)、[失败日志](../../output/transformation-skill-window-20261028/imagegen.log)与[授权适用说明](../../output/transformation-skill-window-20261028/prototype-status.md)。实际页面截图另行检查，不声称为生成原型。
+
+Debug/Release 的 Binding、Hotkey、Localization、IME 四目标共 8 次运行及两配置 ASI 编译通过，20 步构建/测试结果见[命令与日志](../../output/transformation-skill-window-20261028/test-results.json)。首次 Debug 链接返回无详细原因的 `-1`，保留[首次结果](../../output/transformation-skill-window-20261028/first-build-attempt/)，详细模式重试成功后重新完整执行两配置通过。
+
+DX11 visual-only 夹具 7 个场景通过，覆盖主页面入口、中英文亮暗窗口、成功编辑流程和失败保存流程。[汇总](../../output/transformation-skill-window-20261028/fixture-results.json)。实际向 ImGui 内部队列注入鼠标/文本事件，检查窗口拖动 `(+45,+18)`、缩放 `(-80,-45)`、Ctrl+A 改名；按键按钮启动真实 recorder 后注入 Ctrl+K；再次录制后 X 关闭验证取消和草稿保留，重开验证成功/失败保存、清除重载、跨页、主菜单隐藏恢复。两次演练各54帧，没有向桌面或游戏注入系统输入。[成功日志](../../output/transformation-skill-window-20261028/screenshots/edit-lifecycle/fixture-runtime.log)、[失败注入日志](../../output/transformation-skill-window-20261028/screenshots/failed-save/fixture-runtime.log)。最初夹具 `Begin` 宏误改非 ImGui 方法造成编译失败，已改为控件观察，原失败日志保留；夹具未进入生产 ASI。最终暖灰金标题栏和缩放角颜色修改后，两配置构建/测试与7个夹具场景重新通过，已查看[亮暗中英文截图](../../output/transformation-skill-window-20261028/screenshots/light-dark-contact.png)及[主页面入口](../../output/transformation-skill-window-20261028/screenshots/main-dark-zh-CN.png)。夹具源快照见[目录](../../output/transformation-skill-window-20261028/fixture-sources/)。
+
+本轮不修改游戏接口与配置格式，已有名称、按键、视距和速度配置沿用。生产 DX11/DX12 常规宿主此前的焦点/截图失败记录保留在下节，本轮没有将其重新宣称为通过。独立夹具验证仅覆盖界面与 mock 保存；实际游戏窗口中的输入法候选、物理鼠标/手柄输入和角色行为仍属于游戏实测。
+
+确认游戏停止后，仅替换已知 ASI 为 `5E6F18F3185B2F3122979E745EEDA7CC8DD4A240505A9D53BC928D310448C65E`，构建、快照和安装三份哈希一致。旧版 `CCCCA5AA` 已备份，加载器及既有顶层配置文件前后哈希不变。[安装回执](../../output/transformation-skill-window-20261028/delivery.json)、[保留前](../../output/transformation-skill-window-20261028/preserved-before.json) / [后](../../output/transformation-skill-window-20261028/preserved-after.json)。本轮未启动或操作游戏，不据此提升角色支持状态。
+
+## 按角色配置普通/疾跑倍率（2026-10-28，已安装，待游戏实测）
+
+用户确认当前角色移动与加速均已正常；这条反馈验收已有移动/疾跑链，不代表所有角色均完成验证。新增独立的普通、疾跑倍率配置，默认均为 `1.00`，允许 `0.10–5.00`。反射入口 `BGUAISetSpeedRate(Unit, SpeedRate)` 操作临时角色的 Custom 槽；原生 `MoveSpeedRate` 槽继续选择 JOG/RUN/SPRINT，未改 CMC 速度上限或动画播放速度。[静态调用链](../../output/transformation-speed-20261028/analysis.md)、[枚举元数据](../../output/transformation-speed-20261028/speed-ctrl-enum.json)。本轮 REA 确认 EXE SHA-256 `cba6127df85fe6aedf5a71b398f268c8a963c7b19582c3cac087462518358e9a`；原生 provider 未配置，速度入口依据复用本地同构建 ILSpy 导出，不宣称 REA 已提供原生反编译。
+
+Debug / Release 的 Speed、Runtime、Localization 三个目标共六次执行与两配置 ASI 编译通过。[原始命令与日志](../../output/transformation-speed-20261028/test-results.json)。新增覆盖角色隔离、普通/疾跑/摇杆慢走选择、默认无写入、游戏重置后重申、配置重载及保存失败回滚；覆盖停步、菜单、失焦、受控、技能、过场、退出、被拒移动，以及 NotCalled/Completed/Indeterminate 失败、释放失败重试、地址复用不写。Mock 只验证派发和恢复契约，不替代倍率实际生效和动画观感的游戏实测。
+
+变身页新增默认折叠的“移动速度”，放在角色视距下方。普通/疾跑两行分别保存倍率、支持 Ctrl+点击输入和单项“原速”复位。提交时重新获取另一项，避免旧 UI 草稿覆盖已保存值；提交失败回读持久值，界面同步回滚。仅此角色的配置写入 `transformation-speed.cfg`，技能和视距配置文件保持独立。
+
+custom-imagegen 原型生成连续 5 次返回 `429 model_cooldown` 后，用户明确回复“允许沿用现有样式继续”。本轮按该授权实现页面，未把实装截图作为生成原型。[提示词](../../output/transformation-speed-20261028/ui-prototype-prompt.txt)、[失败与授权记录](../../output/transformation-speed-20261028/ui-generation-status.md)。已查看中英文亮暗主题四张截图，控件和按钮可读、没有重叠；1280×720 下展开速度后技能表只留约一行，收起可增加空间，详情区仍可滚动。[截图汇总](../../output/transformation-speed-20261028/screenshots/light-dark-contact.png)。
+
+独立 DX11 visual-only 夹具共 7 个场景通过；通过 ImGui 内部鼠标事件实际拖动两项、释放保存，再分别点击“原速”。检查每次释放恰好保存一次，另一字段不变；另注入四次保存失败，画面与 mock 配置均回滚到 `1.25/1.50`。没有向游戏或桌面发送鼠标/键盘输入。[断言汇总](../../output/transformation-speed-20261028/ui-check-results.json)、[原始交互日志](../../output/transformation-speed-20261028/screenshots/edit-reset/fixture-runtime.log)、[失败注入日志](../../output/transformation-speed-20261028/screenshots/failed-save/fixture-runtime.log)、[夹具源快照](../../output/transformation-speed-20261028/fixture-sources/)。
+
+生产 ASI 的常规 DX11/DX12 自动宿主回归没有通过：菜单键消息处 `foreground-target=0`，菜单开关截图差异为零；最初 DX11 和增加宿主既有焦点预处理后的两项均保留失败结果。渲染初始化、resize/minimize/restore 有日志，不能据此宣称完整图形宿主验收通过。[首次结果](../../output/transformation-speed-20261028/production-host-results.json)、[焦点预处理后的结果](../../output/transformation-speed-20261028/production-host-focus-results.json)。独立夹具的可视与交互验证仅覆盖新页面，不替代生产宿主或游戏行为验证。
+
+确认游戏退出后，仅替换已知 ASI，安装 `CCCCA5AA648DB5404163F6DAB36434E812EF2CBF2990DEA6ED30BBF236B62410`；构建、快照、安装三份 SHA-256 一致。旧版 `29C13D10` 已备份，加载器及原有配置前后哈希一致。[安装回执](../../output/transformation-speed-20261028/delivery.json)、[配置保留前](../../output/transformation-speed-20261028/preserved-before.json) / [后](../../output/transformation-speed-20261028/preserved-after.json)。本轮未操作游戏；新增倍率的真实速度、步态效果、技能和过场恢复仍待用户实测，不提高任何角色支持状态。
+
+## 变身技能默认快捷键（2026-10-28）
+
+未保存角色配置的技能列表现在按实际枚举顺序生成默认绑定：鼠标左键、鼠标右键、主键盘 `1`–`9`、`0`，其余技能留空。绑定使用稳定技能 ID；已保存的名称、组合键、手动留空和空列表均优先保留。UI 在消费按键录制结果前补齐检查到的技能行，覆盖稀疏或空配置。
+
+Debug / Release 的 Binding、Runtime、Hotkey 测试及 BlackMythWukong ASI 构建均通过，原始日志与汇总见 `../../output/transformation-default-hotkeys-20261028/`。自动测试验证默认顺序、主键盘与数字键盘区分、列表变更不重映射已保存技能、序列化往返和录制行补齐；尚未将本项安装包作为新的游戏内实测结论。
+
+## 映射疾跑输入与角色原生速度档位（2026-10-28）
+
+用户确认 `282AEBE6` 移动修复后反馈“移动有点慢，Shift无法疾跑”。此前`Locomotion`只选JOG0/RUN1，从未发SPRINT2；红孩儿实测RUN的CMC walkSpeed为115。现新增游戏映射的`BUIASwitchMoveSpeedState`输入观察，读取动作描述的速度种类和hold/toggle参数，仅截获当前保留悟空的代理会话输入；Shift、手柄和改键均由游戏映射解析。hold依Started/Completed，取消额外清理；toggle沿用游戏已筛选真实回调的翻转语义，不硬编码物理键。预测回调不重复翻转，普通玩家/其他actor不受影响。
+
+主驱动把疾跑意图映射为原生SPRINT2，查询角色自身FreeSprint/LockSprint资源，通过AIInputSprint让游戏速度系统使用MoveSpeedFast；释放后根据摇杆幅度回到JOG/RUN。保留朝向覆盖、技能/过场恢复和角色基础数值，不直接写MaxWalkSpeed或全局倍率。菜单/失焦/受控/技能/过场/恢复清除疾跑意图，idle与请求重建保留“先按疾跑再推方向”的操作。新低频日志包含sprintInput、speedType、requestedMMState及实际速度。缺少独立Sprint指纹只禁用该输入扩展，不禁用原有变身。
+
+Debug / Release 的 Native、Runtime、Adapter 三目标共六次执行及两配置ASI构建通过；将toggle夹具事件更新为真实Triggered1后，两配置Native再次通过。新测试覆盖hold释放/取消、预测重放、配置toggle、线程与weak/session重入、可选hook失败、疾跑与摇杆走跑切换、菜单和技能后清理；原有移动朝向回归仍通过。[执行结果](../../output/transformation-sprint-20261028/test-results.json)、[最终核验](../../output/transformation-sprint-20261028/final-verification.json)、[静态分析](../../output/transformation-sprint-20261028/analysis.md)。
+
+游戏退出后已安装`8D3C582370BC2639F7273BAB56D9915046043DF45906968CB0D65E77A0BCF6F7`，三份ASI哈希一致；备份上一版`282AEBE6`，加载器、技能名称/按键及逐角色视距配置前后哈希一致。[安装回执](../../output/transformation-sprint-20261028/delivery.json)。已请用户比较红孩儿普通前进、疾跑、释放后的速度。输入DB完整触发绑定、实际手柄和改键尚无本轮游戏验证；不能将本机静态方法及mock测试当作这些操作已经实测。
+
+## Lock 步态移动朝向修复（2026-10-28）
+
+用户确认补输入版 `EC93F374` 仍打转。红孩儿会话 `394878671` 的21个样本，LastInput与desired方向水平余弦平均0.99878、最小0.98988；加速度结果相近，实际速度10个反向，LastInput模长平均1.9977。walkSpeed包含1500与115，不能把任一速度值当作整个会话的常量。排除本轮“输入向量缺失”的主要猜测；一秒采样不能证明逐帧根运动因果或重建完整轨迹。[原始数据与计算](../../output/transformation-movement-deep-20261028/runtime-analysis.json)。
+
+静态链显示 `FacingVelocity` 使用实际速度构造 TargetRot，Lock/LM再读取TargetRot生成动画期望朝向；根运动结果可以反馈至下一次朝向。游戏自身 `OnMatchingPositionMove` 在发起AI请求之后通过 `Evt_ForceSetAIMoveFacingTargetRotation` 设置目标朝向。本轮沿用该顺序，仅对地面、有效MM Lock回退、无真实target的自有请求使用KeepFacingTarget并每帧更新输入方向；不创建虚假敌人、不写角色transform、不重发每帧AI请求。删除上一版额外AddMovementInput；其叠加没有改善实测。模式转换即刻indexed取消，避免真实锁定/飞行/Free步态在33ms节流期间继承旧override。技能、菜单、失焦、状态抑制、过场和恢复沿统一停止路径，由游戏OnEnd清除override。[调用与ABI证据](../../output/transformation-movement-deep-20261028/facing-dispatch-abi.md)。
+
+REA成员读取仍受64MiB元数据表示预算限制；本轮留下失败证据，后续使用本机程序集元数据与准确构建的AOT调用表/完整函数字节核验，未把IL token当原生地址。[REA限制](../../output/transformation-movement-deep-20261028/rea-mm-members.json)、[元数据](../../output/transformation-movement-deep-20261028/facing-abi-metadata.json)、[原生函数字节](../../output/transformation-movement-deep-20261028/mm-driver-native-complete.json)。接口是同步void事件，成功派发不等同原生移动成功；新低频日志记录实际Actor yaw、LastInput、加速度、速度、位移和inputFacing，用于后续用户实测核验。
+
+Debug / Release 的 Native、Runtime、Adapter 三个测试目标全部通过，两配置ASI构建通过；补充weak地址复用、同actor新session重入、Invoke后session替换和独立指纹失败测试后，Native在两配置再次通过。Runtime覆盖WASD/斜向与四相机象限、速度背离时方向来源、连续request、即时锁定/Free/未知/Volume转换、取消失败重试、技能同帧派发前清理、过场/菜单/失焦以及独立读取Actor yaw。[16项原始执行结果](../../output/transformation-movement-deep-20261028/test-results.json)、[最终核验与补测](../../output/transformation-movement-deep-20261028/final-verification.json)。这些mock不模拟根运动、导航或真实事件消费。
+
+游戏退出后已安装 `282AEBE66D16F328131EE41625FE86CE1CFBDCDDBF7DE9D50C8639147222172D`，构建、快照、安装路径三份哈希一致；备份 `EC93F374`，加载器及原有顶层配置哈希不变，技能名称/按键与逐角色视距保留。[安装回执](../../output/transformation-movement-deep-20261028/delivery.json)、[配置保留前](../../output/transformation-movement-deep-20261028/preserved-before.json) / [后](../../output/transformation-movement-deep-20261028/preserved-after.json)。已请用户重启测试红孩儿未锁敌时的WASD、反向、停步及技能后移动；实际操控效果仍需用户确认，不提升角色验证状态。
+
+随后用户实测明确确认“现在移动的问题修复了”，但移动偏慢、Shift无法疾跑，进入独立疾跑适配。会话`396284718`的24个样本，实际速度与desired平均余弦从上一版0.1546提高到0.9154，反向样本由10/21降为1/24；LastInput模长恢复约1，Actor yaw误差平均9.28度，仍有转向瞬间偏差。[实测日志及计算](../../output/transformation-movement-deep-20261028/runtime-post-install-first.json)。这确认红孩儿本次移动修复，不构成所有角色、锁定战斗或特殊阶段的完整验收。
+
+## MM 动画恢复后的移动方向输入（2026-10-28，历史版本，实测未解决）
+
+用户确认 `0A29CF50` 动画恢复，但 WASD 操作只在小范围转圈、移动不灵活。红孩儿会话 `393144062` 已记录有效 LockRun7、Final4 和持续的 WithMM 请求；24 个移动样本中有13个速度与加速度的水平点积为负。记录仍有位移，不能称完全不移动，也不能单凭点积断定根因；旧版没有采集 Pawn LastMovementInputVector。[原始日志与解析](../../output/transformation-movement-control-20261028/runtime-baseline.json)。
+
+静态代码显示 FacingVelocity 按实际速度计算朝向，而 Lock+LM 的四方向补偿另读 `GetLastMovementInputVector`；该向量为零或过期会影响动画朝向。当前新增仅地面/下落的有效 WithMM 自有请求期间，每帧调用一次 Pawn `AddMovementInput`，使用玩家的世界单位方向和原摇杆幅度，`bForce=false`；仍保留角色 AI 请求、数值和碰撞检查。闲置、技能施放、受控、菜单、失焦、过场、被拒请求均不补输入，普通及飞行/游泳路径沿原逻辑。失败进入统一恢复。低频诊断新增 desiredDirection 与原生 LastInput 实读，不将传入值伪装成消费结果。[静态审查与限制](../../output/transformation-movement-control-20261028/static-review.md)。
+
+Debug / Release Native、Runtime、Adapter 三个目标共六次执行及两配置 ASI 构建通过；新增覆盖四个相机象限的 WASD/斜向、摇杆幅度、连续请求期间持续输入、暂停/技能/过场门槛、请求及输入失败恢复，以及可选诊断缺失/失败。[测试结果](../../output/transformation-movement-control-20261028/test-results.json)。测试未模拟物理、输入消费和根运动，不能据此保证实机不叠加加速度或转向已修复；同帧先移动再派发技能的 pending input 也仍需游戏确认。
+
+游戏退出后已安装 Release `EC93F374BD0B8EBA7246729DCB70ADD52061C3DC81ED1ABE756587C42EDD5910`，构建、留档及已安装 ASI 哈希一致。仅替换已核对并备份的 `0A29CF50` ASI，加载器及全部已有顶层配置前后哈希一致，技能名称/按键和逐角色视距保留。[安装回执](../../output/transformation-movement-control-20261028/delivery.json)、[保留文件前](../../output/transformation-movement-control-20261028/preserved-before.json) / [后](../../output/transformation-movement-control-20261028/preserved-after.json)。待用户重启测试红孩儿固定视角的 W/A/S/D 连续移动、反向、转向、停步及技能/菜单后恢复；本版无游戏画面验收，角色状态未升级。
+
+## FModel MCP：补齐同速度锁定步态回退（2026-10-28）
+
+FModel MCP 使用已保存配置挂载全部 22 个包，并成功导出红孩儿 ABPS 与 Lock 分析器的原始资源及配套 uexp。其导入元数据包含 `State_MM::Lock`、角色自身 `AAcs_hys_honghaier_01a_lock` 以及多方向起步、奔跑、转向、停步动画。属性 JSON 因缺少映射明确失败，尚不能宣称完整解出 MMState2AACS；同名基础/补丁路径不视为多个角色。[分析与边界](../../output/transformation-fmodel-20261028/findings.md)、[MCP 证据](../../output/transformation-fmodel-20261028/fmodel-mcp-evidence.json)、[导出清单](../../output/transformation-fmodel-20261028/fmodel-mcp-export/manifest.json)。
+
+旧日志中红孩儿实际位置及速度已变化，但自由 RUN 校验失败、Final 仍为 None。本次将只读选择器补为“未锁定 Free→Lock，已锁定 Lock→Free”，均限同速度且必须通过游戏对当前角色缓存的有效性检查。无敌人目标时仍朝移动方向转身，不创建假目标、不改源资源或数值；资源未知/缺失继续普通原生移动。已有动画优先规则和过场恢复保留；游戏仍由用户操作，尚无本修复的角色画面验收。
+
+Debug / Release 的 Native、Runtime 两个测试目标构建及四次执行均通过，两配置 ASI 构建通过；覆盖三个速度的同域优先/备用域选择、不跨速度、异常及非法 bool、对象/缓存身份变化，以及无目标时 WithMM 连续移动、转向、停步和恢复。[命令结果及日志](../../output/transformation-fmodel-20261028/test-results.json)。这些回归验证请求与状态处理，不证明动画画面已恢复。
+
+游戏退出后已安装 Release `0A29CF50066677DA010856CE837C1BA36B2AAC944E2DF77AE3E3954F740E734E`，构建、留档和已安装 ASI 哈希一致。完整安装器因缺少既有安装所有权清单拒绝覆盖，随后仅替换已确认且已备份的 `scripts/GlossTrainer.asi`；未新建所有权清单。加载器、技能名称/按键、逐角色视距及其他现有配置的前后哈希一致。[安装回执](../../output/transformation-fmodel-20261028/delivery.json)、[保留文件前](../../output/transformation-fmodel-20261028/asi-only-preserved-before.json) / [后](../../output/transformation-fmodel-20261028/asi-only-preserved-after.json)、[完整安装器拒绝日志](../../output/transformation-fmodel-20261028/install.log)。待用户重启后以红孩儿未锁目标直行、转向、停步及技能后继续移动进行验收，未提升角色验证状态。
 
 ## 黑神话 v1.0.0 发布验证（2026-10-27）
 

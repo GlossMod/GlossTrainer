@@ -35,6 +35,9 @@ namespace gloss::gameplay::transformation::native
     // Pure resource-key query for the current role's existing MM settings.
     // speedType is EAIMoveSpeedType JOG=0/RUN=1/SPRINT=2. A non-MM role
     // returns current=true, required=false without requiring a linked MM node.
+    // Prefer the requested free/locked gait, then the role's same-speed other
+    // gait. Its own Lock analyzer may be used without a lock target; this query
+    // never creates a target, and usesLocked identifies the selected Lock state.
     // Missing nodes/caches remain unknown; no lazy getter or state setter runs.
     MotionMatchingSelection SelectMotionMatching(std::uintptr_t proxy, int speedType, bool locked);
     bool SetProxy(engine::WeakObject proxy);
@@ -70,15 +73,26 @@ namespace gloss::gameplay::transformation::native
     // Empty handle releases mapped input while preserving proxy isolation.
     bool SetInputOwner(engine::WeakObject originalPlayer);
     std::vector<Action> ConsumeActions();
-    struct MoveInput { float forward{}, right{}; };
-    // Values come from the game's mapped axis actions, expire when no events
-    // arrive for 250 ms, and reset whenever the input/session owner changes.
+    struct MoveInput { float forward{}, right{}; bool sprint{}; };
+    // Axes come from mapped actions and expire after 250 ms. Sprint follows
+    // the mapped hold/toggle action and has no axis timeout. All input resets
+    // whenever the input/session owner changes.
     MoveInput MovementAxes();
+    // Clear only sprint intent on controlled/input/menu/focus/cinematic/skill
+    // suppression and recovery. Idle or AI request replacement must preserve
+    // a held sprint action; no managed state or physical key is read/written.
+    void ResetSprintInput();
     bool DeathRequested();
     bool SetTamerType(std::uintptr_t nativeActor, int type);
     bool Initialized(std::uintptr_t nativeActor);
     bool CopyTeam(std::uintptr_t proxy, std::uintptr_t originalPlayer);
     bool SetTarget(std::uintptr_t proxy, std::uintptr_t target);
+    // Dispatch the game's existing AI-path facing override for this proxy's
+    // active mover. The direction is horizontal, finite and non-zero; the
+    // resulting yaw is consumed synchronously and no managed object is kept.
+    // This is a dispatch observation only: the event has no return value and
+    // the managed path does not expose an override read-back API.
+    bool SetLocomotionFacing(std::uintptr_t proxy, const extensions::Vec3 &direction);
     enum class WeaponReadiness { Pending, Ready, Failed };
     // Read-only preflight for every generated source slot. Pending must be
     // handled before acquiring any player/camera/input activation state.

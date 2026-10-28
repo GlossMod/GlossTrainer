@@ -136,6 +136,8 @@ namespace gloss::features
     {
         bool success{};
         std::string message;
+        bool pending{}; // Accepted asynchronously; CompleteAction reports the final result.
+        bool retryable{}; // Temporary queue contention; automatic restoration may retry.
     };
     struct Snapshot
     {
@@ -144,9 +146,10 @@ namespace gloss::features
         double value{}; // Staged editor value; editing alone never writes to the game.
         std::string message;
         bool actionFailed{};
+        bool restorePending{}; // Saved intent awaiting its first successful restoration.
     };
     // Callbacks are copied under the model mutex and invoked without that mutex.
-    // Query must be read-only. SetEnabled/Apply run only after an explicit UI/hotkey action.
+    // Query must be read-only. SetEnabled also runs for saved startup intent.
     // Backend owns actual enabled state and must report support honestly per feature.
     struct Backend
     {
@@ -155,6 +158,12 @@ namespace gloss::features
         std::function<Result(Id, double)> apply;
     };
     void RegisterBackend(Backend backend);
+    // Load editor values, hotkey enablement and saved switch intent without any
+    // backend calls. Call at startup before exposing the model to user edits.
+    void InitializeSettings();
+    // Poll from the backend worker. Ready switches restore once; actions never
+    // execute. All callbacks run without modelMutex. Safe to call before init.
+    void RestoreSettings();
     // Serializes with writes, disables active switches once on entry, and never
     // re-enables them on exit. Read-only model calls remain safe in callbacks.
     void SetUpdateRequired(bool required);

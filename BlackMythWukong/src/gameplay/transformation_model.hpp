@@ -9,6 +9,16 @@
 
 namespace gloss::gameplay::transformation::model
 {
+    inline std::string CatalogCategory(std::string_view source)
+    {
+        return source == "首领" ? "Boss" : source == "普通角色" ? "小怪" : std::string(source);
+    }
+    inline bool CatalogAssetName(std::string_view source)
+    {
+        std::string lower(source);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower.starts_with("tamer") || lower.starts_with("unit_") || lower.starts_with("brt_");
+    }
     // Unreal object paths are case-insensitive. Form remains part of the key so
     // stage/ally variants sharing a character class are not silently collapsed.
     inline std::string StableId(std::string_view path, std::string_view form = {})

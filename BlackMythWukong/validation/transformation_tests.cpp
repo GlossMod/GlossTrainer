@@ -1,6 +1,8 @@
 #include "../src/gameplay/transformation_model.hpp"
+#include "../src/gameplay/transformation_pak_catalog.hpp"
 #include "../src/gameplay/transformation_presets.hpp"
 #include <iostream>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -81,6 +83,92 @@ namespace
         model::MergeCatalog(entries, alternateForm);
         CHECK(entries.size() == 2);
         CHECK(entries.back().id == "/game/role/foo.foo#phase-2");
+    }
+
+    void TestPakCatalogSeedsUnverifiedCandidatesWithoutChangingReferenceOrConfigurationIds()
+    {
+        using namespace transform::pak_catalog;
+        static constexpr Record references[] = {
+#include "../src/gameplay/transformation_catalog.inc"
+        };
+        std::vector<CharacterEntry> entries;
+        for (const auto &record : references)
+        {
+            CharacterEntry entry;
+            entry.name = record.name;
+            entry.category = model::CatalogCategory(record.category);
+            entry.path = record.path;
+            model::MergeCatalog(entries, std::move(entry));
+        }
+        CHECK(entries.size() == 246);
+        const auto original = entries;
+        std::map<std::string, std::string> savedBindings;
+        std::map<std::string, float> savedCamera;
+        std::map<std::string, transform::MovementSpeedSettings> savedSpeed;
+        for (const auto &entry : original)
+        {
+            savedBindings[entry.id] = "player-defined name / Ctrl+K";
+            savedCamera[entry.id] = 12.f;
+            savedSpeed[entry.id] = {1.25f, 1.5f};
+        }
+        const auto added = Seed(entries);
+        CHECK(added > 0);
+        CHECK(entries.size() == original.size() + added);
+        CHECK(entries.size() > 246);
+        for (std::size_t i = 0; i < original.size(); ++i)
+        {
+            CHECK(entries[i].id == original[i].id);
+            CHECK(entries[i].name == original[i].name);
+            CHECK(entries[i].path == original[i].path);
+            CHECK(entries[i].form == original[i].form);
+            CHECK(savedBindings.at(entries[i].id) == "player-defined name / Ctrl+K");
+            CHECK(savedCamera.at(entries[i].id) == 12.f);
+            CHECK(savedSpeed.at(entries[i].id) == transform::MovementSpeedSettings{1.25f, 1.5f});
+        }
+        std::unordered_set<std::string> ids;
+        std::size_t bossRush{};
+        for (const auto &entry : entries)
+        {
+            CHECK(ids.insert(entry.id).second);
+            CHECK(entry.id == model::StableId(entry.path, entry.form));
+            CHECK(entry.support == Support::Unverified);
+            CHECK(!entry.discovered);
+            if (entry.path.starts_with("/Game/00MainHZ/BossRush/Tamer/")) ++bossRush;
+        }
+        CHECK(bossRush > 0);
+        CHECK(Seed(entries) == 0);
+        CHECK(entries.size() == original.size() + added);
+        // Re-seeding after a current-build inspection must not replace its
+        // diagnostic, resource, support label, or evidence of live discovery.
+        auto &runtime = entries.back();
+        runtime.name = "Current runtime name";
+        runtime.reason = "Current runtime diagnostic";
+        runtime.support = Support::Experimental;
+        runtime.discovered = true;
+        runtime.resourceId = 12345;
+        runtime.overrideId = 678;
+        const auto currentId = runtime.id;
+        Seed(entries);
+        const auto current = std::find_if(entries.begin(), entries.end(), [&](const auto &entry) { return entry.id == currentId; });
+        CHECK(current != entries.end());
+        CHECK(current->name == "Current runtime name" && current->reason == "Current runtime diagnostic");
+        CHECK(current->support == Support::Experimental && current->discovered);
+        CHECK(current->resourceId == 12345 && current->overrideId == 678);
+    }
+
+    void TestCatalogAssetFilterAcceptsBossRushWithoutAcceptingOtherAssetKinds()
+    {
+        CHECK(model::CatalogAssetName("TAMER_Example"));
+        CHECK(model::CatalogAssetName("Unit_Example"));
+        CHECK(model::CatalogAssetName("BRT_Example"));
+        CHECK(model::CatalogAssetName("brt_example"));
+        CHECK(!model::CatalogAssetName("ABP_BRT_Example"));
+        CHECK(!model::CatalogAssetName("SK_Example"));
+        CHECK(!model::CatalogAssetName("BRTExample"));
+        CHECK(!model::CatalogAssetName(""));
+        CHECK(model::CatalogCategory("首领") == "Boss");
+        CHECK(model::CatalogCategory("普通角色") == "小怪");
+        CHECK(model::CatalogCategory("NPC") == "NPC");
     }
 
     void TestSkillSlotsRequireAvailableStableSkillIds()
@@ -404,6 +492,8 @@ namespace
 int main()
 {
     TestCatalogDeduplicatesByPathAndFormWithoutPromotingSupport();
+    TestPakCatalogSeedsUnverifiedCandidatesWithoutChangingReferenceOrConfigurationIds();
+    TestCatalogAssetFilterAcceptsBossRushWithoutAcceptingOtherAssetKinds();
     TestSkillSlotsRequireAvailableStableSkillIds();
     TestStarterPresetsResolveHintsToCurrentSkillIdsAndLeaveMissingSlotsEmpty();
     TestComboAdvancesThroughFinalSkillAndRejectsDuplicates();

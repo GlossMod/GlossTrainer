@@ -1,6 +1,7 @@
 #pragma once
 #include "transformation.hpp"
 #include <algorithm>
+#include <array>
 #include <iomanip>
 #include <map>
 #include <set>
@@ -13,6 +14,18 @@ namespace gloss::gameplay::transformation::bindings
     inline constexpr std::size_t MaximumBindings = 4096;
     inline constexpr std::size_t MaximumNameBytes = 256;
     inline constexpr std::size_t MaximumFileBytes = 16 * 1024 * 1024;
+
+    // Call only for a validated, deduplicated skill catalog with no saved
+    // configuration. Catalog order includes currently unavailable skills.
+    inline std::vector<SkillBinding> DefaultBindings(const std::vector<SkillEntry> &skills)
+    {
+        constexpr std::array<unsigned, 12> keys{0x01, 0x02, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
+        std::vector<SkillBinding> values;
+        values.reserve(skills.size());
+        for (std::size_t i = 0; i < skills.size(); ++i)
+            values.push_back({skills[i].id, {}, i < keys.size() ? keys[i] : 0, 0});
+        return values;
+    }
 
     inline bool ModifierKey(unsigned key)
     {

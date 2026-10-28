@@ -361,6 +361,8 @@ namespace gloss::overlay
         {
             if (state.actionFailed)
                 return Text("失败");
+            if (state.restorePending)
+                return Text("等待游戏");
             switch (state.availability)
             {
             case features::Availability::Ready:
@@ -494,9 +496,10 @@ namespace gloss::overlay
             if (!action)
             {
                 ImGui::SetCursorScreenPos(ImVec2(statusOrigin.x, statusOrigin.y + (statusHeight - 20 * scale) * .5f));
-                ImGui::BeginDisabled(!ready && !state.enabled);
-                if (Toggle("##toggle", state.enabled, scale))
-                    features::SetEnabled(definition.id, !state.enabled);
+                const bool requested = state.enabled || state.restorePending;
+                ImGui::BeginDisabled(!ready && !requested);
+                if (Toggle("##toggle", requested, scale))
+                    features::SetEnabled(definition.id, !requested);
                 ImGui::EndDisabled();
                 FeatureTooltip(definition, state, scale);
             }
@@ -1307,17 +1310,79 @@ namespace gloss::overlay
             }
             ImGui::PopStyleVar(3);
         }
+        struct SkillDraft
+        {
+            std::vector<trans::SkillBinding> bindings;
+            bool dirty{}, loaded{};
+        };
+        struct TransformationSkillWindowState
+        {
+            bool open{}, requestFocus{};
+            std::string characterId, notice;
+            bool noticeFailed{};
+            ImGuiTextFilter search;
+            std::map<std::string, SkillDraft> drafts;
+        } skillWindow;
+        SkillDraft &PrepareSkillDraft(std::string_view id, const trans::SkillSnapshot &snapshot)
+        {
+            auto &draft = skillWindow.drafts[std::string(id)];
+            // Inspection may publish defaults after the editor was opened. Keep
+            // refreshing untouched records, but never overwrite a user's draft.
+            if (!draft.loaded || !draft.dirty)
+            {
+                draft.bindings = trans::Bindings(id);
+                draft.loaded = true;
+            }
+            if (snapshot.inspected)
+                for (const auto &skill : snapshot.skills)
+                    if (std::none_of(draft.bindings.begin(), draft.bindings.end(), [&](const auto &binding)
+                                     { return binding.skillId == skill.id; }))
+                        draft.bindings.push_back({skill.id, {}, 0, 0});
+            return draft;
+        }
+        void ConsumeTransformationSkillCapture()
+        {
+            const auto captured = trans::hotkeys::TakeCaptured();
+            if (!captured || captured->characterId != skillWindow.characterId)
+                return;
+            const auto draft = skillWindow.drafts.find(captured->characterId);
+            if (draft == skillWindow.drafts.end())
+                return;
+            const auto binding = std::find_if(draft->second.bindings.begin(), draft->second.bindings.end(), [&](const auto &item)
+                                              { return item.skillId == captured->skillId; });
+            if (binding != draft->second.bindings.end())
+            {
+                binding->key = captured->key;
+                binding->modifiers = captured->modifiers;
+                draft->second.dirty = true;
+            }
+        }
+        void CancelTransformationSkillCapture()
+        {
+            // A completed recording belongs to the draft even when the same
+            // frame closes its window. Cancel only the remaining recorder.
+            ConsumeTransformationSkillCapture();
+            trans::hotkeys::CancelCapture();
+        }
+        void RecordSkillWindowResult(const features::Result &result)
+        {
+            RecordExtensionResult(result);
+            skillWindow.notice = result.message;
+            skillWindow.noticeFailed = !result.success;
+        }
         void TransformationPage(float scale)
         {
-            static ImGuiTextFilter search, skillSearch;
+            static ImGuiTextFilter search;
             static int category{}, supportFilter{};
             static std::string selected;
-            struct SkillDraft
+            struct MovementSpeedDraft
             {
-                std::vector<trans::SkillBinding> bindings;
-                bool dirty{}, loaded{};
+                trans::MovementSpeedSettings values;
+                std::array<bool, 2> editing{};
+                bool loaded{};
             };
-            static std::map<std::string, SkillDraft> drafts;
+            static std::map<std::string, MovementSpeedDraft> speedDrafts;
+            static std::string speedCharacter;
             const auto status = trans::GetStatus();
             const auto catalog = trans::Catalog();
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8 * scale, 5 * scale));
@@ -1395,8 +1460,6 @@ namespace gloss::overlay
                         ImGui::AlignTextToFramePadding();
                         if (ImGui::Selectable(UiLabel(entry.name.c_str()), selected == entry.id, ImGuiSelectableFlags_SpanAllColumns))
                         {
-                            if (selected != entry.id)
-                                trans::hotkeys::CancelCapture();
                             selected = entry.id;
                         }
                         if (ImGui::IsItemHovered())
@@ -1444,23 +1507,8 @@ namespace gloss::overlay
                 const auto &entry = *found;
                 const auto skillSnapshot = trans::SkillsFor(selected);
                 const auto &skills = skillSnapshot.skills;
-                auto &draft = drafts[selected];
-                if (!draft.loaded)
-                {
-                    draft.bindings = trans::Bindings(selected);
-                    draft.loaded = true;
-                }
-                if (const auto captured = trans::hotkeys::TakeCaptured(); captured && captured->characterId == selected)
-                {
-                    auto binding = std::find_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &item)
-                                                { return item.skillId == captured->skillId; });
-                    if (binding != draft.bindings.end())
-                    {
-                        binding->key = captured->key;
-                        binding->modifiers = captured->modifiers;
-                        draft.dirty = true;
-                    }
-                }
+                auto &draft = PrepareSkillDraft(selected, skillSnapshot);
+                const bool skillContext = skillSnapshot.inspected;
                 Label(Text(entry.name.c_str()), 20, ImGui::GetStyleColorVec4(ImGuiCol_Text));
                 ImGui::SameLine();
                 ImGui::TextDisabled("%s · %s", Text(entry.category.c_str()), Text(trans::SupportName(entry.support)));
@@ -1485,7 +1533,6 @@ namespace gloss::overlay
                                       status.capabilities.input ? Text("就绪") : Text("等待"), status.capabilities.movement ? Text("就绪") : Text("等待"),
                                       status.capabilities.recovery ? Text("就绪") : Text("等待"), status.capabilities.isolation ? Text("就绪") : Text("等待"));
                 }
-                const bool skillContext = skillSnapshot.inspected;
                 ImGui::PushID(selected.c_str());
                 // Keep a drag draft so disk persistence happens once on release,
                 // rather than once per rendered frame. The game thread applies
@@ -1529,32 +1576,156 @@ namespace gloss::overlay
                 ImGui::PushFont(nullptr, 12);
                 ImGui::TextDisabled("%s", Text(savedCamera > 0.f ? "仅此角色 · 已保存视距" : "仅此角色 · 自动按体型"));
                 ImGui::PopFont();
+                auto &speedDraft = speedDrafts[selected];
+                const auto savedSpeed = trans::GetMovementSpeed(selected);
+                if (!speedDraft.loaded || speedCharacter != selected)
+                {
+                    speedDraft.values = savedSpeed;
+                    speedDraft.editing = {};
+                    speedDraft.loaded = true;
+                    speedCharacter = selected;
+                }
+                if (ImGui::CollapsingHeader(UiLabel("移动速度")))
+                {
+                    const auto normalLabel = Text("普通移动速度");
+                    const auto sprintLabel = Text("疾跑速度");
+                    const float labelWidth = std::max(ImGui::CalcTextSize(normalLabel).x, ImGui::CalcTextSize(sprintLabel).x);
+                    const float originalWidth = std::max(58 * scale, ImGui::CalcTextSize(Text("原速")).x + ImGui::GetStyle().FramePadding.x * 2);
+                    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+                    for (int i = 0; i != 2; ++i)
+                    {
+                        ImGui::PushID(i);
+                        auto &value = i == 0 ? speedDraft.values.normal : speedDraft.values.sprint;
+                        if (!speedDraft.editing[i]) value = i == 0 ? savedSpeed.normal : savedSpeed.sprint;
+                        const float rowX = ImGui::GetCursorPosX();
+                        const bool inlineLabel = ImGui::GetContentRegionAvail().x >= labelWidth + originalWidth + 80 * scale + spacing * 2;
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::TextUnformatted(i == 0 ? normalLabel : sprintLabel);
+                        if (inlineLabel) ImGui::SameLine(rowX + labelWidth + spacing);
+                        ImGui::SetNextItemWidth(std::max(48 * scale, ImGui::GetContentRegionAvail().x - originalWidth - spacing));
+                        ImGui::SliderFloat("##movement-speed", &value, .1f, 5.f, "%.2f x", ImGuiSliderFlags_AlwaysClamp);
+                        speedDraft.editing[i] = ImGui::IsItemActive();
+                        if (ImGui::IsItemDeactivatedAfterEdit())
+                        {
+                            // Read the other field at commit time: editing one
+                            // gait must never overwrite a newer saved value.
+                            auto next = trans::GetMovementSpeed(selected);
+                            (i == 0 ? next.normal : next.sprint) = value;
+                            RecordExtensionResult(trans::SetMovementSpeed(selected, next));
+                            const auto persisted = trans::GetMovementSpeed(selected);
+                            value = i == 0 ? persisted.normal : persisted.sprint;
+                        }
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip(Text("范围 0.10 至 5.00 倍 · 松开滑块后保存\nCtrl+点击可输入数值；返回游戏移动时生效"));
+                        ImGui::SameLine();
+                        if (ImGui::Button(UiLabel("原速"), ImVec2(originalWidth, 0)))
+                        {
+                            auto next = trans::GetMovementSpeed(selected);
+                            (i == 0 ? next.normal : next.sprint) = 1.f;
+                            RecordExtensionResult(trans::SetMovementSpeed(selected, next));
+                            const auto persisted = trans::GetMovementSpeed(selected);
+                            value = i == 0 ? persisted.normal : persisted.sprint;
+                            speedDraft.editing[i] = false;
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::PushFont(nullptr, 12);
+                    ImGui::TextWrapped("%s", Text("按角色保存 · 1.00 倍为原速 · 技能与过场保持原速"));
+                    ImGui::PopFont();
+                }
+                else speedDraft.editing = {};
                 ImGui::PopID();
-                // Merge the complete runtime list with the sparse persisted settings.
-                // Keep unknown saved IDs so a temporarily missing skill never erases a name or chord.
-                if (skillContext)
-                    for (const auto &skill : skills)
-                        if (std::none_of(draft.bindings.begin(), draft.bindings.end(), [&](const auto &binding)
-                                         { return binding.skillId == skill.id; }))
-                            draft.bindings.push_back({skill.id, {}, 0, 0});
+                ImGui::Spacing();
+                if (ImGui::Button(UiLabel("技能名称与按键绑定"), ImVec2(-1, 36 * scale)))
+                {
+                    if (skillWindow.characterId != selected)
+                    {
+                        CancelTransformationSkillCapture();
+                        skillWindow.characterId = selected;
+                        skillWindow.notice.clear();
+                    }
+                    skillWindow.open = true;
+                    skillWindow.requestFocus = true;
+                }
+                const auto bindingCount = std::count_if(draft.bindings.begin(), draft.bindings.end(), [](const auto &binding)
+                                                        { return binding.key != 0; });
+                ImGui::PushFont(nullptr, 12);
+                ImGui::TextDisabled(Text("%zu 个技能 · %zu 个按键绑定"), skillContext ? skills.size() : 0, static_cast<std::size_t>(bindingCount));
+                if (draft.dirty) ImGui::TextColored(accent, Text("尚未保存"));
+                ImGui::TextWrapped("%s", Text("在独立窗口中编辑技能名称和按键；窗口可拖动、缩放。"));
+                ImGui::PopFont();
+            }
+            ImGui::EndChild();
+            ImGui::PopStyleVar(2);
+        }
+        void DrawTransformationSkillWindow(float scale)
+        {
+            if (!skillWindow.open)
+                return;
+            const auto catalog = trans::Catalog();
+            const auto found = std::find_if(catalog.begin(), catalog.end(), [&](const auto &entry)
+                                            { return entry.id == skillWindow.characterId; });
+            if (found == catalog.end())
+            {
+                CancelTransformationSkillCapture();
+                skillWindow.open = false;
+                return;
+            }
+            const auto &selected = skillWindow.characterId;
+            const auto &entry = *found;
+            const auto status = trans::GetStatus();
+            const auto skillSnapshot = trans::SkillsFor(selected);
+            const auto &skills = skillSnapshot.skills;
+            const bool skillContext = skillSnapshot.inspected;
+            auto &draft = PrepareSkillDraft(selected, skillSnapshot);
+            ConsumeTransformationSkillCapture();
+            const auto *viewport = ImGui::GetMainViewport();
+            const float margin = 16 * scale;
+            const ImVec2 maximum(std::max(1.f, viewport->WorkSize.x - margin * 2), std::max(1.f, viewport->WorkSize.y - margin * 2));
+            const ImVec2 minimum(std::min(660 * scale, maximum.x), std::min(380 * scale, maximum.y));
+            ImGui::SetNextWindowSizeConstraints(minimum, maximum);
+            ImGui::SetNextWindowSize(ImVec2(std::min(820 * scale, maximum.x), std::min(600 * scale, maximum.y)), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * .5f, viewport->WorkPos.y + viewport->WorkSize.y * .5f),
+                                    ImGuiCond_FirstUseEver, ImVec2(.5f, .5f));
+            if (skillWindow.requestFocus)
+            {
+                ImGui::SetNextWindowCollapsed(false);
+                ImGui::SetNextWindowFocus();
+                skillWindow.requestFocus = false;
+            }
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8 * scale, 5 * scale));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8 * scale, 8 * scale));
+            ImGui::PushStyleColor(ImGuiCol_TitleBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
+            ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImGui::GetStyleColorVec4(ImGuiCol_Header));
+            ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
+            ImGui::PushStyleColor(ImGuiCol_ResizeGrip, ImGui::GetStyleColorVec4(ImGuiCol_Header));
+            ImGui::PushStyleColor(ImGuiCol_ResizeGripHovered, ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered));
+            ImGui::PushStyleColor(ImGuiCol_ResizeGripActive, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            const auto title = std::string(Text("技能名称与按键绑定")) + " · " + Text(entry.name.c_str()) + "###transformation-skill-bindings";
+            const bool expanded = ImGui::Begin(title.c_str(), &skillWindow.open, ImGuiWindowFlags_NoSavedSettings);
+            if (expanded && skillWindow.open)
+            {
+                ImGui::PushID(selected.c_str());
                 ImGui::SetNextItemWidth(-1);
-                if (ImGui::InputTextWithHint("##skill-search", Text("搜索技能名称、自定义名称或 ID"), skillSearch.InputBuf, sizeof(skillSearch.InputBuf)))
-                    skillSearch.Build();
+                if (ImGui::InputTextWithHint("##skill-search", Text("搜索技能名称、自定义名称或 ID"), skillWindow.search.InputBuf, sizeof(skillWindow.search.InputBuf)))
+                    skillWindow.search.Build();
                 const auto bindingCount = std::count_if(draft.bindings.begin(), draft.bindings.end(), [](const auto &binding)
                                                         { return binding.key != 0; });
                 ImGui::PushFont(nullptr, 12);
                 ImGui::TextDisabled(Text("%zu 个技能 · %zu 个按键绑定"), skillContext ? skills.size() : 0, static_cast<std::size_t>(bindingCount));
                 ImGui::PopFont();
-                const float footerHeight = 108 * scale;
+                const float footerHeight = 132 * scale;
                 const float tableHeight = std::max(64 * scale, ImGui::GetContentRegionAvail().y - footerHeight);
                 ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(6 * scale, 7 * scale));
                 if (ImGui::BeginTable("transform-skills", 4, compactTableFlags, ImVec2(0, tableHeight)))
                 {
+                    const float keyWidth = std::min(180 * scale, ImGui::GetContentRegionAvail().x * .28f);
+                    const float actionsWidth = std::max(92 * scale, ImGui::CalcTextSize(Text("清除")).x + ImGui::CalcTextSize(Text("试招")).x + 25 * scale);
                     ImGui::TableSetupScrollFreeze(0, 1);
-                    ImGui::TableSetupColumn(Text("技能"), ImGuiTableColumnFlags_WidthFixed, 76 * scale);
-                    ImGui::TableSetupColumn(Text("名称（可选）"), ImGuiTableColumnFlags_WidthStretch);
-                    ImGui::TableSetupColumn(Text("按键"), ImGuiTableColumnFlags_WidthFixed, 106 * scale);
-                    ImGui::TableSetupColumn(Text("操作"), ImGuiTableColumnFlags_WidthFixed, 92 * scale);
+                    ImGui::TableSetupColumn(Text("技能"), ImGuiTableColumnFlags_WidthStretch, .9f);
+                    ImGui::TableSetupColumn(Text("名称（可选）"), ImGuiTableColumnFlags_WidthStretch, 1.1f);
+                    ImGui::TableSetupColumn(Text("按键"), ImGuiTableColumnFlags_WidthFixed, keyWidth);
+                    ImGui::TableSetupColumn(Text("操作"), ImGuiTableColumnFlags_WidthFixed, actionsWidth);
                     ListHeaders(scale);
                     std::vector<std::size_t> skillRows;
                     if (skillContext)
@@ -1564,7 +1735,7 @@ namespace gloss::overlay
                             const auto binding = std::find_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &item)
                                                               { return item.skillId == skill.id; });
                             const auto text = std::format("{} {} {} {}", skill.id, skill.name, binding->customName, localization::Translate(skill.name));
-                            if (skillSearch.PassFilter(text.c_str()))
+                            if (skillWindow.search.PassFilter(text.c_str()))
                                 skillRows.push_back(i);
                         }
                     ImGuiListClipper skillClipper;
@@ -1598,7 +1769,10 @@ namespace gloss::overlay
                             const auto chord = capturing ? std::string(Text("请按键…")) : localization::Translate(trans::hotkeys::Label(binding.key, binding.modifiers));
                             const auto chordLabel = chord + "###skill-key";
                             if (ImGui::Button(chordLabel.c_str(), ImVec2(-1, 0)))
+                            {
+                                skillWindow.notice.clear();
                                 trans::hotkeys::BeginCapture(selected, skill.id);
+                            }
                             if (ImGui::IsItemHovered())
                                 ImGui::SetTooltip(Text("点击后按单键或 Ctrl / Shift / Alt 组合键\nEsc 取消；Delete / Backspace 清除"));
                             ImGui::TableSetColumnIndex(3);
@@ -1614,7 +1788,7 @@ namespace gloss::overlay
                             ImGui::SameLine(0, 5 * scale);
                             ImGui::BeginDisabled(status.activeId != selected || status.phase != trans::Phase::Active || !skill.available);
                             if (ImGui::SmallButton(UiLabel("试招")))
-                                RecordExtensionResult(trans::TriggerSkill(skill.id));
+                                RecordSkillWindowResult(trans::TriggerSkill(skill.id));
                             ImGui::EndDisabled();
                             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                                 ImGui::SetTooltip("%s", !skill.available ? localization::Translate(skill.reason).c_str() : Text("变身后可试招；关闭菜单后执行"));
@@ -1635,7 +1809,7 @@ namespace gloss::overlay
                 if (ImGui::Button(UiLabel("保存技能配置")))
                 {
                     const auto result = trans::SetBindings(selected, draft.bindings);
-                    RecordExtensionResult(result);
+                    RecordSkillWindowResult(result);
                     if (result.success)
                         draft.dirty = false;
                 }
@@ -1646,6 +1820,7 @@ namespace gloss::overlay
                     trans::hotkeys::CancelCapture();
                     draft.bindings = trans::Bindings(selected);
                     draft.dirty = false;
+                    skillWindow.notice.clear();
                 }
                 if (draft.dirty)
                 {
@@ -1654,8 +1829,18 @@ namespace gloss::overlay
                 }
                 ImGui::PushFont(nullptr, 12);
                 const auto captureResult = trans::hotkeys::GetCaptureResult();
-                if (!captureResult.message.empty())
-                    ImGui::TextColored(captureResult.success ? accent : Color(220, 100, 90), "%s", localization::Translate(captureResult.message).c_str());
+                if (!skillWindow.notice.empty())
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, skillWindow.noticeFailed ? Color(220, 100, 90) : accent);
+                    ImGui::TextWrapped("%s", localization::Translate(skillWindow.notice).c_str());
+                    ImGui::PopStyleColor();
+                }
+                else if (!captureResult.message.empty())
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, captureResult.success ? accent : Color(220, 100, 90));
+                    ImGui::TextWrapped("%s", localization::Translate(captureResult.message).c_str());
+                    ImGui::PopStyleColor();
+                }
                 else
                     ImGui::TextWrapped("%s", Text("名称留空使用原名 · 切换角色保留未保存的编辑"));
                 const auto missingCount = std::count_if(draft.bindings.begin(), draft.bindings.end(), [&](const auto &binding)
@@ -1677,8 +1862,11 @@ namespace gloss::overlay
                 else
                     ImGui::TextWrapped("%s", Text("录制：Esc 取消 · Delete 清除 · 关闭菜单后使用按键"));
                 ImGui::PopFont();
+                ImGui::PopID();
             }
-            ImGui::EndChild();
+            else CancelTransformationSkillCapture();
+            ImGui::End();
+            ImGui::PopStyleColor(6);
             ImGui::PopStyleVar(2);
         }
         void SettingsPage(float scale)
@@ -1979,6 +2167,10 @@ namespace gloss::overlay
     bool Visible() { return visible.load(); }
     void SetVisible(bool show)
     {
+        // Input and renderer callers share this recursive mutex. Keep the
+        // completed skill capture and its UI draft under the same lock as draw,
+        // including callers that do not already hold it (such as local hosts).
+        std::lock_guard lock(OverlayMutex());
         if (show && !rendererReady.load())
             return;
         if (visible.exchange(show) == show)
@@ -1992,7 +2184,7 @@ namespace gloss::overlay
         if (!show)
         {
             features::CancelHotkeyCapture();
-            trans::hotkeys::CancelCapture();
+            CancelTransformationSkillCapture();
             SaveSettings();
         }
         Log(show ? "Menu opened" : "Menu hidden");
@@ -2108,6 +2300,7 @@ namespace gloss::overlay
         }
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+        ConsumeTransformationSkillCapture();
         if (Visible())
         {
             const ImVec2 size(960 * scale, 680 * scale);
@@ -2177,8 +2370,8 @@ namespace gloss::overlay
                 ImGui::EndDisabled();
             }
             ImGui::EndGroup();
-            if (page != 4 || updateRequired)
-                trans::hotkeys::CancelCapture();
+            if (!skillWindow.open || updateRequired)
+                CancelTransformationSkillCapture();
             ImGui::SetCursorPos(ImVec2(184 * scale, 88 * scale));
             ImGui::BeginChild("content", ImVec2(752 * scale, 520 * scale), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
             if (updateRequired)
@@ -2243,6 +2436,10 @@ namespace gloss::overlay
             ImGui::End();
             ImGui::PopStyleVar();
         }
+        // This is a separate top-level window. Keep it independent of the main
+        // page layout, while sharing the same menu visibility and input owner.
+        if (Visible() && !updateRequired)
+            DrawTransformationSkillWindow(scale);
         ImGui::Render();
         if (dirty && GetTickCount64() - savedAt > 1000 && !ImGui::IsMouseDown(0))
             SaveSettings();

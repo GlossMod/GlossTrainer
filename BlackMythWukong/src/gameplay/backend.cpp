@@ -387,6 +387,7 @@ namespace gloss::gameplay
                 }
                 for (auto &state : controls)
                     state.action.Expire(GetTickCount64());
+                features::RestoreSettings();
                 Sleep(100);
             }
         }

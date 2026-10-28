@@ -1,8 +1,10 @@
 #include "transformation.hpp"
 #include "transformation_model.hpp"
+#include "transformation_pak_catalog.hpp"
 #include "transformation_presets.hpp"
 #include "transformation_bindings.hpp"
 #include "transformation_camera.hpp"
+#include "transformation_speed.hpp"
 #include "transformation_adapter.hpp"
 #include "transformation_native.hpp"
 #include "transformation_special.hpp"
@@ -37,6 +39,7 @@ namespace gloss::gameplay::transformation
         std::map<std::string, std::vector<SkillSlot>> slotConfig;
         bindings::Config bindingConfig;
         camera::Config cameraConfig;
+        speed::Config speedConfig;
         float activeCameraMeters{};
         struct Context
         {
@@ -60,7 +63,7 @@ namespace gloss::gameplay::transformation
         std::uint64_t lastProbe{};
         Capabilities capabilities;
         std::string message = "等待游戏角色";
-        std::string catalogMessage = "参考资料目录；尚未枚举游戏资源";
+        std::string catalogMessage = "参考资料与 PAK 候选目录；尚未枚举当前游戏资源";
         bool catalogComplete{};
 
         std::wstring Wide(std::string_view value)
@@ -465,56 +468,96 @@ namespace gloss::gameplay::transformation
             }
             catch (...) { Log("Transformation camera configuration could not be loaded"); }
         }
+        bool SaveSpeedFile(const speed::Config &config)
+        {
+            std::filesystem::path temporary;
+            try
+            {
+                const auto file = DataDirectory() / L"transformation-speed.cfg";
+                std::filesystem::create_directories(file.parent_path());
+                temporary = file.wstring() + L".tmp";
+                const auto text = speed::Serialize(config);
+                if (text.size() > speed::MaximumFileBytes) return false;
+                std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+                if (!out) return false;
+                out.write(text.data(), static_cast<std::streamsize>(text.size()));
+                out.close();
+                if (out.good() && MoveFileExW(temporary.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+            }
+            catch (...) {}
+            if (!temporary.empty()) { std::error_code error; std::filesystem::remove(temporary, error); }
+            return false;
+        }
+        void LoadSpeedFile()
+        {
+            try
+            {
+                const auto file = DataDirectory() / L"transformation-speed.cfg";
+                if (!std::filesystem::exists(file)) return;
+                if (std::filesystem::file_size(file) > speed::MaximumFileBytes) { Log("Transformation speed configuration exceeds size limit"); return; }
+                std::ifstream in(file, std::ios::binary);
+                const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+                if (in.bad()) { Log("Transformation speed configuration could not be read"); return; }
+                if (const auto result = speed::Parse(text, speedConfig); !result.success) Log("Transformation speed configuration ignored: " + result.message);
+            }
+            catch (...) { Log("Transformation speed configuration could not be loaded"); }
+        }
         void RefreshCatalog()
         {
             catalogRequested = false;
+            catalogComplete = false;
             auto registry = std::array{Arg::Interface("ReturnValue")};
-            if (!Call(L"/Script/AssetRegistry.AssetRegistryHelpers:GetAssetRegistry", registry))
+            if (!Call(L"/Script/AssetRegistry.AssetRegistryHelpers:GetAssetRegistry", registry) || !registry[0].Get<engine::ScriptInterface>().object)
             {
-                catalogComplete = false;
-                catalogMessage = "游戏资源注册表不可用；仅显示参考资料，目录覆盖不足";
+                catalogMessage = "游戏资源注册表不可用；显示参考资料与 PAK 候选，目录覆盖不足";
                 return;
             }
             const auto object = registry[0].Get<engine::ScriptInterface>().object;
-            if (!object) return;
             auto loading = std::array{Arg::Data("ReturnValue", engine::Type::Bool, std::int32_t{}, true)};
             const bool loadingKnown = Call(L"/Script/AssetRegistry.AssetRegistry:IsLoadingAssets", loading, object);
-            auto assets = std::array{Arg::Name("PackagePath", L"/Game/00Main/Design/Units"),
-                Arg::Structs("OutAssetData", L"/Script/CoreUObject.AssetData", {Arg::Name("ObjectPath", {}, true), Arg::Name("AssetName", {}, true), Arg::Name("AssetClass", {}, true)}),
-                Arg::Boolean("bRecursive", true), Arg::Boolean("bIncludeOnlyOnDiskAssets", false),
-                Arg::Data("ReturnValue", engine::Type::Bool, std::int32_t{}, true)};
-            if (!Call(L"/Script/AssetRegistry.AssetRegistry:GetAssetsByPath", assets, object) || !assets[4].Get<std::int32_t>())
+            constexpr std::array roots{L"/Game/00Main/Design/Units", L"/Game/00MainHZ/BossRush/Tamer"};
+            std::unordered_set<std::string> found;
+            std::size_t queried{};
+            for (const auto root : roots)
             {
-                catalogComplete = false;
-                catalogMessage = "角色资源枚举失败；参考目录不能代表全部角色";
+                auto assets = std::array{Arg::Name("PackagePath", root),
+                    Arg::Structs("OutAssetData", L"/Script/CoreUObject.AssetData", {Arg::Name("ObjectPath", {}, true), Arg::Name("AssetName", {}, true), Arg::Name("AssetClass", {}, true)}),
+                    Arg::Boolean("bRecursive", true), Arg::Boolean("bIncludeOnlyOnDiskAssets", false),
+                    Arg::Data("ReturnValue", engine::Type::Bool, std::int32_t{}, true)};
+                // A missing/failing root does not suppress the independent root.
+                // Keep offline candidates usable when either runtime scan fails.
+                if (!Call(L"/Script/AssetRegistry.AssetRegistry:GetAssetsByPath", assets, object) || !assets[4].Get<std::int32_t>())
+                    continue;
+                ++queried;
+                std::lock_guard lock(mutex);
+                for (const auto &record : assets[1].records)
+                {
+                    if (record.size() != 3) continue;
+                    auto path = Utf8(record[0].text), name = Utf8(record[1].text), cls = Utf8(record[2].text);
+                    if (path.empty() || !model::CatalogAssetName(name)) continue;
+                    if (cls != "Blueprint" && cls != "BlueprintGeneratedClass") continue;
+                    if (path.size() < 2 || path[path.size() - 2] != '_' || (path.back() != 'C' && path.back() != 'c')) path += "_C";
+                    CharacterEntry entry;
+                    entry.path = path;
+                    entry.name = name;
+                    entry.category = path.find("/NPC/") != std::string::npos ? "NPC" : "其他";
+                    entry.discovered = true;
+                    entry.reason = "资源存在；尚未检查配置与可操作性";
+                    found.insert(model::StableId(entry.path, entry.form));
+                    model::MergeCatalog(catalog, std::move(entry));
+                }
+            }
+            if (!queried)
+            {
+                catalogMessage = "角色资源枚举失败；显示参考资料与 PAK 候选，目录覆盖不足";
                 return;
             }
-            std::lock_guard lock(mutex);
-            std::size_t found{};
-            for (const auto &record : assets[1].records)
-            {
-                if (record.size() != 3) continue;
-                auto path = Utf8(record[0].text), name = Utf8(record[1].text), cls = Utf8(record[2].text);
-                auto lower = name;
-                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (!lower.starts_with("tamer") && !lower.starts_with("unit_")) continue;
-                if (cls != "Blueprint" && cls != "BlueprintGeneratedClass") continue;
-                if (!path.ends_with("_C")) path += "_C";
-                CharacterEntry entry;
-                entry.path = path;
-                entry.name = name;
-                entry.category = path.find("/NPC/") != std::string::npos ? "NPC" : "其他";
-                entry.discovered = true;
-                entry.reason = "资源存在；尚未检查配置与可操作性";
-                model::MergeCatalog(catalog, std::move(entry));
-                ++found;
-            }
-            // This bounded root may omit procedural/cutscene/player-only forms.
+            // These bounded roots may omit procedural/cutscene/player-only forms.
             // A successful Asset Registry query is not evidence of full coverage.
-            catalogComplete = false;
-            catalogMessage = std::format("已从游戏资源注册表找到 {} 个 Tamer 资源；特殊/程序生成形态覆盖尚未确认{}", found,
-                !loadingKnown || loading[0].Get<std::int32_t>() ? "，资源仍可能加载中" : "");
-            capabilities.catalog = found != 0;
+            std::string suffix = queried < roots.size() ? "，部分目录枚举失败" : "";
+            if (!loadingKnown || loading[0].Get<std::int32_t>()) suffix += "，资源仍可能加载中";
+            catalogMessage = std::format("已从游戏资源注册表找到 {} 个 Tamer 资源；特殊/程序生成形态覆盖尚未确认{}", found.size(), suffix);
+            capabilities.catalog = !found.empty();
         }
         struct Prepared
         {
@@ -627,6 +670,8 @@ namespace gloss::gameplay::transformation
             std::uint64_t sessionStarted{};
             model::Combo combo;
             adapter::LocomotionRequests locomotion;
+            bool ownsSpeedMultiplier{};
+            float appliedSpeedMultiplier{1.f};
             native::MotionMatchingSelection movementAnimation;
             int movementAnimationSpeed{-1};
             bool movementAnimationLocked{};
@@ -637,10 +682,10 @@ namespace gloss::gameplay::transformation
                 static constexpr unsigned MaximumSamples = 24, MaximumStops = 8;
                 unsigned samples{}, stops{}, animationChoices{};
                 std::uint64_t frame{}, requestFrame{}, nextSampleAt{}, lastLocationAt{};
-                bool moving{}, locationKnown{}, accelerationAvailable{}, maxAccelerationAvailable{};
+                bool moving{}, locationKnown{}, accelerationAvailable{}, maxAccelerationAvailable{}, lastInputAvailable{};
                 bool animInstanceAvailable{}, humanoidClassAvailable{}, animBaseClassAvailable{};
                 bool linkedGraphAvailable{}, moveClassAvailable{}, animOwnerAvailable{}, monsterClassAvailable{}, advancedClassAvailable{}, settingClassAvailable{};
-                Vec3 lastLocation{};
+                Vec3 lastLocation{}, desiredDirection{};
                 native::MoveInput axes{};
             } movementDiagnostics;
 
@@ -654,6 +699,7 @@ namespace gloss::gameplay::transformation
                     // session, never once per gameplay frame.
                     movementDiagnostics.accelerationAvailable = engine::Find(L"/Script/Engine.CharacterMovementComponent:GetCurrentAcceleration") != 0;
                     movementDiagnostics.maxAccelerationAvailable = engine::Find(L"/Script/Engine.CharacterMovementComponent:GetMaxAcceleration") != 0;
+                    movementDiagnostics.lastInputAvailable = engine::Find(L"/Script/Engine.Pawn:GetLastMovementInputVector") != 0;
                     movementDiagnostics.animInstanceAvailable = engine::Find(L"/Script/Engine.SkeletalMeshComponent:GetAnimInstance") != 0;
                     movementDiagnostics.humanoidClassAvailable = engine::Find(L"/Script/b1-Managed.BUAnimHumanoidCS") != 0;
                     movementDiagnostics.animBaseClassAvailable = engine::Find(L"/Script/b1-Managed.BUAnimInstanceBase") != 0;
@@ -819,6 +865,12 @@ namespace gloss::gameplay::transformation
                     auto acceleration = std::array{Arg::Vector("ReturnValue", {}, true)};
                     const bool accelerationRead = movement && diagnostic.accelerationAvailable &&
                         engine::Call(L"/Script/Engine.CharacterMovementComponent:GetCurrentAcceleration", acceleration, movement).success && finite(acceleration[0].Get<Vec3>());
+                    auto lastInput = std::array{Arg::Vector("ReturnValue", {}, true)};
+                    const bool lastInputRead = diagnostic.lastInputAvailable &&
+                        engine::Call(L"/Script/Engine.Pawn:GetLastMovementInputVector", lastInput, actor).success && finite(lastInput[0].Get<Vec3>());
+                    auto actorRotation = std::array{Arg::Rotation("ReturnValue", {}, true)};
+                    const bool actorRotationRead = engine::Call(L"/Script/Engine.Actor:K2_GetActorRotation", actorRotation, actor).success &&
+                        std::isfinite(actorRotation[0].Get<engine::Rotator>().yaw);
                     auto maximum = std::array{Arg::Data("ReturnValue", engine::Type::Float, 0.f, true)};
                     const bool maximumRead = movement && diagnostic.maxAccelerationAvailable &&
                         engine::Call(L"/Script/Engine.CharacterMovementComponent:GetMaxAcceleration", maximum, movement).success &&
@@ -827,7 +879,7 @@ namespace gloss::gameplay::transformation
                     const bool requestedRead = movement && engine::Property(movement, requested);
                     const bool pathsRead = movement && engine::Property(movement, paths);
                     const Vec3 delta{position.x - diagnostic.lastLocation.x, position.y - diagnostic.lastLocation.y, position.z - diagnostic.lastLocation.z};
-                    Log(std::format("Transformation movement sample: id={} session={} sample={}/{} proxy={}:{} cmc=0x{:X} dtMs={} locationRead=true location={} deltaRead={} delta={} velocityRead={} velocity={} accelerationRead={} acceleration={} maxAccelerationRead={} maxAcceleration={} requestedAccelerationRead={} requestedAcceleration={} pathAccelerationRead={} pathAcceleration={} axes=({:.3f},{:.3f}) request={} casting={} speedType={} moveAIType={} mode={} customMode={} walkSpeed={:.3f} flySpeed={:.3f} swimSpeed={:.3f} requestedMMState={} moveAPI={}",
+                    Log(std::format("Transformation movement sample: id={} session={} sample={}/{} proxy={}:{} cmc=0x{:X} dtMs={} locationRead=true location={} deltaRead={} delta={} velocityRead={} velocity={} accelerationRead={} acceleration={} maxAccelerationRead={} maxAcceleration={} requestedAccelerationRead={} requestedAcceleration={} pathAccelerationRead={} pathAcceleration={} axes=({:.3f},{:.3f}) request={} casting={} speedType={} moveAIType={} mode={} customMode={} walkSpeed={:.3f} flySpeed={:.3f} swimSpeed={:.3f} requestedMMState={} moveAPI={} desiredDirection={} lastInputRead={} lastInput={}",
                         characterId, sessionStarted, diagnostic.samples, MovementDiagnostics::MaximumSamples, proxy.index, proxy.serial, movement,
                         now >= diagnostic.lastLocationAt ? now - diagnostic.lastLocationAt : 0, vectorText(position), diagnostic.locationKnown,
                         diagnostic.locationKnown ? vectorText(delta) : "unknown", velocityRead, velocityRead ? vectorText(velocity.Get<Vec3>()) : "unknown",
@@ -837,7 +889,10 @@ namespace gloss::gameplay::transformation
                         pathsRead ? (paths.Get<std::int32_t>() ? "true" : "false") : "unknown", diagnostic.axes.forward, diagnostic.axes.right,
                         locomotion.requestId, castingSkill, locomotion.previous.speedType, locomotion.previous.moveAIType,
                         movementState.mode, movementState.custom, movementState.walkSpeed, movementState.flySpeed, movementState.swimSpeed, locomotion.previous.motionMatchingState,
-                        locomotion.previous.motionMatchingState ? "with-mm" : "native"));
+                        locomotion.previous.motionMatchingState ? "with-mm" : "native", vectorText(diagnostic.desiredDirection),
+                        lastInputRead, lastInputRead ? vectorText(lastInput[0].Get<Vec3>()) : "unknown") +
+                        std::format(" inputFacing={} actorYawRead={} actorYaw={} sprintInput={}", locomotion.previous.inputFacing, actorRotationRead,
+                            actorRotationRead ? std::format("{:.3f}", actorRotation[0].Get<engine::Rotator>().yaw) : "unknown", diagnostic.axes.sprint));
                 }
                 catch (...) {}
                 SampleAnimationDiagnostics(actor);
@@ -855,8 +910,42 @@ namespace gloss::gameplay::transformation
                 catch (...) {}
             }
 
+            bool ApplySpeedMultiplier(std::uintptr_t actor, float multiplier)
+            {
+                if (!speed::ValidValue(multiplier)) return false;
+                if (multiplier == 1.f && !ownsSpeedMultiplier) return true;
+                // This setting belongs only to the temporary proxy. A retired
+                // weak identity requires no write, even if its address is reused.
+                if (!actor)
+                {
+                    if (multiplier != 1.f) return false;
+                    ownsSpeedMultiplier = false;
+                    appliedSpeedMultiplier = 1.f;
+                    return true;
+                }
+                if (engine::ResolveWeak(proxy) != actor) return false;
+                auto args = std::array{Arg::Object("Unit", actor), Arg::Float("SpeedRate", multiplier)};
+                const auto result = engine::Call(L"/Script/b1-Managed.BGUFunctionLibraryCS:BGUAISetSpeedRate", args);
+                if (!result.success)
+                {
+                    // Numeric assignment is idempotent, but a completed or
+                    // indeterminate write must still be released on rollback.
+                    ownsSpeedMultiplier |= result.state != engine::CallState::NotCalled;
+                    Log("Transformation movement speed: " + result.message);
+                    return false;
+                }
+                if (appliedSpeedMultiplier != multiplier)
+                    Log(std::format("Transformation movement speed: id={} session={} multiplier={:.3f}", characterId, sessionStarted, multiplier));
+                appliedSpeedMultiplier = multiplier;
+                ownsSpeedMultiplier = multiplier != 1.f;
+                return true;
+            }
             bool StopLocomotion(std::uintptr_t actor, std::string_view reason = "pause")
             {
+                // A mapped release may be swallowed while the overlay or a
+                // cinematic owns input. Do not carry a sprint latch through
+                // those transitions. Idle preserves Shift-before-W behavior.
+                if (reason != "input_idle" && reason != "facing_mode_changed" && reason != "request_rejected") native::ResetSprintInput();
                 if (locomotion.requestId > 0 && actor)
                 {
                     // The game checks this request index before stopping its
@@ -870,7 +959,7 @@ namespace gloss::gameplay::transformation
                 locomotion.Reset();
                 nextMovementAnimationAt = 0;
                 movementDiagnostics.moving = false;
-                return true;
+                return ApplySpeedMultiplier(actor, 1.f);
             }
 
             void RecordExit(std::string reason)
@@ -1311,8 +1400,9 @@ namespace gloss::gameplay::transformation
                     const auto steering = adapter::Steer(movementSuppressed || casting[1].Get<int>() > 0 ? adapter::Motion::Stationary : control.motion, rotation.yaw, rotation.pitch, axes.forward, axes.right);
                     if (!steering.valid) return Fail("角色移动输入或视角无效");
                     const bool locked = engine::ResolveWeak(target) != 0;
-                    auto intent = adapter::Locomotion(actualMovement, steering, p, locked);
+                    auto intent = adapter::Locomotion(actualMovement, steering, p, locked, axes.sprint);
                     if (!intent.valid) return Fail("角色原生移动目标无效");
+                    movementDiagnostics.desiredDirection = intent.direction;
                     bool useMotionMatching{};
                     if (intent.moving)
                     {
@@ -1340,6 +1430,13 @@ namespace gloss::gameplay::transformation
                         if (useMotionMatching)
                         {
                             intent.motionMatchingState = static_cast<std::uint8_t>(movementAnimation.state);
+                            // Lock-only ground analyzers need an explicit facing
+                            // direction. FacingVelocity feeds root-motion output
+                            // back into the next animation's desired rotation.
+                            // The game's AI mover accepts an independent facing
+                            // override without creating a combat target.
+                            intent.inputFacing = !locked && movementAnimation.usesLocked && control.motion == adapter::Motion::Ground;
+                            if (intent.inputFacing) intent.moveAIType = 1;
                             if (locked && !movementAnimation.usesLocked)
                             {
                                 intent.moveAIType = 3; // The role has only a free gait: face its velocity.
@@ -1356,6 +1453,12 @@ namespace gloss::gameplay::transformation
                             message == "角色缺少当前步态动画，已允许原生移动（可能滑行）")
                             message = "实验性变身已激活；保留角色原始数值";
                     }
+                    // KeepFacingTarget uses the same enum for real combat locks
+                    // and our input-facing override. Cancel on ownership changes
+                    // immediately so an old override cannot survive the 33ms
+                    // replan throttle and redirect a real lock or another mover.
+                    if (locomotion.issued && locomotion.previous.inputFacing != intent.inputFacing &&
+                        !StopLocomotion(actor, "facing_mode_changed")) return Fail("无法停止本次角色移动请求");
                     if (!intent.moving)
                     {
                         if (!StopLocomotion(actor, casting[1].Get<int>() > 0 ? "casting" : movementSuppressed ? "state_suppressed" : "input_idle")) return Fail("无法停止本次角色移动请求");
@@ -1378,6 +1481,24 @@ namespace gloss::gameplay::transformation
                         }
                         locomotion.Result(intent, GetTickCount64(), moveRequest);
                         MovementRequestObserved(p, GetTickCount64(), moveRequest);
+                    }
+                    if (intent.inputFacing && locomotion.requestId > 0 && locomotion.previous.inputFacing)
+                    {
+                        // Begin/Reset clears the override, so dispatch after the
+                        // move request. Continuous updates steer the same mover.
+                        // Native path following already supplies Pawn input;
+                        // adding it again doubled LastInput without fixing drift.
+                        if (!native::SetLocomotionFacing(actor, intent.direction)) return Fail("角色原生移动接口失效");
+                    }
+                    if (intent.moving && locomotion.requestId > 0)
+                    {
+                        // The game's Custom speed slot multiplies its gait slot.
+                        // Reapply during owned locomotion because buff/config
+                        // updates can reset that slot. Preserve native movement
+                        // states and animations; never scale skill playback.
+                        const auto settings = GetMovementSpeed(characterId);
+                        if (!ApplySpeedMultiplier(actor, speed::Multiplier(settings, intent.speedType == 2)))
+                            return Fail("角色移动速度设置失败，正在恢复悟空");
                     }
                     // Free locomotion turns through the native mover. Preserve
                     // the selected combat target while its locked gait is active.
@@ -1598,19 +1719,25 @@ namespace gloss::gameplay::transformation
             {
                 CharacterEntry entry;
                 entry.name = hint.name; entry.path = hint.path;
-                entry.category = std::string_view(hint.category) == "首领" ? "Boss" : std::string_view(hint.category) == "普通角色" ? "小怪" : hint.category;
+                entry.category = model::CatalogCategory(hint.category);
                 entry.reason = "参考资料条目；尚未读取游戏配置";
                 model::MergeCatalog(catalog, std::move(entry));
             }
+            pak_catalog::Seed(catalog);
             LoadSlotsFile();
             LoadBindingsFile();
             LoadCameraFile();
+            LoadSpeedFile();
             features::RegisterHotkeyConflictProbe([](unsigned key, unsigned modifiers)
             {
                 std::lock_guard lock(mutex);
                 for (const auto &[id, values] : bindingConfig)
                     for (const auto &binding : values)
                         if (bindings::Matches(binding, key, modifiers)) return std::string("变身角色技能 ") + std::to_string(binding.skillId);
+                for (const auto &[id, skills] : skillCache)
+                    if (!bindingConfig.contains(id))
+                        for (const auto &binding : bindings::DefaultBindings(skills))
+                            if (bindings::Matches(binding, key, modifiers)) return std::string("变身角色技能 ") + std::to_string(binding.skillId);
                 return std::string{};
             });
         });
@@ -1753,7 +1880,11 @@ namespace gloss::gameplay::transformation
     {
         Initialize(); std::lock_guard lock(mutex);
         const auto found = bindingConfig.find(std::string(id));
-        return found == bindingConfig.end() ? std::vector<SkillBinding>{} : found->second;
+        // An existing record owns the whole character, including deliberately
+        // unbound skills and an explicitly saved empty configuration.
+        if (found != bindingConfig.end()) return found->second;
+        const auto skills = skillCache.find(std::string(id));
+        return skills == skillCache.end() ? std::vector<SkillBinding>{} : bindings::DefaultBindings(skills->second);
     }
     features::Result SetBindings(std::string_view id, std::vector<SkillBinding> values)
     {
@@ -1804,6 +1935,22 @@ namespace gloss::gameplay::transformation
         if (!SaveCameraFile(next)) return {false, "角色视距保存失败；仍使用之前的配置"};
         cameraConfig = std::move(next);
         return {true, "角色视距已保存；变身中即时生效"};
+    }
+    MovementSpeedSettings GetMovementSpeed(std::string_view id)
+    {
+        Initialize(); std::lock_guard lock(mutex);
+        return speed::Get(speedConfig, id);
+    }
+    features::Result SetMovementSpeed(std::string_view id, MovementSpeedSettings settings)
+    {
+        Initialize(); std::lock_guard lock(mutex);
+        if (std::none_of(catalog.begin(), catalog.end(), [&](const auto &entry) { return entry.id == id; })) return {false, "请先选择目录中的角色"};
+        if (!speed::Valid(settings)) return {false, "普通移动与疾跑倍率须为 0.10 至 5.00 倍"};
+        auto next = speedConfig;
+        if (settings == MovementSpeedSettings{}) next.erase(std::string(id)); else next[std::string(id)] = settings;
+        if (!SaveSpeedFile(next)) return {false, "角色速度保存失败；仍使用之前的配置"};
+        speedConfig = std::move(next);
+        return {true, "角色速度已保存；下次移动时生效"};
     }
     features::Result TriggerSkill(int skillId) { return Queue(RequestKind::Skill, {}, 0, skillId); }
     // Used by the input adapter: an input press is cancelled if the menu/focus or

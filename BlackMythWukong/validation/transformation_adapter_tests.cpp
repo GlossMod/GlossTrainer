@@ -170,6 +170,22 @@ namespace
         requests.Reset();
         CHECK(!requests.requestId && requests.Due(plan, 6000));
     }
+    void TestNativeSprintChangesGaitWithoutChangingDirectionOrBaseAttributes()
+    {
+        const auto movement = Ground();
+        const auto steering = adapter::Steer(adapter::Motion::Ground, -45., 0., .4f, .3f);
+        const auto walk = adapter::Locomotion(movement, steering, {}, false);
+        const auto sprint = adapter::Locomotion(movement, steering, {}, false, true);
+        CHECK(walk.speedType == 0 && sprint.speedType == 2);
+        CHECK(sprint.direction.x == walk.direction.x && sprint.direction.y == walk.direction.y);
+        CHECK(sprint.destination.x == walk.destination.x && sprint.destination.y == walk.destination.y);
+        CHECK(!adapter::Locomotion(movement, {true}, {}, false, true).moving);
+        adapter::LocomotionRequests requests;
+        requests.Result(walk, 1000, 17);
+        CHECK(requests.Due(sprint, 1033));
+        requests.Result(sprint, 1033, 18);
+        CHECK(!requests.Due(sprint, 1100) && requests.Due(walk, 1100));
+    }
 }
 
 int main()
@@ -180,6 +196,7 @@ int main()
     TestSteeringRotatesNormalizesAndClampsGroundInput();
     TestSteeringSupportsPitchForVolumeAndRejectsNonFiniteInput();
     TestNativeLocomotionPlansOwnGaitsAndAvoidsRepeatedMoverResets();
+    TestNativeSprintChangesGaitWithoutChangingDirectionOrBaseAttributes();
     if (failures)
     {
         std::cerr << failures << " transformation adapter assertion(s) failed\n";

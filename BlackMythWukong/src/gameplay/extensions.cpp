@@ -933,6 +933,7 @@ namespace gloss::gameplay::extensions
             {
                 ~Exit() { inFrame = false; }
             } exit;
+            std::optional<Id> executingFeature;
             try
             {
                 game_language::Tick();
@@ -951,10 +952,12 @@ namespace gloss::gameplay::extensions
                     std::lock_guard lock(mutex);
                     controls[static_cast<std::size_t>(Id::HideHud)].message = restored ? "已关闭并恢复" : "已关闭，正在恢复界面";
                 }
+                std::optional<Id> expiredFeature;
                 {
                     std::lock_guard lock(mutex);
                     if (request && now - request->at >= 30000)
                     {
+                        expiredFeature = request->feature;
                         if (request->feature)
                             controls[static_cast<std::size_t>(*request->feature)].message = "请求已过期";
                         request.reset();
@@ -962,6 +965,8 @@ namespace gloss::gameplay::extensions
                         status.message = "请求已过期，请重新操作";
                     }
                 }
+                if (expiredFeature)
+                    features::CompleteAction(*expiredFeature, {false, "请求已过期，请重新操作"});
                 const auto context = candidate.load();
                 if (cameraOwned && !engine::World(cameraController))
                 {
@@ -1044,6 +1049,7 @@ namespace gloss::gameplay::extensions
                 }
                 if (work)
                 {
+                    executingFeature = work->feature;
                     const bool transformBlocked = !work->restoring && transformation::NeedsExclusiveControl() &&
                         (!work->feature || TransformationConflict(*work->feature));
                     const bool allowed = !transformBlocked && (work->restoring || (!features::UpdateRequired() && work->updateGeneration == features::UpdateGeneration()));
@@ -1052,6 +1058,7 @@ namespace gloss::gameplay::extensions
                     Log("Extension action: " + result.message);
                     if (work->feature)
                         features::CompleteAction(*work->feature, result);
+                    executingFeature.reset();
                     std::lock_guard lock(mutex);
                     status.pending = false;
                     status.message = result.message;
@@ -1097,31 +1104,41 @@ namespace gloss::gameplay::extensions
             catch (const std::exception &e)
             {
                 Log(std::format("Extension frame failed: {}", e.what()));
-                std::lock_guard lock(mutex);
-                status.pending = false;
-                status.message = "操作失败，请查看日志";
+                std::optional<Id> cancelled;
+                {
+                    std::lock_guard lock(mutex);
+                    if (request)
+                        cancelled = request->feature;
+                    request.reset();
+                    status.pending = false;
+                    status.message = "操作失败，请查看日志";
+                }
+                if (executingFeature)
+                    features::CompleteAction(*executingFeature, {false, "操作失败，请查看日志"});
+                if (cancelled && cancelled != executingFeature)
+                    features::CompleteAction(*cancelled, {false, "操作失败，请查看日志"});
             }
         }
         features::Result Queue(std::function<features::Result()> execute, std::optional<Id> id = {}, bool resetPosition = false, bool restoring = false)
         {
             if (!restoring && transformation::NeedsExclusiveControl() && (!id || TransformationConflict(*id)))
-                return {false, "请先恢复悟空，再进行此操作"};
+                return {false, "请先恢复悟空，再进行此操作", false, true};
             std::lock_guard lock(mutex);
             const auto updateGeneration = features::UpdateGeneration();
             if (!restoring && (features::UpdateRequired() || updateGeneration != observedUpdateGeneration || HasUpdateRestores()))
-                return {false, features::UpdateRequired() ? "请下载最新版本后使用" : "正在恢复此前功能状态，请稍后重试"};
+                return {false, features::UpdateRequired() ? "请下载最新版本后使用" : "正在恢复此前功能状态，请稍后重试", false, true};
             if (recovering)
-                return {false, "正在恢复此前场景的临时状态"};
+                return {false, "正在恢复此前场景的临时状态", false, true};
             if (!status.ready)
-                return {false, "请进入存档，等待游戏接口就绪"};
+                return {false, "请进入存档，等待游戏接口就绪", false, true};
             if (status.pending)
-                return {false, "上一项操作尚未完成"};
+                return {false, "上一项操作尚未完成", false, true};
             status.pending = true;
             status.message = "等待游戏线程处理";
             if (resetPosition)
                 status.positionValid = false;
             request = Request{GetTickCount64(), generation, std::move(execute), id, updateGeneration, restoring};
-            return {true, "已排队"};
+            return {true, "已排队", true};
         }
         void LoadBookmarks()
         {
@@ -1315,7 +1332,7 @@ namespace gloss::gameplay::extensions
     features::Result SetEnabled(Id id, bool enabled, double value)
     {
         if (TransformationConflict(id) && transformation::NeedsExclusiveControl())
-            return {false, "此功能在变身期间暂挂，退出后自动恢复"};
+            return {false, "此功能在变身期间暂挂，退出后自动恢复", false, true};
         if (!std::isfinite(value))
             return {false, "参数无效"};
         if (enabled && Query(id).availability != features::Availability::Ready)

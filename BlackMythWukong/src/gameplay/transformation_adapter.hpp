@@ -73,8 +73,9 @@ namespace gloss::gameplay::transformation::adapter
         extensions::Vec3 direction{}, destination{}, origin{};
         double refreshDistance{};
         std::uint8_t speedType{}, moveAIType{}, motionMatchingState{};
+        bool inputFacing{};
     };
-    inline LocomotionIntent Locomotion(const Movement &movement, const Steering &steering, const extensions::Vec3 &origin, bool locked)
+    inline LocomotionIntent Locomotion(const Movement &movement, const Steering &steering, const extensions::Vec3 &origin, bool locked, bool sprint = false)
     {
         if (!steering.valid || !std::isfinite(origin.x) || !std::isfinite(origin.y) || !std::isfinite(origin.z)) return {};
         if (steering.scale <= .001f) return {true};
@@ -82,12 +83,12 @@ namespace gloss::gameplay::transformation::adapter
         if (!std::isfinite(speed) || speed <= 0.f) return {};
         const auto distance = std::clamp(static_cast<double>(speed) * 2., 300., 4000.);
         // This is a destination for the character's own AI mover, never a
-        // location write. Native JOG/RUN select this character's configured
+        // location write. Native JOG/RUN/SPRINT select this character's configured
         // gait/speed/animation; no player animation or numeric override is used.
         return {true, true, steering.direction,
             {origin.x + steering.direction.x * distance, origin.y + steering.direction.y * distance, origin.z + steering.direction.z * distance},
             origin, std::clamp(static_cast<double>(speed) * .35, 75., 500.),
-            static_cast<std::uint8_t>(steering.scale < .6f ? 0 : 1), static_cast<std::uint8_t>(locked ? 1 : 3)};
+            static_cast<std::uint8_t>(sprint ? 2 : steering.scale < .6f ? 0 : 1), static_cast<std::uint8_t>(locked ? 1 : 3)};
     }
     struct LocomotionRequests
     {
@@ -102,7 +103,7 @@ namespace gloss::gameplay::transformation::adapter
             const auto elapsed = now - issuedAt;
             const auto dot = previous.direction.x * intent.direction.x + previous.direction.y * intent.direction.y + previous.direction.z * intent.direction.z;
             const bool changed = dot < .98 || previous.speedType != intent.speedType || previous.moveAIType != intent.moveAIType ||
-                previous.motionMatchingState != intent.motionMatchingState;
+                previous.motionMatchingState != intent.motionMatchingState || previous.inputFacing != intent.inputFacing;
             if (!requestId) return elapsed >= 250 || (changed && elapsed >= 33);
             const auto dx = previous.destination.x - intent.origin.x, dy = previous.destination.y - intent.origin.y, dz = previous.destination.z - intent.origin.z;
             const bool nearDestination = dx * dx + dy * dy + dz * dz <= previous.refreshDistance * previous.refreshDistance;

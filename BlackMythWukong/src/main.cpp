@@ -13,6 +13,8 @@ extern "C" __declspec(dllexport) void InitializeASI()
     try
     {
         gloss::localization::Initialize();
+        // Read saved intent before input/render hooks can expose editable state.
+        gloss::features::InitializeSettings();
         gloss::Log(std::format("GlossTrainer {} initializing; process {}", gloss::Version, GetCurrentProcessId()));
         gloss::Log("Initializing MinHook");
         const auto status = MH_Initialize();

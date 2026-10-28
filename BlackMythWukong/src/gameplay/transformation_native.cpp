@@ -97,6 +97,13 @@ namespace gloss::gameplay::transformation::native
         std::size_t actionCount{};
         MoveInput movement;
         std::array<ULONGLONG, 2> movementTime{};
+        std::uint64_t sprintInputGeneration{};
+        std::atomic_bool sprintInputReady{};
+        void ClearSprintInputLocked()
+        {
+            movement.sprint = false;
+            ++sprintInputGeneration;
+        }
         std::array<int, 16> rejectedSkillInputs{};
         std::size_t rejectedSkillCount{};
         std::uintptr_t returnStub{};
@@ -104,11 +111,15 @@ namespace gloss::gameplay::transformation::native
         {
             std::uintptr_t findRef{}, setTamerType{}, initialized{}, inputOwner{}, getTeam{}, setTeam{};
             std::uintptr_t getEventCollection{}, clearTargetEvent{}, invokeVoid{}, makeTargetInfo{}, setTargetInfo{};
+            // Optional, independently fingerprinted facing event. Its absence
+            // must leave the core transformation adapter usable.
+            std::uintptr_t forceFacingEvent{}, invokeFacing{};
             std::uintptr_t weaponInitialized{}, weaponEvents{}, weaponMasterEvent{}, weaponActiveEvent{}, invokeActor{}, invokeBool{};
             std::uintptr_t boolPropertyEvent{}, enumPropertyEvent{}, resetPropertyEvent{}, invokeBoolProperty{}, invokeEnumProperty{}, invokeResetProperty{}, propHandle{}, calculateProperty{};
             std::uintptr_t hiddenPropertyReturn{};
             std::uintptr_t actionDesc{}, firstParam{}, getAxis{}, receiveBattle{}, receiveAction{};
         } methods;
+        std::atomic_bool facingEventReady{};
         struct ManagedRuntime
         {
             std::uintptr_t currentThread{}, enterUnsafe{}, exitUnsafe{};
@@ -625,6 +636,7 @@ namespace gloss::gameplay::transformation::native
                 {
                     movement = {};
                     movementTime = {};
+                    ClearSprintInputLocked();
                 }
                 context.rax = 0;
                 context.resume = returnStub;
@@ -651,6 +663,71 @@ namespace gloss::gameplay::transformation::native
             }
             context.rax = allowed ? 1 : 0;
             context.resume = returnStub;
+        }
+        void SprintInput(Context &context, void *)
+        {
+            if (!sprintInputReady.load(std::memory_order_acquire))
+                return;
+            ManagedRegion region;
+            if (!region)
+                return;
+            const auto session = Session();
+            const auto input = Identity(true);
+            std::uint64_t inputGeneration{};
+            {
+                std::unique_lock lock(stateMutex, std::try_to_lock);
+                if (!lock)
+                    return;
+                inputGeneration = sprintInputGeneration;
+            }
+            // Keep the owner, descriptor and concrete int-list rooted through
+            // all immediate managed calls; no managed object survives a frame.
+            volatile std::uintptr_t owner = InputOwner(context);
+            if (!owner)
+                return;
+            context.rax = 0;
+            context.resume = returnStub;
+            // Predictive/replayed input must neither flip a toggle twice nor
+            // release an independently held live action.
+            if (Read<std::uintptr_t>(context.rsp() + 0x28))
+                return;
+            volatile std::uintptr_t descriptor{}, parameters{};
+            std::uintptr_t found{};
+            const int id = static_cast<int>(context.rdx);
+            bool resolved = id > 0 && Safe(reinterpret_cast<std::uintptr_t (*)(int)>(methods.actionDesc), found, id) && Pointer(found);
+            descriptor = found;
+            parameters = resolved ? Read<std::uintptr_t>(descriptor + 0x20) : 0;
+            const int count = Pointer(parameters) ? Read<int>(parameters + 0x18) : 0;
+            int action{}, mode{};
+            resolved = resolved && count >= 2 && count <= 32 &&
+                Safe(reinterpret_cast<int (*)(std::uintptr_t, int)>(methods.firstParam), action, parameters, 0) &&
+                Safe(reinterpret_cast<int (*)(std::uintptr_t, int)>(methods.firstParam), mode, parameters, 1) && action == 2;
+            const bool allowed = resolved && BattleAllowed(owner, 12);
+            const auto event = static_cast<std::uint8_t>(context.r8);
+            // The DB already selects (action name, trigger event). The game's
+            // toggle branch flips on that configured callback, not necessarily
+            // Started; hold alone recognizes Started=2 and Completed=5.
+            const bool release = mode == 2 && (event == 4 || event == 5);
+            if (!SameIdentity(engine::MakeWeak(NativeAddress(owner)), input) ||
+                engine::ResolveWeak(input) != NativeAddress(owner) || !engine::ResolveWeak(session.root))
+                return;
+            std::unique_lock lock(stateMutex, std::try_to_lock);
+            if (!lock || session.generation != sessionGeneration || !SameIdentity(session.root, proxyIdentity) ||
+                !SameIdentity(input, inputIdentity) || inputGeneration != sprintInputGeneration)
+                return;
+            if (!resolved || !allowed || release)
+                ClearSprintInputLocked();
+            else if (mode != 2)
+            {
+                movement.sprint = !movement.sprint;
+                ++sprintInputGeneration;
+            }
+            else if (event == 2)
+            {
+                movement.sprint = true;
+                ++sprintInputGeneration;
+            }
+            context.rax = allowed ? 1 : 0;
         }
         bool SameImageCode(std::uintptr_t address, std::uintptr_t owner)
         {
@@ -744,6 +821,25 @@ namespace gloss::gameplay::transformation::native
             motionMatchingMethods = {aot::Method(0x18753), aot::Method(0x3b98), aot::Method(0xe783)};
             motionMatchingSelectorReady.store(true, std::memory_order_release);
             return true;
+        }
+        bool VerifyFacingEvent()
+        {
+            facingEventReady.store(false, std::memory_order_release);
+            methods.forceFacingEvent = aot::Method(0x30af);
+            methods.invokeFacing = aot::Method(0x15313);
+            // BUS_GSEventCollection::get_Evt_ForceSetAIMoveFacingTargetRotation
+            // and GSDel_Void_InRotator::Invoke. These probes are deliberately
+            // separate from VerifyMethods: a future managed build may remove
+            // this optional event without invalidating input/isolation hooks.
+            const bool matched = methods.forceFacingEvent && methods.invokeFacing &&
+                Matches(methods.forceFacingEvent,
+                    "55 48 8B EC 48 83 EC 40 48 89 75 E8 48 89 7D F0 4C 89 7D F8 48 8B F1 48 8B 86 D8 00 00 00 81 78 18 83 00 00 00 0F 86 89 00 00 00 48 8B B8 38 04 00 00 48 85 FF 74 1E") &&
+                Matches(methods.invokeFacing,
+                    "55 48 8B EC 48 83 EC 30 48 89 7D F8 48 8B F9 48 89 55 F0 48 8B 47 10 48 8B F8 48 85 C0 75 02 EB 0A 48 8B CF 48 8B 55 F0 FF 57 18 48 8B 7D F8 48 8D 65 00 5D C3");
+            if (!matched)
+                methods.forceFacingEvent = methods.invokeFacing = 0;
+            facingEventReady.store(matched, std::memory_order_release);
+            return matched;
         }
         bool VerifyMethods()
         {
@@ -900,6 +996,59 @@ namespace gloss::gameplay::transformation::native
             Hooks() = std::move(hooks);
             return true;
         }
+        // Complete exact-build 0x11C09 RUNTIME_FUNCTION body (1076 bytes).
+        // Besides the ABI this proves descriptor.Params +20, Count +18, and
+        // the hold/toggle branches used by SprintInput.
+        constexpr const char *sprintInputFingerprint =
+            "55 48 8B EC 48 81 EC 80 00 00 00 48 89 5D C8 48 89 75 D0 48 89 7D D8 4C 89 65 E0 4C 89 6D E8 4C "
+            "89 75 F0 4C 89 7D F8 4C 8B F9 48 8B FA 4C 89 45 B0 E8 82 16 BD 01 48 8B C8 33 D2 E8 2E 0B B8 01 "
+            "85 C0 0F 84 19 00 00 00 49 8B CF E8 68 16 BD 01 48 8B C8 41 0F B6 57 18 E8 01 11 B8 01 85 C0 75 "
+            "07 33 C0 E9 92 03 00 00 49 8B CF E8 48 16 BD 01 4C 8B F0 49 8B CE 33 D2 E8 CF 51 B6 01 85 C0 74 "
+            "07 33 C0 E9 72 03 00 00 48 8B CF E8 C4 10 B8 01 48 8B F8 48 85 C0 75 07 33 C0 E9 5B 03 00 00 83 "
+            "3F 00 48 8B 47 20 48 8B C8 83 39 00 48 63 40 18 83 F8 02 7D 07 33 C0 E9 3E 03 00 00 4D 8B 15 D5 "
+            "AB 9D 1A 49 8B CE E8 73 B8 B7 01 4C 8B E8 4D 8B 15 6B 7D 9C 1A 49 8B CE E8 67 F9 B6 01 4C 8B E0 "
+            "4D 8B 15 D9 FB 9D 1A 49 8B CE E8 19 FD B7 01 48 8B D8 4D 85 ED 74 0A 4D 85 E4 74 05 48 85 DB 75 "
+            "07 33 C0 E9 F2 02 00 00 49 8B CE E8 1A C8 B6 01 48 89 45 C0 33 C0 48 0F B6 F0 83 3F 00 48 8B 47 "
+            "20 48 8B C8 BA 01 00 00 00 83 38 00 E8 CD 43 B7 01 83 F8 02 40 0F 94 C0 48 0F B6 C0 85 C0 0F 84 "
+            "94 01 00 00 83 3F 00 48 8B 47 20 48 8B C8 33 D2 83 38 00 E8 A6 43 B7 01 83 F8 01 0F 85 32 00 00 "
+            "00 0F B6 45 B0 83 F8 02 75 0E B8 0A 00 00 00 48 0F B6 F0 E9 2F 01 00 00 0F B6 45 B0 83 F8 05 0F "
+            "85 22 01 00 00 B8 0B 00 00 00 48 0F B6 F0 E9 14 01 00 00 83 3F 00 48 8B 47 20 48 8B C8 33 D2 83 "
+            "38 00 E8 57 43 B7 01 83 F8 02 0F 85 F7 00 00 00 0F B6 45 B0 83 F8 02 0F 85 BC 00 00 00 48 8B 4D "
+            "C0 48 8B C1 83 38 00 E8 CC 07 B8 01 48 8B C8 BA 01 00 00 00 83 38 00 E8 C8 1A B7 01 49 8B CC BA "
+            "1F 00 00 00 49 8B 04 24 4D 8B 15 59 7C 9C 1A FF 50 D8 85 C0 0F 84 07 00 00 00 33 C0 E9 F9 01 00 "
+            "00 49 8B CE E8 53 8B B6 01 48 8B C8 E8 C5 14 BD 01 48 8B F0 48 85 C0 0F 84 4E 00 00 00 83 3E 00 "
+            "F3 0F 10 46 5C F3 0F 11 45 BC F3 0F 10 45 BC 0F 57 C9 67 0F 2F C8 0F 8A 2F 00 00 00 0F 83 29 00 "
+            "00 00 48 8B CB BA 9E 00 00 00 48 8B 03 4D 8B 15 8C F7 9D 1A FF 50 C0 0F 57 C9 67 0F 2F C8 0F 82 "
+            "07 00 00 00 33 C0 E9 8F 01 00 00 B8 0C 00 00 00 48 0F B6 F0 E9 2E 00 00 00 0F B6 45 B0 83 F8 05 "
+            "75 25 48 8B 4D C0 48 8B C1 83 38 00 E8 07 07 B8 01 48 8B C8 33 D2 83 38 00 E8 06 1A B7 01 B8 0D "
+            "00 00 00 48 0F B6 F0 48 8B 4D C0 48 8B C1 83 38 00 E8 02 0F B8 01 F3 0F 10 05 72 01 00 00 48 8B "
+            "C8 48 8B D6 45 33 C9 F2 0F 10 D0 83 38 00 E8 37 18 B7 01 E9 1D 01 00 00 83 3F 00 48 8B 47 20 48 "
+            "8B C8 33 D2 83 38 00 E8 12 42 B7 01 83 F8 01 0F 85 39 00 00 00 49 8B CD BA 09 00 00 00 49 8B 45 "
+            "00 4D 8B 15 98 A9 9D 1A FF 90 68 FF FF FF 85 C0 74 0E B8 0B 00 00 00 48 0F B6 F0 E9 9D 00 00 00 "
+            "B8 0A 00 00 00 48 0F B6 F0 E9 8F 00 00 00 83 3F 00 48 8B 47 20 48 8B C8 33 D2 83 38 00 E8 BC 41 "
+            "B7 01 83 F8 02 0F 85 72 00 00 00 49 8B CD BA 08 00 00 00 49 8B 45 00 4D 8B 15 42 A9 9D 1A FF 90 "
+            "68 FF FF FF 85 C0 74 0E B8 0D 00 00 00 48 0F B6 F0 E9 47 00 00 00 49 8B CC BA 1F 00 00 00 49 8B "
+            "04 24 4D 8B 15 BF 7A 9C 1A FF 50 D8 85 C0 0F 85 29 00 00 00 48 8B CB BA 9E 00 00 00 48 8B 03 4D "
+            "8B 15 3A F6 9D 1A FF 50 C0 0F 57 C9 67 0F 2F C8 7A 0B 73 09 B8 0C 00 00 00 48 0F B6 F0 49 8B CF "
+            "E8 F3 12 BD 01 48 8B C8 E8 5D C5 B6 01 48 8B C8 83 38 00 E8 E0 0D B8 01 F3 0F 10 05 40 00 00 00 "
+            "48 8B C8 48 8B D6 45 33 C9 F2 0F 10 D0 83 38 00 E8 15 17 B7 01 B8 01 00 00 00 48 8B 5D C8 48 8B "
+            "75 D0 48 8B 7D D8 4C 8B 65 E0 4C 8B 6D E8 4C 8B 75 F0 4C 8B 7D F8 48 8D 65 00 5D C3 00 00 00 00 "
+            "00 00 80 BF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80 BF";
+        bool InstallSprintInputHook()
+        {
+            sprintInputReady.store(false, std::memory_order_release);
+            const auto address = aot::Method(0x11c09);
+            if (!Matches(address, sprintInputFingerprint) || !methods.firstParam ||
+                CallTarget(address + 0x12c) != methods.firstParam || CallTarget(address + 0x153) != methods.firstParam)
+                return false;
+            std::string error;
+            auto hook = MidHook::Create(reinterpret_cast<void *>(address), SprintInput, nullptr, error);
+            if (!hook)
+                return false;
+            Hooks().push_back(std::move(hook));
+            sprintInputReady.store(true, std::memory_order_release);
+            return true;
+        }
     }
     void Initialize()
     {
@@ -909,6 +1058,8 @@ namespace gloss::gameplay::transformation::native
         ready.store(true, std::memory_order_release);
         Log(VerifyAnimationProbe() ? "Transformation animation data observation ready (read-only)" : "Transformation animation data observation unavailable; gameplay adapter remains enabled");
         Log(VerifyMotionMatchingSelector() ? "Transformation Motion Matching resource selector ready (read-only)" : "Transformation Motion Matching resource selector unavailable; gameplay adapter remains enabled");
+        Log(VerifyFacingEvent() ? "Transformation AI locomotion facing event ready (dispatch-only)" : "Transformation AI locomotion facing event unavailable; gameplay adapter remains enabled");
+        Log(InstallSprintInputHook() ? "Transformation mapped sprint hold/toggle input ready" : "Transformation mapped sprint input unavailable; gameplay adapter remains enabled");
         Log("Transformation native adapter: managed identity, owned cooperative isolation and mapped input hooks ready (experimental)");
     }
     bool Ready() { return ready.load(std::memory_order_acquire); }
@@ -1077,6 +1228,14 @@ namespace gloss::gameplay::transformation::native
                     if (!valid(state, accepted)) return false;
                     if (accepted) { result.valid = true; result.state = static_cast<int>(state); }
                 }
+                if (!locked && !result.valid)
+                {
+                    // Some roles provide only a Lock analyzer. Query their own
+                    // same-speed gait without creating or changing a target.
+                    const auto state = static_cast<std::uint32_t>(6 + speedType);
+                    if (!valid(state, accepted)) return false;
+                    if (accepted) { result.valid = result.usesLocked = true; result.state = static_cast<int>(state); }
+                }
             }
             std::uintptr_t currentSetting{}, currentCommon{}, currentMatching{}, currentData{};
             std::uint8_t currentMode{};
@@ -1165,6 +1324,7 @@ namespace gloss::gameplay::transformation::native
         actionCount = 0;
         movement = {};
         movementTime = {};
+        ClearSprintInputLocked();
         rejectedSkillCount = 0;
         deathRequested.store(false, std::memory_order_release);
         return true;
@@ -1181,6 +1341,7 @@ namespace gloss::gameplay::transformation::native
         actionCount = 0;
         movement = {};
         movementTime = {};
+        ClearSprintInputLocked();
         rejectedSkillCount = 0;
         deathRequested.store(false, std::memory_order_release);
     }
@@ -1209,6 +1370,7 @@ namespace gloss::gameplay::transformation::native
         actionCount = 0;
         movement = {};
         movementTime = {};
+        ClearSprintInputLocked();
         rejectedSkillCount = 0;
         return true;
     }
@@ -1226,7 +1388,15 @@ namespace gloss::gameplay::transformation::native
             return {};
         std::lock_guard lock(stateMutex);
         const auto now = GetTickCount64();
-        return {now - movementTime[0] <= 250 ? movement.forward : 0.f, now - movementTime[1] <= 250 ? movement.right : 0.f};
+        return {now - movementTime[0] <= 250 ? movement.forward : 0.f, now - movementTime[1] <= 250 ? movement.right : 0.f,
+            sprintInputReady.load(std::memory_order_acquire) && movement.sprint};
+    }
+    void ResetSprintInput()
+    {
+        if (!engine::IsGameThread())
+            return;
+        std::lock_guard lock(stateMutex);
+        ClearSprintInputLocked();
     }
     bool SetTamerType(std::uintptr_t object, int type)
     {
@@ -1733,5 +1903,50 @@ namespace gloss::gameplay::transformation::native
                    Safe(reinterpret_cast<std::uintptr_t (*)(std::uintptr_t, std::uint8_t, std::uint8_t)>(methods.makeTargetInfo), targetInfo, managedTarget, std::uint8_t{}, std::uint8_t{}) && targetInfo &&
                    SafeVoid(reinterpret_cast<void (*)(bool, std::uintptr_t, std::uintptr_t)>(methods.setTargetInfo), false, managedProxy, targetInfo);
         });
+    }
+    bool SetLocomotionFacing(std::uintptr_t proxy, const extensions::Vec3 &direction)
+    {
+        if (!facingEventReady.load(std::memory_order_acquire) || !Ready() || !engine::IsGameThread() ||
+            !Owned(proxy) || !std::isfinite(direction.x) || !std::isfinite(direction.y) ||
+            !std::isfinite(direction.z))
+            return false;
+        const double lengthSquared = direction.x * direction.x + direction.y * direction.y;
+        if (!std::isfinite(lengthSquared) || lengthSquared <= 1e-12)
+            return false;
+        const auto session = Session();
+        const auto identity = engine::MakeWeak(proxy);
+        if (!SameIdentity(identity, session.root) || engine::ResolveWeak(identity) != proxy)
+            return false;
+        const double yaw = std::atan2(direction.y, direction.x) * (180.0 / 3.14159265358979323846);
+        if (!std::isfinite(yaw))
+            return false;
+        const engine::Rotator targetRotation{0.0, yaw, 0.0};
+        const bool dispatched = ManagedOperation([&] {
+            volatile std::uintptr_t managedProxy = Managed(proxy);
+            std::uintptr_t collection{}, callback{}, subscriber{};
+            if (!managedProxy || !methods.getEventCollection || !methods.forceFacingEvent || !methods.invokeFacing ||
+                !Safe(reinterpret_cast<std::uintptr_t (*)(std::uintptr_t)>(methods.getEventCollection), collection, managedProxy) ||
+                !Pointer(collection) || !engine::IsA(NativeAddress(collection), L"/Script/b1-Managed.BUS_GSEventCollection") ||
+                !Safe(reinterpret_cast<std::uintptr_t (*)(std::uintptr_t)>(methods.forceFacingEvent), callback, collection) ||
+                !Pointer(callback) || !ReadMemory(callback + 0x10, &subscriber, sizeof(subscriber)) || !Pointer(subscriber))
+                return false;
+            // Getter calls can allocate managed objects or synchronously cause
+            // lifecycle callbacks. Recheck ownership and the immutable session
+            // snapshot immediately before dispatch; a stale callback must never
+            // be sent to a replacement mover.
+            const auto beforeInvoke = Session();
+            if (!Owned(proxy) || engine::ResolveWeak(identity) != proxy ||
+                beforeInvoke.generation != session.generation || !SameIdentity(beforeInvoke.root, session.root))
+                return false;
+            // GSDel_Void_InRotator::Invoke(in FRotator) is a synchronous managed
+            // call with rcx=event object and rdx=&targetRotation. No delegate or
+            // event object escapes this ManagedOperation scope.
+            return SafeVoid(reinterpret_cast<void (*)(std::uintptr_t, const engine::Rotator *)>(methods.invokeFacing), callback, &targetRotation);
+        });
+        if (!dispatched || !Owned(proxy) || engine::ResolveWeak(identity) != proxy)
+            return false;
+        const auto after = Session();
+        return after.generation == session.generation && SameIdentity(after.root, session.root) &&
+               engine::ResolveWeak(after.root) == proxy;
     }
 }

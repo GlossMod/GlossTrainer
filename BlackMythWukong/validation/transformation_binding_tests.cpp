@@ -33,6 +33,64 @@ namespace
         return skills;
     }
 
+    void TestDefaultBindingsCoverEmptyShortExactAndLongCatalogs()
+    {
+        const std::vector<unsigned> expected{1, 2, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30};
+        for (const auto count : {0u, 1u, 5u, 11u, 12u, 17u})
+        {
+            auto skills = Skills();
+            skills.resize(count);
+            const auto values = binding::DefaultBindings(skills);
+            CHECK(values.size() == skills.size());
+            CHECK(binding::ValidBindings(values, skills).success);
+            for (std::size_t i = 0; i < values.size(); ++i)
+            {
+                CHECK(values[i].skillId == skills[i].id);
+                CHECK(values[i].customName.empty() && values[i].modifiers == 0);
+                CHECK(values[i].key == (i < expected.size() ? expected[i] : 0));
+                if (i >= 2 && i < 12)
+                {
+                    CHECK(values[i].key >= 0x30 && values[i].key <= 0x39); // Main keyboard VK_0..VK_9.
+                    CHECK(!(values[i].key >= 0x60 && values[i].key <= 0x69)); // Never VK_NUMPAD0..9.
+                }
+            }
+        }
+    }
+
+    void TestDefaultBindingsPreserveCatalogOrderIncludingUnavailableSkills()
+    {
+        const std::vector<trans::SkillEntry> skills{
+            {90001, "First unavailable", false, "not initialized"},
+            {17, "Second", true, {}},
+            {74000, "Third unavailable", false, "not initialized"},
+            {3, "Fourth", true, {}},
+        };
+        const auto values = binding::DefaultBindings(skills);
+        CHECK(values.size() == 4);
+        CHECK(values[0].skillId == 90001 && values[0].key == 1);
+        CHECK(values[1].skillId == 17 && values[1].key == 2);
+        CHECK(values[2].skillId == 74000 && values[2].key == '1');
+        CHECK(values[3].skillId == 3 && values[3].key == '2');
+        auto available = skills;
+        for (auto &skill : available) skill.available = true;
+        CHECK(binding::Serialize({{"role", values}}) == binding::Serialize({{"role", binding::DefaultBindings(available)}}));
+    }
+
+    void TestDefaultBindingsRoundTripKeepsUnboundTailAndEmptyNames()
+    {
+        const auto skills = Skills();
+        const binding::Config source{{"default-role", binding::DefaultBindings(skills)}};
+        binding::Config parsed;
+        const auto encoded = binding::Serialize(source);
+        CHECK(binding::Parse(encoded, parsed).success);
+        CHECK(binding::Serialize(parsed) == encoded);
+        const auto &values = parsed.at("default-role");
+        CHECK(values.size() == skills.size() && binding::ValidBindings(values, skills).success);
+        CHECK(values[0].key == 1 && values[1].key == 2 && values[11].key == '0');
+        for (std::size_t i = 12; i < values.size(); ++i)
+            CHECK(values[i].skillId == skills[i].id && values[i].key == 0 && values[i].modifiers == 0 && values[i].customName.empty());
+    }
+
     void TestMoreThanEightBindingsAndStableSkillIds()
     {
         const auto skills = Skills();
@@ -160,6 +218,9 @@ namespace
 
 int main()
 {
+    TestDefaultBindingsCoverEmptyShortExactAndLongCatalogs();
+    TestDefaultBindingsPreserveCatalogOrderIncludingUnavailableSkills();
+    TestDefaultBindingsRoundTripKeepsUnboundTailAndEmptyNames();
     TestMoreThanEightBindingsAndStableSkillIds();
     TestCharacterScopedNamesAndBindingsRoundTripAsUtf8();
     TestModifierMatchingIsExactAndUnboundSkillsDoNotMatch();
