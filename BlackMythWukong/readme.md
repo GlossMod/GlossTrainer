@@ -117,7 +117,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-install.p
 
 ## 关于
 
-- **当前版本号**：v1.0.0；运行版本与最新版本号可在修改器“关于”页查看。
+- **当前版本号**：v1.1.0；运行版本与最新版本号可在修改器“关于”页查看。
 - **最新版本**：[黑神话：悟空 GitHub Releases](https://github.com/GlossMod/GlossTrainer/releases?q=BlackMythWukong%2Fv&expanded=true)，仅比较本游戏正式版本。检查失败仅显示“检查更新失败”，不限制使用。
 - **作者：小莫**（By: 小莫）。
 - **主 LICENSE**：[GNU GPL v3](https://github.com/GlossMod/GlossTrainer/blob/master/LICENSE)。
