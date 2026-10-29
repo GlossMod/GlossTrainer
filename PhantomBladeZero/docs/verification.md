@@ -319,3 +319,18 @@ Debug / Release 两配置的 PBZ 构建与 13 套测试共 26 次运行全部通
 证据：[after-hotspot-fix.log](../../output/pbz-live-stutter-20261030/after-hotspot-fix.log)。菜单关闭稳定窗口Tick平均5.884—7.161ms；01:10:40窗口6.621ms/max22.704ms，items约0.001ms，images约0.001ms且不再出现labels/inventory采样，证明按需暂停生效。与旧窗口11.751ms相比该窗口约下降44%，非严格同场景基准。
 
 仍有问题：combat在01:10:40平均4.394ms，占Tick约66%，其余约2.225ms尚未分段；当前磁盘设置perfect_deflect/perfect_dodge/infinite_dark_source均为1，不等同于运行时状态证明。物品页打开后库存仍约50.584ms、labels max35.246ms；01:09:50 items max1545.898ms，目录重建/文本处理等内部阶段尚未细分不能认定具体函数。读取故障绝大多数窗口0，仅一次1，无证据支持持续SEH风暴。未采集实际呈现FPS，不能据Tick次数推算显示帧率。
+
+## 2026-10-30 v1.0.2 发布验证
+
+按用户指定更新日志“优化性能，降低对 FPS 的影响”更新为 1.0.2。发行源码 `30e13a08adb7ac58e841463f2861fbf2b73bdde5` 包含轻量就绪查询、不可变共享物品快照、隐藏菜单输入路径、映射索引和名称缓存、游戏语言缓存隔离，以及物品页按需维护和关闭自动战斗时的提前返回。已有性能观察及其限制见上文；本次没有新增严格同场景 FPS 基准。
+
+固定源码工作树的 Debug / Release PBZ 构建和 14 套验证目标共 28 次测试全部通过，见 [测试结果](../../output/pbz-release-v1.0.2-20261030/tests.json)、[Debug 构建](../../output/pbz-release-v1.0.2-20261030/build-debug.log)、[Release 构建](../../output/pbz-release-v1.0.2-20261030/build-release.log)、[只读审查](../../output/pbz-release-v1.0.2-20261030/source-review.json)。PowerShell 5/7 打包各 29 项、模拟升级保留配置各 45 项全部通过，共 148 项，见 [发行工具证据](../../output/pbz-release-v1.0.2-20261030/release-tools-results.json)。
+
+代码和标签 `PhantomBladeZero/v1.0.2` 已推送，触发 [发行 CI](https://github.com/GlossMod/GlossTrainer/actions/runs/40919910639)。后续正式包哈希与本地部署以下文最终回执为准。
+
+[v1.0.2 正式版本](https://github.com/GlossMod/GlossTrainer/releases/tag/PhantomBladeZero/v1.0.2) 已发布，云端 Debug、Release 及发布任务全部成功。下载正式附件与 CI 候选包，核对来源提交、artifact/附件 digest、ZIP 字节一致性、SHA256SUMS 和五个包内文件全部通过，见 [发行核验](../../output/pbz-release-v1.0.2-20261030/published-verification.json)、[CI API](../../output/pbz-release-v1.0.2-20261030/ci-result.json)。
+
+- 正式 ZIP SHA-256：`7A3BDD4E0DF65934FA6E9F279F3E8A14875567369FB09C575C14B1145DD0D039`。
+- 正式 ASI SHA-256：`65B0C1F6B4E636260195C7D9EC6046F8F5F1C54E40F49649318F2F9983B03EE1`。
+
+用户确认保存退出且部署前再次确认无 PBZ 进程后，01:23 将正式包部署至 `E:\steam\steamapps\common\PBZ\platform\steam`。替换 ASI 和双语说明，Loader 与其配置保留；备份旧安装五个文件与完整用户数据目录。独立复核五个安装文件、五个备份、七个用户数据文件均通过，`scripts` 下仅有 `GlossTrainer.asi`。见 [部署回执](../../output/pbz-release-v1.0.2-20261030/deploy-20261030-012309/receipt.json)、[最终复核](../../output/pbz-release-v1.0.2-20261030/release-deployment-verification.json)。部署后未启动游戏，本次发布未新增 FPS 基准或游戏内功能验证。
