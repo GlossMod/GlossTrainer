@@ -3,7 +3,7 @@
         struct ItemInputState {
             Address table{};
             std::uint32_t tableIndex{};
-            std::uint32_t scanCursor{};
+            ItemScanSchedule scan;
             Clock::time_point nextRefresh{};
             std::unordered_map<std::string, std::string> labels;
             std::string device;
@@ -36,13 +36,14 @@
         void ItemDiscoverInputTable() {
             if (ItemInputTableValid()) return;
             itemInput.table = 0;
+            const auto now = Clock::now();
             const auto chunks = Read<Address>(base + 0xddb3c58);
             const auto count = Read<std::uint32_t>(base + 0xddb3c60);
             if (!chunks || count > 2000000) return;
-            if (itemInput.scanCursor >= count) itemInput.scanCursor = 0;
-            const auto end = (std::min)(count, itemInput.scanCursor + 4096);
-            for (; itemInput.scanCursor < end; ++itemInput.scanCursor) {
-                const auto index = itemInput.scanCursor;
+            if (!itemInput.scan.Begin(now, count)) return;
+            const auto end = itemInput.scan.End(count);
+            for (; itemInput.scan.cursor < end; ++itemInput.scan.cursor) {
+                const auto index = itemInput.scan.cursor;
                 const auto chunk = Read<Address>(chunks + (index / 65536) * 8);
                 const auto object = Read<Address>(chunk + (index % 65536) * 24 + 8);
                 if (Read<std::uint32_t>(object + 0xc) != index || ObjectName(object) != "DT_RichTextInputAction") continue;
@@ -50,6 +51,8 @@
                 if (ItemInputTableValid()) return;
                 itemInput.table = 0;
             }
+            // Missing optional decorator assets must not trigger endless full scans.
+            itemInput.scan.Finish(now, count);
         }
         std::string ItemKeyLabel(std::string key, std::string_view gamepad) {
             const bool ps = gamepad == "PS4" || gamepad == "PS5" || gamepad.find("Dual") != gamepad.npos;

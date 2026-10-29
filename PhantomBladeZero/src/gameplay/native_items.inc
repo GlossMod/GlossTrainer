@@ -86,6 +86,41 @@
         };
         NativeItemCatalog itemCatalog;
 
+        struct CachedItemText { ItemEntry entry; std::string raw; };
+        std::unordered_map<std::string, CachedItemText> cachedItemText;
+        bool itemCacheLoaded{};
+        void LoadItemCache() {
+            if (itemCacheLoaded) return;
+            itemCacheLoaded = true;
+            const auto path = gloss::DataDirectory() / "item_catalog.cache";
+            std::error_code error;
+            if (std::filesystem::file_size(path, error) > 16 * 1024 * 1024 || error) return;
+            std::ifstream stream(path, std::ios::binary);
+            ReadItemTextCache(stream, SupportedHash, cachedItemText);
+
+        }
+        void SaveItemCache() {
+            bool dirty{};
+            for (const auto& item : itemCatalog.rows) if (item.named) {
+                const auto found = cachedItemText.find(item.entry.key);
+                if (found != cachedItemText.end() && found->second.entry.name == item.entry.name &&
+                    found->second.entry.category == item.entry.category && found->second.raw == item.rawDescription) continue;
+                cachedItemText[item.entry.key] = {item.entry, item.rawDescription};
+                dirty = true;
+            }
+            if (!dirty) return;
+            const auto path = gloss::DataDirectory() / "item_catalog.cache";
+            auto temporary = path; temporary += ".tmp";
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            if (!stream) return;
+            stream << SupportedHash << '\n';
+            for (const auto& [key, value] : cachedItemText)
+                stream << std::quoted(key) << ' ' << std::quoted(value.entry.name) << ' '
+                    << std::quoted(value.entry.category) << ' ' << std::quoted(value.raw) << '\n';
+            stream.close();
+            if (stream) MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+        }
+
         std::uint64_t ItemNameIdentity(const NameValue& id) {
             return static_cast<std::uint64_t>(id.comparison) | (static_cast<std::uint64_t>(id.number) << 32);
         }
@@ -382,11 +417,19 @@
         }
         #include "native_dust.inc"
         void ItemPublish(bool ready, std::string status) {
+            LoadItemCache();
             std::vector<ItemEntry> entries;
             if (itemCatalog.complete) {
                 entries.reserve(itemCatalog.rows.size());
                 for (const auto& item : itemCatalog.rows) entries.push_back(item.entry);
                 if (dustItem) entries.push_back(*dustItem);
+            }
+            if (!itemCatalog.complete) for (const auto& [key, value] : cachedItemText) {
+                auto entry = value.entry;
+                entry.available = false;
+                entry.owned = -1;
+                entry.reason = "等待当前游戏目录验证";
+                entries.push_back(std::move(entry));
             }
             GetBackend().PublishItems(std::move(entries), ready, std::move(status));
         }
@@ -396,7 +439,7 @@
             itemCatalog.parsed = 0;
             itemCatalog.built = itemCatalog.complete = false;
             itemCatalog.nextRefresh = Clock::now() + std::chrono::milliseconds(1500);
-            GetBackend().PublishItems({}, false, std::move(reason));
+            ItemPublish(false, std::move(reason));
         }
         bool ItemBuildCatalog(Address backpack, std::string& reason) {
             const auto backpackType = Read<Address>(backpack + 0x10);
@@ -560,7 +603,8 @@
                 itemCatalog.session = session;
                 itemCatalog.backpack = backpack;
                 itemCatalog.backpackIndex = backpackIndex;
-                GetBackend().PublishItems({}, false, "正在核对当前场景的物品表与本地化布局");
+                itemInput.scan = {};
+                ItemPublish(false, "正在核对当前场景的物品表与本地化布局");
             }
             const auto now = Clock::now();
             const bool inputChanged = ItemRefreshInput(context);
@@ -584,6 +628,15 @@
                         return;
                     }
                     const auto& table = ItemTables[static_cast<std::size_t>(item.kind)];
+                    LoadItemCache();
+                    const auto cached = cachedItemText.find(item.entry.key);
+                    if (cached != cachedItemText.end()) {
+                        item.entry.name = cached->second.entry.name;
+                        item.rawDescription = cached->second.raw;
+                        item.entry.description = ItemFormattedDescription(item.rawDescription);
+                        item.named = true;
+                        continue;
+                    }
                     if (item.nameInputValid) {
                         const auto name = ItemResolveText(item.row + table.nameOffset);
                         if (faulted.load()) { ItemInvalidate("物品文本解析异常，目录已停用"); return; }
@@ -618,6 +671,7 @@
                     return;
                 }
                 itemCatalog.complete = true;
+                SaveItemCache();
                 ItemRefreshAmounts(backpack);
                 RefreshDust(context);
                 if (!ItemBackpackMatches(context, backpack)) { ItemInvalidate("目录库存回读后玩家会话变化"); return; }

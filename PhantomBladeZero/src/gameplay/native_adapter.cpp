@@ -1,6 +1,8 @@
 #include "native_adapter.hpp"
 #include "backend.hpp"
 #include "item_images.hpp"
+#include "item_scan_schedule.hpp"
+#include "item_text_cache.hpp"
 #include "item_richtext.hpp"
 #include "combat_rules.hpp"
 #include "attribute_rules.hpp"
@@ -13,6 +15,8 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <optional>
 #include <string>
@@ -977,6 +981,7 @@ namespace gloss::gameplay::native {
     }
 
     bool Initialize() {
+        ItemPublish(false, "正在等待游戏物品目录验证");
         if (initialized.exchange(true)) return installed.load();
         base = reinterpret_cast<Address>(GetModuleHandleW(nullptr));
         std::wstring path(32768, L'\0');

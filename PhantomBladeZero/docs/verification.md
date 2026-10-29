@@ -261,3 +261,19 @@ PBZ 已加入独立发布注册表，标签 `PhantomBladeZero/v1.0.0`，目标 `
 | 新版产物 | [GlossTrainer.asi](../../output/pbz-menu-key-20261029/package/GlossTrainer.asi)、[回执](../../output/pbz-menu-key-20261029/package/receipt.json)，SHA-256 `DF616E5837F797F62AF5B79D08CF54B9F23A2B167716ABB542F3DDBB91B1F8B0`；游戏仍在运行，本轮未替换游戏文件 |
 
 默认 Insert 的两轮 DX11 自动宿主因消息到达时 `foreground-target=0` 未通过，见 [首次](../../output/pbz-menu-key-20261029/input-insert-dx11/result.json)、[第二次](../../output/pbz-menu-key-20261029/input-insert-dx11-controlled/result.json)，不改记为通过；首次恢复前台后日志有 Menu opened。最终构建前第一次命令未显式选择 `--game=PhantomBladeZero`，出现目标不存在，原始日志 `build-debug-final.log` 保留，随后显式选择游戏的两配置构建通过。真实游戏中的按键录制、组合键、raw-only 设备、重启保留仍需实机验证；本地回归和宿主结果不替代这些验证。
+
+## 2026-10-29 物品输入装饰器发现扫描节流
+
+代码检查发现：可选的 DT_RichTextInputAction 表未加载时，旧实现在每次 ReceiveTick 的 250 ms 节流之前扫描 4096 个 UObject，完整未命中后立即从头循环。该路径即使菜单关闭也会运行，可能造成持续卡顿。用户日志没有物品扫描细节，不能据此证明唯一根因。
+
+发现扫描使用独立调度：50 ms 间隔、每批最多 512 个对象，完整未命中后等待 30 秒才重新扫描；输入标签刷新仍保持原有 250 ms 间隔。相比旧实现，60 FPS 时最大扫描吞吐从每秒 245760 个对象降为 10240；最大允许的 200 万对象首次遍历约需 195 秒，常见较小对象数组更快。表晚加载时仍可恢复发现，物品名称和发放不依赖该可选装饰器表。
+
+PBZItemScanTests 在 Debug / Release 均为 0 failures，覆盖批次上限、扫描间隔、完整未命中冷却、冷却结束重新扫描及对象数组缩小。记录：[Debug](../../output/pbz-item-scan-20261029/test-debug.log)、[Release](../../output/pbz-item-scan-20261029/test-release.log)。PBZ Release 编译通过，原始记录：[build.log](../../output/pbz-item-scan-20261029/build.log)。未执行游戏内复现与帧耗时验证。
+
+### 2026-10-29 物品磁盘缓存与单次发现
+
+物品稳定符号键、名称、分类与原始描述保存为 `DataDirectory()/item_catalog.cache`，以受支持游戏构建 SHA-256 隔离。启动后优先展示缓存，当前会话目录验证完成前禁止获取；运行时指针、FName、库存数量和授权状态不持久化。当前游戏中新出现的符号键解析后合并，未出现的旧记录保留，内容无变化时不写盘。写入采用临时文件和原子替换；超过16 MiB、版本不符或截断文件回退游戏读取。
+
+可选按键装饰表发现每次玩家会话/背包身份变化后只检查对象数组前缀一次，随后只检查新追加对象，50ms/512对象上限；不再完整循环扫描。同一会话已经检查过的槽位若复用为该表，需要下一次会话变化才会重新发现，物品描述可能显示“按键待读取”。缓存保存的是当前语言文本，切换游戏语言后需删除缓存再启动以重新解析。
+
+验证：PBZ Debug/Release构建成功，扫描频率、完成后不重扫、尾部新增和数组缩小的Debug/Release测试均为0失败。原始证据见 [output/pbz-item-cache-20261029](../../output/pbz-item-cache-20261029/)。尚未在真实游戏内验证；缓存序列化的多行与转义往返、版本不符及截断失败保留旧内容，Debug/Release自动测试均0失败。

@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## 修改器通用约定
+
+- 每款游戏的修改器代码单独存储在自己的目录下，互不干扰。
+- 修改器编译后的文件统一命名为 `GlossTrainer.asi`。
+- 每款修改器的基础功能包括：
+  - 记住用户的开关项，并在下次启动时恢复。
+  - 从 GitHub 检查更新。
+  - 同步“关于”页面的相关内容。
+  - 支持自定义显示/隐藏修改器界面的快捷键。
+
 ## Project Structure & Module Organization
 
 GlossTrainer hosts Windows x64 C++20 trainers in per-game directories, using Dear ImGui and MinHook. `BlackMythWukong/src/` contains runtime, input, overlay, and DX11/DX12 renderers; its `gameplay/` subdirectory contains hooks, engine bridges, and embedded catalog data. `BlackMythWukong/validation/` holds regression tests, and `BlackMythWukong/docs/` holds this game's architecture, implementation, installation and verification documents. `Scripts/` provides installation tooling; root `docs/` holds shared release and maintenance documents; `licenses/` holds dependency notices.
@@ -18,7 +28,7 @@ Install Visual Studio 2022 Desktop Development with C++, Windows SDK, and xmake.
 
 ```powershell
 xmake f -p windows -a x64 -m release  # Configure; use debug for debugging
-xmake build BlackMythWukong         # Produce build\release\BlackMythWukong.asi
+xmake build BlackMythWukong         # Build the game trainer; output filename must be GlossTrainer.asi
 xmake build GlossTrainerGameplayTests
 .\build\release\GlossTrainerGameplayTests.exe
 xmake build GlossTrainerImeTests
