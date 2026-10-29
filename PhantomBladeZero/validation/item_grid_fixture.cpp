@@ -19,14 +19,22 @@ namespace gloss::input {
         std::ifstream mode(DataDirectory() / L"fixture-mode.txt");
         std::string value;
         mode >> value;
-        if (value == "settings") {
+        if (value == "settings" || value == "menu-key" || value == "menu-capture") {
+            static bool menuKey{};
+            menuKey = value != "settings";
+            if (menuKey) {
+                std::string error;
+                gloss::hotkeys::GetRegistry().SetMenu({VK_F10, 7}, DataDirectory() / L"hotkeys.ini", error);
+                if (!error.empty()) Log(error);
+                if (value == "menu-capture") gloss::hotkeys::GetRegistry().BeginMenuCapture();
+            }
             ImGuiContextHook hook;
             hook.Type = ImGuiContextHookType_NewFramePre;
             hook.Callback = [](ImGuiContext* context, ImGuiContextHook*) {
                 if (!overlay::Visible()) return;
                 for (auto* window : context->Windows)
                     if (std::string_view(window->Name).starts_with("GlossTrainer/content_"))
-                        ImGui::SetScrollY(window, window->ScrollMax.y);
+                        ImGui::SetScrollY(window, menuKey ? 220.f : window->ScrollMax.y);
             };
             ImGui::AddContextHook(ImGui::GetCurrentContext(), &hook);
         }
@@ -77,7 +85,7 @@ namespace {
     void PrepareFixture() {
         std::ifstream mode(gloss::DataDirectory() / L"fixture-mode.txt");
         std::string modeName; mode >> modeName;
-        if (modeName == "settings") return;
+        if (modeName == "settings" || modeName == "menu-key" || modeName == "menu-capture") return;
         if (modeName == "features") {
             auto& backend = gloss::gameplay::GetBackend();
             backend.SetRuntimeState(true, "仅用于界面测试，不连接游戏", "features-fixture");

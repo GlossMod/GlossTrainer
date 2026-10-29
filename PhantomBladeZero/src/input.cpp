@@ -272,7 +272,7 @@ namespace gloss::input
         bool MatchesLegacyShortcut(unsigned key)
         {
             const auto chord = CurrentChord(key);
-            return (key == VK_INSERT && !chord.modifiers) ||
+            return hotkeys::GetRegistry().MatchesMenu(chord, true) ||
                 hotkeys::GetRegistry().Matches(chord, true, overlay::Visible());
         }
         enum class ShortcutAction
@@ -284,9 +284,10 @@ namespace gloss::input
         ShortcutAction DispatchHotkey(unsigned key)
         {
             const auto chord = CurrentChord(key);
-            // Capture has priority over the fixed menu key and gameplay actions.
+            // Capture owns the entire physical press, including the existing or
+            // newly recorded menu chord. Neither may also toggle the menu.
             if (hotkeys::GetRegistry().QueueKey(chord, true, overlay::Visible())) return ShortcutAction::Consumed;
-            return key == VK_INSERT && !chord.modifiers ? ShortcutAction::ToggleMenu : ShortcutAction::None;
+            return hotkeys::GetRegistry().MatchesMenu(chord, true) ? ShortcutAction::ToggleMenu : ShortcutAction::None;
         }
         void ToggleMenu(const std::shared_ptr<WindowState> &state)
         {

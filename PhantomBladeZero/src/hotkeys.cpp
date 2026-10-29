@@ -43,7 +43,6 @@ namespace gloss::hotkeys {
     std::string ChordError(Chord chord) {
         if (!KeyboardKey(chord.key) || ModifierKey(chord.key) || chord.key == VK_PROCESSKEY || chord.key == VK_PACKET) return "请选择一个键盘按键，可组合 Ctrl / Shift / Alt。";
         if (chord.modifiers & ~unsigned(Control | Shift | Alt)) return "Windows 组合键由系统保留。";
-        if (chord.key == VK_INSERT) return "Insert 由显示或隐藏菜单保留。";
         if (chord.key == VK_ESCAPE || chord.key == VK_DELETE || chord.key == VK_TAB) return "Escape、Delete 和 Tab 为界面保留键。";
         if (chord.key == VK_F4 && (chord.modifiers & Alt)) return "Alt + F4 由系统保留。";
         if (chord.key == VK_SPACE && (chord.modifiers & Alt)) return "Alt + Space 由系统保留。";
@@ -56,12 +55,13 @@ namespace gloss::hotkeys {
         if (chord.modifiers & Shift) label += "Shift+";
         if (chord.modifiers & Alt) label += "Alt+";
         const auto key = chord.key;
-        if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9')) label.push_back(static_cast<char>(key));
+        if (key == VK_INSERT) label += "Insert";
+        else if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9')) label.push_back(static_cast<char>(key));
         else if (key >= VK_F1 && key <= VK_F24) label += "F" + std::to_string(key - VK_F1 + 1);
         else {
             wchar_t name[64]{};
             auto scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC) << 16;
-            if (key == VK_PRIOR || key == VK_NEXT || key == VK_END || key == VK_HOME || key == VK_LEFT || key == VK_UP || key == VK_RIGHT || key == VK_DOWN || key == VK_DIVIDE || key == VK_NUMLOCK) scan |= 1u << 24;
+            if (key == VK_INSERT || key == VK_DELETE || key == VK_PRIOR || key == VK_NEXT || key == VK_END || key == VK_HOME || key == VK_LEFT || key == VK_UP || key == VK_RIGHT || key == VK_DOWN || key == VK_DIVIDE || key == VK_NUMLOCK) scan |= 1u << 24;
             if (GetKeyNameTextW(static_cast<LONG>(scan), name, static_cast<int>(std::size(name)))) {
                 char utf8[256]{};
                 const auto count = WideCharToMultiByte(CP_UTF8, 0, name, -1, utf8, sizeof(utf8), nullptr, nullptr);
@@ -75,7 +75,7 @@ namespace gloss::hotkeys {
     void Registry::Configure(std::vector<Action> actions) {
         std::lock_guard lock(mutex_);
         actions_.clear();
-        for (auto& action : actions) if (actions_.size() < MaxActions && ValidId(action.id) && ParametersValid(action.defaults, action.defaults.size())) actions_.emplace(action.id, std::move(action));
+        for (auto& action : actions) if (actions_.size() < MaxActions && action.id != MenuAction && ValidId(action.id) && ParametersValid(action.defaults, action.defaults.size())) actions_.emplace(action.id, std::move(action));
         for (auto it = bindings_.begin(); it != bindings_.end();) {
             const auto found = actions_.find(it->first);
             if (found == actions_.end() || !ParametersValid(it->second.parameters, found->second.defaults.size())) { it = bindings_.erase(it); dirty_ = true; }
@@ -87,12 +87,36 @@ namespace gloss::hotkeys {
         std::lock_guard lock(mutex_); const auto found = bindings_.find(action);
         return found == bindings_.end() ? std::nullopt : std::optional(found->second);
     }
+    Chord Registry::MenuChord() const { std::lock_guard lock(mutex_); return menuChord_; }
+    bool Registry::MatchesMenu(Chord chord, bool foreground) const {
+        std::lock_guard lock(mutex_);
+        return foreground && capture_.action.empty() && chord == menuChord_;
+    }
+    bool Registry::SetMenuLocked(Chord chord, const std::filesystem::path& path, std::string& error) {
+        error.clear();
+        if (!chord.key) { error = "界面开关快捷键不能为空。"; return false; }
+        if (!(error = ChordError(chord)).empty()) return false;
+        for (const auto& [id, binding] : bindings_) if (binding.chord == chord) {
+            const auto other = actions_.find(id);
+            error = "此快捷键已绑定：" + (other != actions_.end() && !other->second.title.empty() ? other->second.title : std::string("其他功能"));
+            return false;
+        }
+        // The currently usable chord remains active until the whole file is
+        // replaced successfully. A failed write cannot strand the menu.
+        if (!SaveLocked(path, chord, error)) return false;
+        menuChord_ = chord;
+        return true;
+    }
+    bool Registry::SetMenu(Chord chord, const std::filesystem::path& path, std::string& error) {
+        std::lock_guard lock(mutex_); return SetMenuLocked(chord, path, error);
+    }
     bool Registry::SetLocked(std::string_view action, Chord chord, std::vector<std::string> parameters, std::string& error) {
         error.clear();
         const auto definition = actions_.find(action);
         if (definition == actions_.end()) { error = "此功能已不再提供。"; return false; }
         if (!chord.key) { if (bindings_.erase(std::string(action))) dirty_ = true; return true; }
         if (!(error = ChordError(chord)).empty()) return false;
+        if (chord == menuChord_) { error = "此快捷键已用于界面开关。"; return false; }
         if (!ParametersValid(parameters, definition->second.defaults.size())) { error = "绑定参数无效。"; return false; }
         for (const auto& [id, binding] : bindings_) if (id != action && binding.chord == chord) {
             const auto other = actions_.find(id);
@@ -115,6 +139,11 @@ namespace gloss::hotkeys {
         const auto found = actions_.find(action);
         if (found == actions_.end() || !ParametersValid(parameters, found->second.defaults.size())) return;
         capture_ = {std::string(action), "按下快捷键；Escape 取消，Delete 清除。"}; captureParameters_ = std::move(parameters); captureKeys_.clear(); queue_.clear(); pending_.clear();
+    }
+    void Registry::BeginMenuCapture() {
+        std::lock_guard lock(mutex_);
+        capture_ = {std::string(MenuAction), "按下界面开关键，可组合 Ctrl / Shift / Alt；Escape 取消。"};
+        captureParameters_.clear(); captureKeys_.clear(); queue_.clear(); pending_.clear();
     }
     void Registry::CancelCapture() { std::lock_guard lock(mutex_); capture_ = {}; captureKeys_.clear(); }
     CaptureState Registry::Capture() const { std::lock_guard lock(mutex_); return capture_; }
@@ -139,13 +168,15 @@ namespace gloss::hotkeys {
         }
         return false;
     }
-    void Registry::PumpCapture() {
+    void Registry::PumpCapture(const std::filesystem::path& path) {
         std::lock_guard lock(mutex_);
         while (!captureKeys_.empty() && !capture_.action.empty()) {
             const auto chord = captureKeys_.front(); captureKeys_.pop_front();
             if (chord.key == VK_ESCAPE) { capture_ = {}; break; }
             std::string error;
-            if (SetLocked(capture_.action, chord.key == VK_DELETE ? Chord{} : chord, captureParameters_, error)) { capture_ = {}; break; }
+            const bool menu = capture_.action == MenuAction;
+            if (menu ? SetMenuLocked(chord.key == VK_DELETE ? Chord{} : chord, path, error) :
+                SetLocked(capture_.action, chord.key == VK_DELETE ? Chord{} : chord, captureParameters_, error)) { capture_ = {}; break; }
             capture_.message = std::move(error);
         }
         captureKeys_.clear();
@@ -174,10 +205,20 @@ namespace gloss::hotkeys {
             if (!line.empty() && line.back() == '\r') line.pop_back();
             if (line.empty() || line.front() == ';') continue;
             if (line.size() > 4096) { error = "快捷键文件行过长。"; return false; }
-            if (line.front() == '[' && line.back() == ']') { section = line.substr(1, line.size() - 2); if (!ValidId(section) || sections.size() >= MaxActions) { error = "快捷键文件节无效。"; return false; } }
+            if (line.front() == '[' && line.back() == ']') { section = line.substr(1, line.size() - 2); if (!ValidId(section) || sections.size() >= MaxActions + 1) { error = "快捷键文件节无效。"; return false; } }
             else { const auto equals = line.find('='); if (!section.empty() && equals != std::string::npos) sections[section][line.substr(0, equals)] = line.substr(equals + 1); }
         }
         if (!stream.eof()) { error = "快捷键文件读取未完成。"; return false; }
+        menuChord_ = {VK_INSERT, 0};
+        // Resolve the menu first regardless of section order. Invalid menu
+        // values fall back to Insert and cannot be claimed by a feature.
+        if (const auto menu = sections.find(MenuAction); menu != sections.end()) {
+            const auto key = menu->second.find("key"), mods = menu->second.find("modifiers"), count = menu->second.find("count");
+            unsigned vk{}, modifiers{}, parameters{};
+            if (key != menu->second.end() && mods != menu->second.end() && count != menu->second.end() &&
+                Number(key->second, vk) && Number(mods->second, modifiers) && Number(count->second, parameters) && !parameters &&
+                ChordError({vk, modifiers}).empty()) menuChord_ = {vk, modifiers};
+        }
         bindings_.clear();
         for (const auto& [id, values] : sections) {
             const auto spec = actions_.find(id);
@@ -199,13 +240,18 @@ namespace gloss::hotkeys {
         return true;
     }
     bool Registry::Save(const std::filesystem::path& path, std::string& error) {
-        std::lock_guard lock(mutex_); error.clear();
+        std::lock_guard lock(mutex_); return SaveLocked(path, menuChord_, error);
+    }
+    bool Registry::SaveLocked(const std::filesystem::path& path, Chord menu, std::string& error) {
+        error.clear();
+        if (path.empty()) { error = "保存快捷键失败。"; return false; }
         try {
             if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
             auto temporary = path; temporary += L".tmp";
             {
                 std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
                 stream << "; GlossTrainer PBZ hotkeys v1; parameters are UTF-8 hex\n";
+                stream << '[' << MenuAction << "]\nkey=" << menu.key << "\nmodifiers=" << menu.modifiers << "\ncount=0\n\n";
                 for (const auto& [id, binding] : bindings_) {
                     stream << '[' << id << "]\nkey=" << binding.chord.key << "\nmodifiers=" << binding.chord.modifiers << "\ncount=" << binding.parameters.size() << '\n';
                     for (std::size_t i = 0; i < binding.parameters.size(); ++i) stream << 'p' << i << '=' << Hex(binding.parameters[i]) << '\n';

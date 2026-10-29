@@ -243,3 +243,21 @@ PBZ 已加入独立发布注册表，标签 `PhantomBladeZero/v1.0.0`，目标 `
 本机编译与云端编译产物的哈希不同；此次部署以正式发行包为准。以上发布和文件核验不新增游戏内功能验证。
 
 18:57 用户再次确认退出游戏后，已完成正式包在 `E:\steam\steamapps\common\PBZ\platform\steam` 的部署核验。执行时已有 ASI 与正式包哈希相同，因此保留 ASI、Loader 和 Loader 配置，补齐双语玩家说明；安装目录五个发行文件均与候选清单一致。现有安装文件与完整用户配置已备份，配置逐文件哈希保持一致，`scripts` 下仅有一个 `GlossTrainer.asi`。见 [部署与备份回执](../../output/pbz-release-20261029/deploy-20261029-185715/receipt.json)、[最终独立复核](../../output/pbz-release-20261029/release-deployment-verification.json)。此次没有启动游戏或新增实机功能验证。
+
+## 2026-10-29 自定义界面开关按键
+
+设置页“菜单与布局”新增界面开关按键录制与恢复默认，默认 Insert，支持 Ctrl / Shift / Alt 组合。Esc 取消；菜单键不能清空。当前菜单组合键与功能组合键双向检查冲突。录制优先于菜单切换和功能调用；legacy/raw 两路读取相同配置，沿用按住与抬起的消费状态，录下的新键不会在同次按住时再切换菜单。
+
+菜单键保存到现有 `hotkeys.ini` 的 `[menu:toggle]` 节；完整文件原子替换成功后才启用新菜单键，保存失败保留旧键和旧文件，并允许重试。旧配置继续使用 Insert；非法菜单配置回退 Insert，再过滤与菜单冲突的功能键。底部提示和启动提示实时读取当前组合键，中英文文案与弹窗 ID 保持一致。版本仍为 1.0.0，本轮没有改动正式发布标签或附件。
+
+| 检查 | 结果与证据 |
+| --- | --- |
+| PBZ / 图形 fixture Debug、Release 构建 | 均通过；[Debug 最终构建](../../output/pbz-menu-key-20261029/build-debug-final-pbz.log)、[Release 最终构建](../../output/pbz-menu-key-20261029/build-release-final-pbz.log) |
+| Hotkey / MouseShortcut / IME / Localization 回归 | 两配置共 8 次全部通过，Hotkey 每配置 541 checks / 0 failures；[结果](../../output/pbz-menu-key-20261029/tests.json)、[复跑脚本](../../output/pbz-menu-key-20261029/validate-backend.ps1) |
+| 保存与录制边界 | 覆盖全部修饰键组合、双向冲突及恢复默认冲突、录制取消、Delete 不可清空、失焦取消、旧配置、坏配置回退、文件锁定保存失败保留旧键/旧文件、重试和其他功能参数保留 |
+| 长组合键与双语双主题界面 | 已查看中文暗色与英文亮色设置、录制弹窗；最终[英文亮色设置](../../output/pbz-menu-key-20261029/final-en-light-key/GlossTrainer.Host-open.png)、[中文暗色录制](../../output/pbz-menu-key-20261029/final-zh-dark-capture/GlossTrainer.Host-open.png)。显示 Ctrl+Shift+Alt+F10；fixture 不连接游戏且排除生产输入实现 |
+| 自定义 F10 的生产 ASI 宿主 | Release DX12 自动开关、最小化/恢复、按住 W 的合成释放及后续抬起检查通过；[结果](../../output/pbz-menu-key-20261029/input-f10-dx12/result.json)、[日志](../../output/pbz-menu-key-20261029/input-f10-dx12/GlossTrainer.Host.log)。使用窗口消息，未验证真实物理组合键或 raw-only 键盘 |
+| UI 原型 | custom-imagegen / model_providers.custom / gpt-image-2.5 返回 HTTP 429 usage_limit_reached；已查看并复用既有菜单按键双主题原型。[提示词](../../output/pbz-menu-key-20261029/ui/prompt.txt)、[日志](../../output/pbz-menu-key-20261029/ui/generation.log)、[审阅](../../output/pbz-menu-key-20261029/ui/prototype-review.txt) |
+| 新版产物 | [GlossTrainer.asi](../../output/pbz-menu-key-20261029/package/GlossTrainer.asi)、[回执](../../output/pbz-menu-key-20261029/package/receipt.json)，SHA-256 `DF616E5837F797F62AF5B79D08CF54B9F23A2B167716ABB542F3DDBB91B1F8B0`；游戏仍在运行，本轮未替换游戏文件 |
+
+默认 Insert 的两轮 DX11 自动宿主因消息到达时 `foreground-target=0` 未通过，见 [首次](../../output/pbz-menu-key-20261029/input-insert-dx11/result.json)、[第二次](../../output/pbz-menu-key-20261029/input-insert-dx11-controlled/result.json)，不改记为通过；首次恢复前台后日志有 Menu opened。最终构建前第一次命令未显式选择 `--game=PhantomBladeZero`，出现目标不存在，原始日志 `build-debug-final.log` 保留，随后显式选择游戏的两配置构建通过。真实游戏中的按键录制、组合键、raw-only 设备、重启保留仍需实机验证；本地回归和宿主结果不替代这些验证。

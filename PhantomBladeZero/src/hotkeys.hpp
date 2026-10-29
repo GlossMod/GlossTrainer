@@ -11,6 +11,7 @@
 #include <vector>
 
 namespace gloss::hotkeys {
+    inline constexpr std::string_view MenuAction = "menu:toggle";
     enum Modifier : unsigned { Control = 1, Shift = 2, Alt = 4, Windows = 8 };
     struct Chord {
         unsigned key{}, modifiers{};
@@ -29,6 +30,10 @@ namespace gloss::hotkeys {
     class Registry {
     public:
         void Configure(std::vector<Action> actions);
+        Chord MenuChord() const;
+        bool SetMenu(Chord chord, const std::filesystem::path& path, std::string& error);
+        bool MatchesMenu(Chord chord, bool foreground) const;
+        void BeginMenuCapture();
         std::optional<Binding> Get(std::string_view action) const;
         bool Set(std::string_view action, Chord chord, std::vector<std::string> parameters, std::string& error);
         void SetParameters(std::string_view action, std::vector<std::string> parameters);
@@ -37,7 +42,7 @@ namespace gloss::hotkeys {
         CaptureState Capture() const;
         bool Matches(Chord chord, bool foreground, bool menuVisible) const;
         bool QueueKey(Chord chord, bool foreground, bool menuVisible);
-        void PumpCapture();
+        void PumpCapture(const std::filesystem::path& path = {});
         std::vector<Invocation> Drain();
         void Complete(std::string_view action);
         void OnFocusLost();
@@ -46,9 +51,12 @@ namespace gloss::hotkeys {
         bool Dirty() const;
     private:
         bool SetLocked(std::string_view action, Chord chord, std::vector<std::string> parameters, std::string& error);
+        bool SetMenuLocked(Chord chord, const std::filesystem::path& path, std::string& error);
+        bool SaveLocked(const std::filesystem::path& path, Chord menu, std::string& error);
         mutable std::mutex mutex_;
         std::map<std::string, Action, std::less<>> actions_;
         std::map<std::string, Binding, std::less<>> bindings_;
+        Chord menuChord_{0x2d, 0}; // VK_INSERT; keep the public header independent of Windows.h.
         CaptureState capture_;
         std::vector<std::string> captureParameters_;
         std::deque<Chord> captureKeys_;

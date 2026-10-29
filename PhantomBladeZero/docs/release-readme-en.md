@@ -8,7 +8,7 @@ GlossTrainer v{{VERSION}} · Windows x64
 
 1. Save and exit the game normally, then extract the release ZIP.
 2. Copy `version.dll`, `version.ini` and the `scripts` folder into `platform/steam`, alongside that directory's `PBZ.exe`.
-3. Start the game and press **Insert** to show or hide the menu. Feature hotkeys are initially unbound; assign them on the Features page.
+3. Start the game and press **Insert** (the default) to show or hide the menu. Click the key box under Settings > Menu and layout to record a new combination or restore the default. Ctrl / Shift / Alt are supported; Esc cancels. Changes are saved automatically. Feature hotkeys are initially unbound; assign them on the Features page.
 
 ```text
 PBZ/platform/steam/

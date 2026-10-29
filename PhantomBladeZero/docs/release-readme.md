@@ -8,7 +8,7 @@ GlossTrainer v{{VERSION}} · Windows x64
 
 1. 保存并正常退出游戏，解压发行 ZIP。
 2. 将 `version.dll`、`version.ini` 和 `scripts` 文件夹一起复制到游戏的 `platform/steam`，与该目录的 `PBZ.exe` 同级。
-3. 启动游戏，按 **Insert** 打开或隐藏菜单。功能快捷键默认未绑定，可在修改功能页设置。
+3. 启动游戏，默认按 **Insert** 打开或隐藏菜单。可在设置页“菜单与布局”点击按键框自定义组合键或恢复默认，支持 Ctrl / Shift / Alt，Esc 取消，设置会自动保存。功能快捷键默认未绑定，可在修改功能页设置。
 
 ```text
 PBZ/platform/steam/

@@ -1113,7 +1113,7 @@ namespace gloss::overlay
         void ProcessHotkeys(const gameplay::Snapshot& snapshot)
         {
             auto& registry = hotkeys::GetRegistry();
-            registry.PumpCapture();
+            registry.PumpCapture(DataDirectory() / L"hotkeys.ini");
             for (auto& invocation : registry.Drain())
             {
                 const gameplay::FeatureDef* feature{};
@@ -1658,7 +1658,34 @@ namespace gloss::overlay
             BeginAutoCard("layout-settings", scale);
             Label("菜单与布局", 20, ImGui::GetStyleColorVec4(ImGuiCol_Text));
             ImGui::Spacing();
-            ImGui::TextUnformatted(Text("Insert  显示或隐藏菜单"));
+            auto& registry = hotkeys::GetRegistry();
+            static std::string menuHotkeyError;
+            ImGui::TextUnformatted(Text("界面开关按键"));
+            const auto menuKeyLabel = hotkeys::ChordLabel(registry.MenuChord());
+            const float resetKeyWidth = std::max(112 * scale,
+                ImGui::CalcTextSize(Text("恢复默认")).x + ImGui::GetStyle().FramePadding.x * 2);
+            const float keyWidth = std::min(std::max(160 * scale,
+                ImGui::CalcTextSize(menuKeyLabel.c_str()).x + 28 * scale),
+                ImGui::GetContentRegionAvail().x - resetKeyWidth - ImGui::GetStyle().ItemSpacing.x);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, scale);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+            if (ImGui::Button(WidgetLabel(menuKeyLabel, "settings-menu-key"), ImVec2(keyWidth, 32 * scale)))
+            {
+                menuHotkeyError.clear();
+                registry.BeginMenuCapture();
+            }
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar();
+            ImGui::SameLine();
+            if (ImGui::Button(WidgetLabel("恢复默认###reset-menu-key"), ImVec2(resetKeyWidth, 32 * scale)))
+            {
+                menuHotkeyError.clear();
+                registry.SetMenu({VK_INSERT, 0}, DataDirectory() / L"hotkeys.ini", menuHotkeyError);
+            }
+            MutedWrapped("点击按键框后按下组合键，Esc 取消；设置自动保存。");
+            if (!menuHotkeyError.empty())
+                ImGui::TextWrapped("%s", Text(menuHotkeyError));
+            ImGui::Spacing();
             MutedWrapped("点击修改功能的快捷键列绑定；仅菜单隐藏时生效。");
             MutedWrapped("拖动顶部空白区域可移动窗口，设置自动保存。");
             if (ImGui::Button(WidgetLabel("重置布局"), ImVec2(124 * scale, 32 * scale)))
@@ -1669,6 +1696,31 @@ namespace gloss::overlay
                 dirty = true;
             }
             EndCard();
+            if (registry.Capture().action == hotkeys::MenuAction && !ImGui::IsPopupOpen(WidgetLabel("设置界面开关按键###menu-key-capture")))
+                ImGui::OpenPopup(WidgetLabel("设置界面开关按键###menu-key-capture"));
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(.5f, .5f));
+            ImGui::SetNextWindowSize(ImVec2(440 * scale, 0));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * scale, 20 * scale));
+            if (ImGui::BeginPopupModal(WidgetLabel("设置界面开关按键###menu-key-capture"), nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings))
+            {
+                const auto capture = registry.Capture();
+                if (capture.action != hotkeys::MenuAction)
+                    ImGui::CloseCurrentPopup();
+                ImGui::TextWrapped("%s", Text("按下要使用的按键或组合键…"));
+                MutedWrapped("支持 Ctrl / Shift / Alt，Esc 取消。");
+                MutedWrapped("界面开关按键始终可用，不能留空。");
+                if (!capture.message.empty() && capture.message != "按下界面开关键，可组合 Ctrl / Shift / Alt；Escape 取消。")
+                    ImGui::TextWrapped("%s", Text(capture.message));
+                ImGui::Spacing();
+                if (ImGui::Button(WidgetLabel("取消###cancel-menu-key"), ImVec2(112 * scale, 32 * scale)))
+                {
+                    registry.CancelCapture();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::PopStyleVar();
             BeginAutoCard("debug-settings", scale);
             if (ImGui::Checkbox(WidgetLabel("Debug（调试信息）"), &settings.debug))
                 dirty = true;
@@ -2018,7 +2070,9 @@ namespace gloss::overlay
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9 * scale, 4 * scale));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, scale);
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
-            ImGui::Button("Insert##menu-keycap", ImVec2(66 * scale, 26 * scale));
+            const auto menuKeyLabel = hotkeys::ChordLabel(hotkeys::GetRegistry().MenuChord());
+            const float menuKeyWidth = std::max(66 * scale, ImGui::CalcTextSize(menuKeyLabel.c_str()).x + 18 * scale);
+            ImGui::Button(WidgetLabel(menuKeyLabel, "menu-keycap"), ImVec2(menuKeyWidth, 26 * scale));
             ImGui::PopStyleColor();
             ImGui::PopStyleVar(2);
             ImGui::SameLine(0, 12 * scale);
@@ -2034,7 +2088,8 @@ namespace gloss::overlay
             ImGui::Begin("##welcome", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings);
             ImGui::TextColored(accent, "GlossTrainer");
             ImGui::SameLine();
-            ImGui::TextUnformatted(Text("UI 已加载  |  Insert 打开菜单"));
+            const auto menuKeyLabel = hotkeys::ChordLabel(hotkeys::GetRegistry().MenuChord());
+            ImGui::Text(Text("UI 已加载  |  %s 打开菜单"), menuKeyLabel.c_str());
             ImGui::End();
             ImGui::PopStyleVar();
         }

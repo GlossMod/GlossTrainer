@@ -48,7 +48,12 @@ namespace {
         CHECK(std::string(english) == "About");
         for (const auto* key : {"概览", "修改功能", "物品", "设置", "关于", "界面语言", "检查更新", "版本信息",
             "功能开关自动记忆", "无限暗源", "无限杀气", "自动完美格挡判定", "自动完美闪避", "无敌模式",
-            "暂无正式发布版本", "检查更新失败", "语言设置保存失败，已保留原设置"}) {
+            "暂无正式发布版本", "检查更新失败", "语言设置保存失败，已保留原设置",
+            "界面开关按键", "设置界面开关按键", "恢复默认",
+            "点击按键框后按下组合键，Esc 取消；设置自动保存。",
+            "按下要使用的按键或组合键…", "支持 Ctrl / Shift / Alt，Esc 取消。",
+            "界面开关按键始终可用，不能留空。", "界面开关快捷键不能为空。",
+            "此快捷键已用于界面开关。", "按下界面开关键，可组合 Ctrl / Shift / Alt；Escape 取消。"}) {
             if (HasChinese(Translate(key))) { std::cerr << "Missing translation: " << key << '\n'; ++failures; }
         }
         CHECK(Translate("my own item / 用户物品名") == "my own item / 用户物品名");
@@ -59,6 +64,7 @@ namespace {
         CHECK(std::string(english) == "About");
         BeginFrame();
         CHECK(Translate("当前版本 v%s").find("%s") != std::string::npos);
+        CHECK(Translate("UI 已加载  |  %s 打开菜单") == "UI loaded  |  Press %s to open the menu");
         CHECK(Translate("获取 {0} 个{1}结果未确认").find("{0}") != std::string::npos);
         CHECK(!HasChinese(Translate("数量：参数为空、格式错误或超出允许范围")));
         CHECK(!HasChinese(Translate("此快捷键已绑定：无限暗源")));

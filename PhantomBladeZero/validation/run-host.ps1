@@ -5,9 +5,10 @@ param(
     [ValidateRange(0, 5)][int]$Page = 1,
     [switch]$Light,
     [ValidateSet('zh-CN', 'en')][string]$Language = 'zh-CN',
+    [ValidateRange(8, 254)][int]$MenuKey = 45,
     [switch]$GridFixture,
     [string]$IconSamplePath,
-    [ValidateSet('grid', 'hover', 'quantity', 'features', 'settings')][string]$FixtureView = 'grid',
+    [ValidateSet('grid', 'hover', 'quantity', 'features', 'settings', 'menu-key', 'menu-capture')][string]$FixtureView = 'grid',
     [ValidateRange(0.8, 1.5)][double]$Scale = 1,
     [Parameter(Mandatory = $true)][string]$OutputDirectory
 )
@@ -31,15 +32,18 @@ $null = New-Item -ItemType Directory -Path $settings -Force
 $testAsi = Join-Path $output "artifact/$artifactName"
 Copy-Item -LiteralPath $asi -Destination $testAsi
 if ($GridFixture) {
-    if ($FixtureView -notin @('features', 'settings') -and (-not $IconSamplePath -or (Get-Item -LiteralPath $IconSamplePath).Length -ne 262144)) {
+    if ($FixtureView -notin @('features', 'settings', 'menu-key', 'menu-capture') -and (-not $IconSamplePath -or (Get-Item -LiteralPath $IconSamplePath).Length -ne 262144)) {
         throw 'Grid fixture requires one captured 512x512 BC3 sample (262144 bytes).'
     }
-    if ($FixtureView -notin @('features', 'settings')) { Copy-Item -LiteralPath $IconSamplePath -Destination (Join-Path $settings 'fixture.dxt5') }
+    if ($FixtureView -notin @('features', 'settings', 'menu-key', 'menu-capture')) { Copy-Item -LiteralPath $IconSamplePath -Destination (Join-Path $settings 'fixture.dxt5') }
     [IO.File]::WriteAllText((Join-Path $settings 'fixture-mode.txt'), $FixtureView)
 }
 $scaleText = $Scale.ToString([Globalization.CultureInfo]::InvariantCulture)
 [IO.File]::WriteAllText((Join-Path $settings 'ui.ini'), "[UI]`r`nLightTheme=$([int]$Light.IsPresent)`r`nScale=$scaleText`r`nPage=$Page`r`nX=-1`r`nY=-1`r`n")
 [IO.File]::WriteAllText((Join-Path $settings 'language.ini'), "[Interface]`r`nLanguage=$Language`r`n")
+if ($MenuKey -ne 45) {
+    [IO.File]::WriteAllText((Join-Path $settings 'hotkeys.ini'), "[menu:toggle]`r`nkey=$MenuKey`r`nmodifiers=0`r`ncount=0`r`n")
+}
 
 # This existing host-only flag performs a minimize/restore before timed tests,
 # allowing a background terminal launch to acquire foreground focus. The PBZ
@@ -48,11 +52,12 @@ $previousBootstrap = $env:GLOSS_SKILL_UI_THEME
 try {
     $env:GLOSS_SKILL_UI_THEME = 'pbz-host-focus-bootstrap'
     $automationFlag = if ($GridFixture) { '--visual-only' } else { '--automated' }
-    & $hostExe "--$Renderer" $automationFlag "--asi=$testAsi" "--output=$output" *> (Join-Path $output 'console.log')
+    & $hostExe "--$Renderer" $automationFlag "--menu-key=$MenuKey" "--asi=$testAsi" "--output=$output" *> (Join-Path $output 'console.log')
     $hostCode = $LASTEXITCODE
     [ordered]@{
-        mode = $Mode; renderer = $Renderer; page = $Page; light = $Light.IsPresent; scale = $Scale; language = $Language
+        mode = $Mode; renderer = $Renderer; page = $Page; light = $Light.IsPresent; scale = $Scale; language = $Language; menuKey = $MenuKey
         fixtureView = if ($GridFixture) { $FixtureView } else { $null }
+        fixtureMenuChord = if ($GridFixture -and $FixtureView -in @('menu-key', 'menu-capture')) { 'Ctrl+Shift+Alt+F10' } else { $null }
         exitCode = $hostCode; sha256 = (Get-FileHash -LiteralPath $testAsi -Algorithm SHA256).Hash
         scope = if ($GridFixture) { 'Visual fixture; no game connection, grants or input validation' } else { 'Local graphics host; not PBZ in-game validation' }
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'result.json') -Encoding UTF8

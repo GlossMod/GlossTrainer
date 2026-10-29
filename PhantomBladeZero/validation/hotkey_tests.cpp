@@ -40,6 +40,7 @@ namespace {
         CHECK(ChordError({VK_F4, Control}).empty());
         CHECK(ChordLabel({'P', Control | Shift | Alt}) == "Ctrl+Shift+Alt+P");
         CHECK(ChordLabel({VK_F24, 0}) == "F24");
+        CHECK(ChordLabel({VK_INSERT, Control | Shift}) == "Ctrl+Shift+Insert");
         CHECK(ChordLabel({}) == "未绑定");
         CHECK(!ChordLabel({VK_HOME, Alt}).empty());
         CHECK(!r.Set("action:speed", {'S', 0}, {std::string(1025, 'x')}, error));
@@ -83,7 +84,7 @@ namespace {
         CHECK(r.QueueKey({VK_SHIFT, Shift}, true, true));
         r.PumpCapture(); CHECK(!r.Capture().action.empty());
         CHECK(r.QueueKey({VK_INSERT, 0}, true, true));
-        r.PumpCapture(); CHECK(r.Capture().message.find("Insert") != std::string::npos);
+        r.PumpCapture(); CHECK(r.Capture().message.find("界面开关") != std::string::npos);
         CHECK(r.QueueKey({'Q', Control}, true, true));
         r.PumpCapture(); CHECK(r.Capture().message.find("已绑定") != std::string::npos);
         CHECK(r.Drain().empty());
@@ -154,6 +155,138 @@ namespace {
         CHECK(r.Drain().size() == 1);
         r.OnFocusLost(); CHECK(r.Drain().empty());
     }
+    void TestMenuBindingAndConflicts(const std::filesystem::path& root) {
+        Registry r; r.Configure(Actions()); std::string error;
+        const auto path = root / "menu-hotkeys.ini";
+        CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0});
+        CHECK(r.MatchesMenu({VK_INSERT, 0}, true));
+        CHECK(!r.MatchesMenu({VK_INSERT, 0}, false));
+        CHECK(!r.MatchesMenu({VK_INSERT, Control}, true));
+        CHECK(!r.Set("action:heal", {VK_INSERT, 0}, {}, error));
+        CHECK(error.find("界面开关") != std::string::npos);
+        CHECK(r.SetMenu({'M', Control | Shift}, path, error));
+        CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control | Shift});
+        CHECK(!r.MatchesMenu({VK_INSERT, 0}, true));
+        CHECK(r.MatchesMenu({'M', Control | Shift}, true));
+        CHECK(!r.MatchesMenu({'M', Control}, true));
+        // Menu input is routed independently of gameplay eligibility or actions.
+        CHECK(!r.QueueKey({'M', Control | Shift}, true, false));
+        CHECK(!r.QueueKey({'M', Control | Shift}, true, true));
+        CHECK(!r.Set("action:heal", {'M', Control | Shift}, {}, error));
+        CHECK(r.Set("action:heal", {VK_INSERT, 0}, {}, error));
+        CHECK(!r.SetMenu({VK_INSERT, 0}, path, error));
+        CHECK(error.find("恢复生命") != std::string::npos);
+        CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control | Shift});
+        CHECK(r.Set("action:heal", {}, {}, error));
+        CHECK(r.SetMenu({VK_INSERT, 0}, path, error));
+        CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0});
+        for (const auto chord : {gloss::hotkeys::Chord{}, gloss::hotkeys::Chord{VK_ESCAPE, 0}, gloss::hotkeys::Chord{VK_DELETE, Control}, gloss::hotkeys::Chord{VK_TAB, 0},
+            gloss::hotkeys::Chord{VK_SHIFT, 0}, gloss::hotkeys::Chord{VK_F4, Alt}, gloss::hotkeys::Chord{VK_SPACE, Alt}, gloss::hotkeys::Chord{'K', Windows},
+            gloss::hotkeys::Chord{VK_LBUTTON, 0}, gloss::hotkeys::Chord{255, 0}}) {
+            CHECK(!r.SetMenu(chord, path, error));
+            CHECK(!error.empty());
+            CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0});
+        }
+        for (unsigned modifiers = 0; modifiers < 8; ++modifiers) {
+            CHECK(r.SetMenu({VK_HOME, modifiers}, path, error));
+            CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_HOME, modifiers});
+        }
+        r.Configure({});
+        CHECK(r.MatchesMenu({VK_HOME, 7}, true));
+        CHECK(!r.Set(MenuAction, {'A', 0}, {}, error));
+    }
+    void TestMenuCaptureAndSaveFailures(const std::filesystem::path& root) {
+        Registry r; r.Configure(Actions()); std::string error;
+        const auto path = root / "menu-capture.ini";
+        CHECK(r.Set("action:heal", {'H', Control}, {}, error));
+        CHECK(r.QueueKey({'H', Control}, true, false));
+        r.BeginMenuCapture();
+        CHECK(r.Capture().action == MenuAction);
+        CHECK(r.Drain().empty());
+        CHECK(!r.MatchesMenu({VK_INSERT, 0}, true));
+        CHECK(!r.QueueKey({'M', Control}, false, true));
+        CHECK(r.QueueKey({VK_SHIFT, Shift}, true, true));
+        r.PumpCapture(path); CHECK(r.Capture().action == MenuAction);
+        CHECK(r.QueueKey({VK_DELETE, 0}, true, true));
+        r.PumpCapture(path);
+        CHECK(r.Capture().action == MenuAction);
+        CHECK(r.Capture().message.find("不能为空") != std::string::npos);
+        CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0});
+        CHECK(r.QueueKey({'H', Control}, true, true));
+        r.PumpCapture(path);
+        CHECK(r.Capture().message.find("恢复生命") != std::string::npos);
+        CHECK(r.Drain().empty());
+        CHECK(r.QueueKey({'M', Control}, true, true));
+        CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0}); // Input thread never edits the model or disk.
+        r.PumpCapture(path);
+        CHECK(r.Capture().action.empty());
+        CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control});
+        CHECK(!r.Dirty());
+        Registry loaded; loaded.Configure(Actions()); CHECK(loaded.Load(path, error));
+        CHECK(loaded.MenuChord() == gloss::hotkeys::Chord{'M', Control});
+        CHECK(loaded.Get("action:heal")->chord == gloss::hotkeys::Chord{'H', Control});
+
+        r.BeginMenuCapture();
+        CHECK(r.QueueKey({VK_ESCAPE, 0}, true, true)); r.PumpCapture(path);
+        CHECK(r.Capture().action.empty()); CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control});
+        r.BeginMenuCapture();
+        CHECK(r.QueueKey({'Q', 0}, true, true)); r.OnFocusLost(); r.PumpCapture(path);
+        CHECK(r.Capture().action.empty()); CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control});
+        r.BeginMenuCapture(); r.CancelCapture(); CHECK(r.Capture().action.empty());
+
+        CHECK(r.Set("action:heal", {'J', Control}, {}, error));
+        CHECK(r.Dirty());
+        // Disallow replacement at the OS level: the original file and active
+        // menu stay usable, and unrelated unsaved feature edits remain dirty.
+        const auto file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        CHECK(file != INVALID_HANDLE_VALUE);
+        CHECK(!r.SetMenu({'N', Alt}, path, error));
+        CHECK(!error.empty()); CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control}); CHECK(r.Dirty());
+        r.BeginMenuCapture(); CHECK(r.QueueKey({'N', Alt}, true, true)); r.PumpCapture(path);
+        CHECK(r.Capture().action == MenuAction); CHECK(!r.Capture().message.empty());
+        CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control});
+        CHECK(CloseHandle(file));
+        Registry unchanged; unchanged.Configure(Actions()); CHECK(unchanged.Load(path, error));
+        CHECK(unchanged.MenuChord() == gloss::hotkeys::Chord{'M', Control});
+        CHECK(unchanged.Get("action:heal")->chord == gloss::hotkeys::Chord{'H', Control});
+        CHECK(r.QueueKey({'N', Alt}, true, true)); r.PumpCapture(path);
+        CHECK(r.Capture().action.empty()); CHECK(r.MenuChord() == gloss::hotkeys::Chord{'N', Alt}); CHECK(!r.Dirty());
+        CHECK(unchanged.Load(path, error)); CHECK(unchanged.MenuChord() == gloss::hotkeys::Chord{'N', Alt});
+        CHECK(unchanged.Get("action:heal")->chord == gloss::hotkeys::Chord{'J', Control});
+        CHECK(!r.SetMenu({'P', 0}, {}, error)); CHECK(r.MenuChord() == gloss::hotkeys::Chord{'N', Alt});
+        r.BeginMenuCapture(); CHECK(r.QueueKey({'P', 0}, true, true)); r.PumpCapture();
+        CHECK(r.Capture().action == MenuAction); CHECK(r.MenuChord() == gloss::hotkeys::Chord{'N', Alt});
+    }
+    void TestMenuPersistenceCompatibility(const std::filesystem::path& root) {
+        const auto path = root / "menu-compatibility.ini";
+        std::string error;
+        auto write = [&](const std::string& content) { std::ofstream stream(path, std::ios::binary | std::ios::trunc); stream << content; };
+        write("[action:heal]\nkey=72\nmodifiers=1\ncount=0\n");
+        Registry legacy; legacy.Configure(Actions()); CHECK(legacy.Load(path, error));
+        CHECK(legacy.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0}); CHECK(legacy.Get("action:heal")->chord == gloss::hotkeys::Chord{'H', Control});
+        write("[action:heal]\nkey=77\nmodifiers=1\ncount=0\n[menu:toggle]\nkey=77\nmodifiers=1\ncount=0\n");
+        CHECK(legacy.Load(path, error));
+        CHECK(legacy.MenuChord() == gloss::hotkeys::Chord{'M', Control}); CHECK(!legacy.Get("action:heal"));
+        // A malformed menu always falls back to Insert, with feature conflicts
+        // rejected after that fallback. None may leave an empty menu binding.
+        for (const auto& menu : {"key=0\nmodifiers=0\ncount=0\n", "key=72\nmodifiers=8\ncount=0\n",
+            "key=27\nmodifiers=0\ncount=0\n", "key=72\nmodifiers=0\ncount=1\np0=31\n",
+            "key=72oops\nmodifiers=0\ncount=0\n", "key=72\ncount=0\n"}) {
+            write(std::string("[action:heal]\nkey=45\nmodifiers=0\ncount=0\n[menu:toggle]\n") + menu);
+            CHECK(legacy.Load(path, error)); CHECK(legacy.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0}); CHECK(!legacy.Get("action:heal"));
+        }
+        CHECK(legacy.SetMenu({'K', Control | Alt}, path, error));
+        CHECK(legacy.Set("action:heal", {VK_INSERT, 0}, {}, error));
+        CHECK(legacy.Save(path, error));
+        Registry restored; restored.Configure(Actions()); CHECK(restored.Load(path, error));
+        CHECK(restored.MenuChord() == gloss::hotkeys::Chord{'K', Control | Alt});
+        CHECK(restored.Get("action:heal")->chord == gloss::hotkeys::Chord{VK_INSERT, 0});
+        CHECK(restored.Set("action:speed", {VK_F7, 0}, {"1.25"}, error));
+        CHECK(restored.Save(path, error));
+        Registry again; again.Configure(Actions()); CHECK(again.Load(path, error));
+        CHECK(again.MenuChord() == restored.MenuChord());
+        CHECK(again.Get("action:speed")->parameters[0] == "1.25");
+    }
     void TestAllModifiersAndQueueCapacity() {
         Registry r; std::vector<Action> actions;
         for (int i = 0; i < 64; ++i) actions.push_back({"action:" + std::to_string(i), {"1"}, "测试功能"});
@@ -183,6 +316,7 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(root);
     TestDefaultsAndValidation(); TestEligibilityQueueAndPending(); TestCapturePriorityAndErrors();
     TestPersistenceAndCatalogChange(root); TestConcurrentInputQueue(); TestAllModifiersAndQueueCapacity();
+    TestMenuBindingAndConflicts(root); TestMenuCaptureAndSaveFailures(root); TestMenuPersistenceCompatibility(root);
     std::cout << checks << " checks, " << failures << " failures\n";
     return failures ? 1 : 0;
 }
