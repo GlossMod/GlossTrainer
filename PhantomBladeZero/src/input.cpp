@@ -657,6 +657,10 @@ namespace gloss::input
                 return 0;
             if (isTarget)
             {
+                // Shortcut edges, raw releases and IME ownership are handled above.
+                // Visibility transitions clear ImGui keys/mouse; preserve backend focus
+                // bookkeeping without sending hidden mouse motion through the draw lock.
+                if (ForwardOverlayMessage(overlay::Visible(), message))
                 {
                     std::lock_guard lock(OverlayMutex());
                     if (ImGui::GetCurrentContext())

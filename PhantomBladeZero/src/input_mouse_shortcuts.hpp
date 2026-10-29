@@ -6,6 +6,11 @@
 
 namespace gloss::input
 {
+    inline bool ForwardOverlayMessage(bool visible, UINT message)
+    {
+        return visible || message == WM_SETFOCUS || message == WM_KILLFOCUS;
+    }
+
     inline constexpr unsigned MouseKeys[] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
     inline constexpr USHORT MouseDown[] = {RI_MOUSE_LEFT_BUTTON_DOWN, RI_MOUSE_RIGHT_BUTTON_DOWN,
         RI_MOUSE_MIDDLE_BUTTON_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN};

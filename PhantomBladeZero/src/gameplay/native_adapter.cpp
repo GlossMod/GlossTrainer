@@ -2,7 +2,11 @@
 #include "backend.hpp"
 #include "item_images.hpp"
 #include "item_scan_schedule.hpp"
+#include "performance_scope.hpp"
+#include "item_action_index.hpp"
 #include "item_text_cache.hpp"
+#include "item_culture.hpp"
+#include "missing_name_cache.hpp"
 #include "item_richtext.hpp"
 #include "combat_rules.hpp"
 #include "attribute_rules.hpp"
@@ -82,10 +86,11 @@ namespace gloss::gameplay::native {
         std::mutex debugMutex;
 
         // Keep SEH confined to leaf helpers, away from C++ objects with destructors.
+        std::atomic<std::uint64_t> readFaults{};
         bool ReadBytes(Address address, void* output, std::size_t size) noexcept {
             if (address < 0x10000 || size > 1024 * 1024) return false;
             __try { std::memcpy(output, reinterpret_cast<const void*>(address), size); return true; }
-            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+            __except (EXCEPTION_EXECUTE_HANDLER) { ++readFaults; return false; }
         }
         bool WriteAddress(Address address, Address value) noexcept {
             __try { *reinterpret_cast<Address*>(address) = value; return true; }
@@ -138,6 +143,17 @@ namespace gloss::gameplay::native {
             if (!block || (blockIndex == currentBlock && offset + 2 > currentCursor)) return {};
             std::uint16_t header{};
             if (!ReadBytes(block + offset, &header, sizeof(header))) return {};
+            struct CachedName { Address block; std::uint16_t header; std::string text; };
+            // FName entries are immutable; keep per-thread caches because the monitor
+            // and game callback both resolve names. Validate pool identity on reuse.
+            static thread_local std::unordered_map<std::uint32_t, CachedName> names;
+            if (const auto found = names.find(id); found != names.end() &&
+                found->second.block == block && found->second.header == header) return found->second.text;
+            const auto remember = [&](std::string text) {
+                if (names.size() >= 32768) names.clear();
+                names.insert_or_assign(id, CachedName{block, header, text});
+                return text;
+            };
             const auto count = header >> 6;
             if (!count || count > 1023) return {};
             const bool wide = (header & 1) != 0;
@@ -148,7 +164,7 @@ namespace gloss::gameplay::native {
                 std::string result(count, '\0');
                 if (!ReadBytes(block + offset + 2, result.data(), count) || result.find('\0') != std::string::npos)
                     return {};
-                return result;
+                return remember(std::move(result));
             }
             std::wstring text(count, L'\0');
             if (!ReadBytes(block + offset + 2, text.data(), length)) return {};
@@ -156,7 +172,7 @@ namespace gloss::gameplay::native {
             if (bytes <= 0) return {};
             std::string result(bytes, '\0');
             WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), count, result.data(), bytes, nullptr, nullptr);
-            return result;
+            return remember(std::move(result));
         }
         std::string ObjectName(Address object) {
             return object ? Name(Read<std::uint32_t>(object + 0x18)).value_or("") : "";
@@ -416,10 +432,19 @@ namespace gloss::gameplay::native {
             const auto last = Read<std::uint32_t>(base + 0xdd11ac8);
             const auto cursor = Read<std::uint32_t>(base + 0xdd11acc);
             if (last >= 8192 || cursor > 0x20000) return {};
+            // A missing name stays missing until the append-only pool grows.
+            static thread_local MissingNameCache missing;
+            const auto poolRevision = (static_cast<std::uint64_t>(last) << 32) | cursor;
+            if (missing.Contains(text, poolRevision)) return {};
+            bool completeScan = true;
             std::vector<unsigned char> bytes(0x20000);
             for (std::uint32_t block = 0; block <= last; ++block) {
                 const auto size = block == last ? cursor : 0x20000;
-                if (size < text.size() + 2 || !ReadBytes(Read<Address>(base + 0xdd11ad0 + block * 8), bytes.data(), size)) continue;
+                if (size < text.size() + 2) continue;
+                if (!ReadBytes(Read<Address>(base + 0xdd11ad0 + block * 8), bytes.data(), size)) {
+                    completeScan = false;
+                    continue;
+                }
                 auto begin = bytes.begin() + 2;
                 const auto end = bytes.begin() + size;
                 while (begin != end) {
@@ -435,6 +460,7 @@ namespace gloss::gameplay::native {
                     begin = found + 1;
                 }
             }
+            if (completeScan) missing.Remember(text, poolRevision);
             return {};
         }
         std::optional<bool> ReadState(const Context& context, std::string_view tag) {
@@ -820,6 +846,12 @@ namespace gloss::gameplay::native {
             return {RequestState::Dispatched, "游戏线程调用已返回；效果、保存与异步任务完成情况尚未验证"};
         }
         void Tick(Context context) {
+            PerformanceScope performance(0);
+            static auto nextFaultReport = Clock::now() + std::chrono::seconds(10);
+            if (Clock::now() >= nextFaultReport) {
+                gloss::Log(std::format("PBZ perf read faults: {}", readFaults.exchange(0)));
+                nextFaultReport = Clock::now() + std::chrono::seconds(10);
+            }
             lastControllerTick.store(GetTickCount64());
             observedThread.store(GetCurrentThreadId());
             const auto tick = ++observedTicks;
@@ -837,7 +869,7 @@ namespace gloss::gameplay::native {
             const bool attributesChanged = combatBinding.attributes && (attributes != combatBinding.attributes ||
                 Read<std::uint32_t>(attributes + 0xc) != combatBinding.attributeIndex ||
                 Read<std::uint32_t>(context.pawn + 0xc) != combatBinding.pawnIndex);
-            if (activeSession != key || activeCheat != context.cheat || attributesChanged || !GetBackend().GetSnapshot().ready) {
+            if (activeSession != key || activeCheat != context.cheat || attributesChanged || !GetBackend().IsReady()) {
                 // Object storage can be reused without changing Context::Key().
                 // Invalidate queued work/read-back and re-arm saved toggles before rebinding.
                 GetBackend().SetRuntimeState(false, "玩家对象已变化，等待重新绑定", key);
@@ -881,7 +913,7 @@ namespace gloss::gameplay::native {
             }
             RefreshItems(context);
             GetBackend().Pump(Execute, 1);
-            CombatTick(context);
+            { PerformanceScope combatPerformance(4); CombatTick(context); }
             ProcessItemImage(context);
         }
         void __fastcall HookActorProcessEvent(void* object, void* function, void* parameters) {
@@ -912,6 +944,7 @@ namespace gloss::gameplay::native {
             // attach vtables here; all UObject construction/engine calls stay in Tick.
             while (!stopping.load() && !faulted.load()) {
                 try {
+                    UpdateItemCulture();
                     const auto context = CurrentContext();
                     if (context) {
                         const auto slot = Read<Address>(context->controller) + 0x260;
@@ -926,7 +959,7 @@ namespace gloss::gameplay::native {
                             }
                         }
                     }
-                    if (GetTickCount64() - lastControllerTick.load() > 2000 && GetBackend().GetSnapshot().ready)
+                    if (GetTickCount64() - lastControllerTick.load() > 2000 && GetBackend().IsReady())
                         GetBackend().SetRuntimeState(false, "等待本地玩家 Tick；加载或暂停期间停止接受请求");
                 } catch (...) {
                     faulted.store(true);

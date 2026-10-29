@@ -2,11 +2,13 @@
 
 #include "catalog.hpp"
 #include <chrono>
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -68,6 +70,21 @@ namespace gloss::gameplay {
         std::uint64_t requestId{};
         std::string message;
     };
+    // Publications own immutable storage; frame snapshots only share ownership.
+    class ItemList {
+    public:
+        ItemList() : entries_(std::make_shared<const std::vector<ItemEntry>>()) {}
+        ItemList(std::vector<ItemEntry> entries)
+            : entries_(std::make_shared<const std::vector<ItemEntry>>(std::move(entries))) {}
+        auto begin() const { return entries_->begin(); }
+        auto end() const { return entries_->end(); }
+        bool empty() const { return entries_->empty(); }
+        std::size_t size() const { return entries_->size(); }
+        const ItemEntry& operator[](std::size_t index) const { return (*entries_)[index]; }
+        const ItemEntry* data() const { return entries_->data(); }
+    private:
+        std::shared_ptr<const std::vector<ItemEntry>> entries_;
+    };
     struct Snapshot {
         bool ready{};
         std::uint64_t generation{};
@@ -77,13 +94,14 @@ namespace gloss::gameplay {
         std::vector<RequestRecord> requests; // Oldest first; bounded history.
         std::size_t pendingCount{};
         std::vector<ToggleState> toggleStates;
-        std::vector<ItemEntry> items;
+        ItemList items;
         bool itemsReady{};
         std::string itemCatalogStatus;
         std::vector<TogglePreference> togglePreferences;
     };
 
     class Backend {
+        std::atomic<bool> itemPageActive_{};
     public:
         explicit Backend(std::size_t queueCapacity = 32, std::size_t historyCapacity = 96);
         // Initialize before starting the native adapter. Missing files use defaults.
@@ -92,6 +110,9 @@ namespace gloss::gameplay {
         // Call periodically outside the game thread. Failed saves stay dirty.
         bool FlushSettings(std::string* error = nullptr);
         Snapshot GetSnapshot() const;
+        bool IsReady() const;
+        void SetItemPageActive(bool active) { itemPageActive_.store(active, std::memory_order_relaxed); }
+        bool ItemPageActive() const { return itemPageActive_.load(std::memory_order_relaxed); }
         // Session key identifies the player/world context. Any key/readiness change
         // invalidates queued work; dispatch must occur only on the game thread.
         void SetRuntimeState(bool ready, std::string status, std::string sessionKey = {});
@@ -131,7 +152,7 @@ namespace gloss::gameplay {
         std::vector<Capability> capabilities_;
         std::vector<Statistic> statistics_;
         std::vector<ToggleState> toggleStates_;
-        std::vector<ItemEntry> items_;
+        ItemList items_;
         bool itemsReady_{};
         std::string itemCatalogStatus_{"进入角色场景后加载物品列表"};
         std::deque<Request> queue_;

@@ -895,10 +895,37 @@ namespace
     }
 }
 
+void TestItemSnapshotsShareImmutablePublication()
+{
+    using namespace gloss::gameplay;
+    Backend backend;
+    CHECK(!backend.IsReady());
+    backend.SetRuntimeState(true, "ready", "session");
+    CHECK(backend.IsReady());
+    ItemEntry original;
+    original.key = "item";
+    original.name = "old";
+    original.description = std::string(65536, 'x');
+    backend.PublishItems({original}, true, "loaded");
+    const auto first = backend.GetSnapshot();
+    const auto second = backend.GetSnapshot();
+    CHECK(first.items.data() == second.items.data());
+    original.name = "new";
+    backend.PublishItems({original}, true, "updated");
+    const auto third = backend.GetSnapshot();
+    CHECK(first.items.data() != third.items.data());
+    CHECK(first.items[0].name == "old");
+    CHECK(third.items[0].name == "new");
+    backend.SetRuntimeState(false, "gone", "other");
+    CHECK(!backend.IsReady());
+    CHECK(backend.GetSnapshot().items.empty());
+    CHECK(first.items[0].description.size() == 65536);
+}
 int main(int argc, char** argv)
 {
     settingsRoot = std::filesystem::absolute(argc > 1 ? argv[1] : "output/pbz-basics-20261029") /
         ("gameplay-settings-" + std::to_string(GetCurrentProcessId()));
+    TestItemSnapshotsShareImmutablePublication();
     TestCatalogMatchesRecoveredNativeContracts();
     TestCatalogParameterValidationAndFixedArguments();
     TestToggleCatalogHasUniqueReversibleStatePairs();

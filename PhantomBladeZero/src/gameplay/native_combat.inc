@@ -330,7 +330,9 @@
             return false;
         }
         void CombatTick(const Context& context) {
-            if (CombatCleanup() || !CombatBindingCurrent()) return;
+            if (CombatCleanup()) return;
+            if (!perfectDodgeEnabled && !perfectDeflectEnabled) return;
+            if (!CombatBindingCurrent()) return;
             if (perfectDeflectEnabled && !EnsurePerfectDeflect(context)) {
                 perfectDeflectEnabled = false; combatError = "完美格挡状态未通过回读，自动操作已停止";
             }

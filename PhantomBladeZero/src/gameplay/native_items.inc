@@ -89,10 +89,36 @@
         struct CachedItemText { ItemEntry entry; std::string raw; };
         std::unordered_map<std::string, CachedItemText> cachedItemText;
         bool itemCacheLoaded{};
+        std::string itemCacheCulture;
+        std::mutex itemCultureMutex;
+        std::string observedItemCulture;
+        void UpdateItemCulture() {
+            static Clock::time_point next;
+            if (Clock::now() < next) return;
+            next = Clock::now() + std::chrono::seconds(1);
+            wchar_t local[32768]{};
+            std::string culture;
+            if (GetEnvironmentVariableW(L"LOCALAPPDATA", local, 32768)) {
+                const auto config = std::filesystem::path(local) / L"ProjectPBZ/Saved/Config/Windows/GameUserSettings.ini";
+                std::ifstream input(config);
+                culture = ReadItemCulture(input);
+            }
+            std::lock_guard lock(itemCultureMutex);
+            observedItemCulture = std::move(culture);
+        }
+        std::string ItemGameCulture() {
+            std::lock_guard lock(itemCultureMutex);
+            return observedItemCulture;
+        }
+        std::filesystem::path ItemCachePath() {
+            return gloss::DataDirectory() / ("item_catalog_" + itemCacheCulture + ".cache");
+        }
         void LoadItemCache() {
             if (itemCacheLoaded) return;
             itemCacheLoaded = true;
-            const auto path = gloss::DataDirectory() / "item_catalog.cache";
+            if (itemCacheCulture.empty()) itemCacheCulture = ItemGameCulture();
+            if (itemCacheCulture.empty()) return;
+            const auto path = ItemCachePath();
             std::error_code error;
             if (std::filesystem::file_size(path, error) > 16 * 1024 * 1024 || error) return;
             std::ifstream stream(path, std::ios::binary);
@@ -100,6 +126,7 @@
 
         }
         void SaveItemCache() {
+            if (itemCacheCulture.empty()) return;
             bool dirty{};
             for (const auto& item : itemCatalog.rows) if (item.named) {
                 const auto found = cachedItemText.find(item.entry.key);
@@ -109,7 +136,8 @@
                 dirty = true;
             }
             if (!dirty) return;
-            const auto path = gloss::DataDirectory() / "item_catalog.cache";
+            if (itemCacheCulture.empty()) return;
+            const auto path = ItemCachePath();
             auto temporary = path; temporary += ".tmp";
             std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
             if (!stream) return;
@@ -565,6 +593,7 @@
             return found == amounts.end() ? 0 : found->second;
         }
         bool ItemRefreshAmounts(Address backpack) {
+            PerformanceScope performance(2);
             bool changed{};
             for (const auto& table : ItemTables) {
                 ItemAmounts amounts;
@@ -590,7 +619,21 @@
             return changed;
         }
         void RefreshItems(const Context& context, bool force = false) {
+            PerformanceScope performance(5);
             if (stopping.load() || faulted.load() || !LocalGameThread()) return;
+            if (!force && !GetBackend().ItemPageActive()) return;
+            static Clock::time_point nextCultureCheck;
+            if (Clock::now() >= nextCultureCheck) {
+                nextCultureCheck = Clock::now() + std::chrono::seconds(1);
+                const auto culture = ItemGameCulture();
+                if (culture != itemCacheCulture) {
+                    itemCacheCulture = culture;
+                    cachedItemText.clear();
+                    itemCacheLoaded = false;
+                    itemCatalog = {};
+                    gloss::Log("PBZ item culture changed: " + culture);
+                }
+            }
             const auto session = context.Key();
             const auto backpack = Backpack(context);
             if (!backpack || session != activeSession) {
@@ -719,6 +762,8 @@
             } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
         void ProcessItemImage(const Context& context) {
+            PerformanceScope performance(3);
+            if (!GetBackend().ItemPageActive()) return;
             static Clock::time_point nextImage;
             static std::uint64_t lastEpoch{};
             static bool imageFault{};

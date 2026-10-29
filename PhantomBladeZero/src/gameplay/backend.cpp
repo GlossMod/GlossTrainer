@@ -85,6 +85,11 @@ namespace gloss::gameplay {
         return saved;
     }
 
+    bool Backend::IsReady() const {
+        std::lock_guard lock(mutex_);
+        return ready_;
+    }
+
     Snapshot Backend::GetSnapshot() const {
         std::lock_guard lock(mutex_);
         Snapshot result{ready_, generation_, status_, capabilities_, statistics_,
@@ -203,7 +208,7 @@ namespace gloss::gameplay {
                 intent.restorePending = pendingOff || (settingsInitialized_ && intent.enabled);
                 intent.restoreEnabled = !pendingOff;
             }
-            items_.clear();
+            items_ = ItemList{};
             itemsReady_ = false;
             itemCatalogStatus_ = "进入角色场景后加载物品列表";
             for (auto& capability : capabilities_) {

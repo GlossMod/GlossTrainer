@@ -7,6 +7,8 @@
             Clock::time_point nextRefresh{};
             std::unordered_map<std::string, std::string> labels;
             std::string device;
+            std::vector<std::uint64_t> mappingSnapshot;
+            std::string mappingGamepad;
         };
         ItemInputState itemInput;
         Address ItemCommonInput(const Context& context) {
@@ -77,6 +79,7 @@
             return key;
         }
         bool ItemRefreshInput(const Context& context) {
+            PerformanceScope performance(1);
             ItemDiscoverInputTable();
             const auto now = Clock::now();
             if (now < itemInput.nextRefresh) return false;
@@ -103,7 +106,35 @@
             if (device < 2 && mappingLayout && data && count >= 0 && count <= 2048 && capacity >= count && capacity <= 4096 &&
                 ItemInputTableValid() && ReadBytes(itemInput.table + 0x30, &rows, sizeof(rows)) && rows.count >= 0 &&
                 rows.count <= 256 && rows.capacity >= rows.count && rows.numBits == rows.count && rows.maxBits >= rows.count) {
+                // Capture each mapping once, including in-place remaps and UObject identities.
+                std::vector<std::uint64_t> snapshot{context.player, playerInput, itemInput.table, static_cast<std::uint64_t>(device)};
+
+                for (int j = 0; j < count; ++j) {
+                    const auto mapping = data + j * 80;
+                    const auto action = Read<Address>(mapping + 0x20);
+                    const auto asset = Read<std::uint32_t>(action + 0x18);
+                    const auto package = Read<std::uint32_t>(Read<Address>(action + 0x20) + 0x18);
+                    const auto key = Read<std::uint32_t>(mapping + 0x28);
+                    const bool valid = ObjectValid(action);
+                    snapshot.insert(snapshot.end(), {action, asset, package, key, valid});
+                }
                 const auto bits = rows.heapBits ? rows.heapBits : itemInput.table + 0x40;
+                snapshot.push_back(static_cast<std::uint64_t>(rows.count));
+                for (int i = 0; i < rows.count && (rows.heapBits || rows.count <= 128); ++i) {
+                    const bool occupied = (Read<std::uint32_t>(bits + (i / 32) * 4) & (1u << (i % 32))) != 0;
+                    snapshot.push_back(occupied);
+                    if (!occupied) continue;
+                    const auto entry = rows.data + i * 24;
+                    const auto row = Read<Address>(entry + 8);
+                    snapshot.insert(snapshot.end(), {Read<std::uint32_t>(entry), row,
+                        Read<std::uint64_t>(row + 0x10), Read<std::uint64_t>(row + 0x18),
+                        Read<std::uint32_t>(row + 0x38), Read<std::uint32_t>(row + 0x88),
+                        Read<std::uint32_t>(row + 0x100), Read<std::uint32_t>(row + 0xd8)});
+                }
+                if (snapshot == itemInput.mappingSnapshot && gamepad == itemInput.mappingGamepad) return false;
+                const auto actionKeys = BuildItemActionIndex(snapshot, count);
+                itemInput.mappingSnapshot = std::move(snapshot);
+                itemInput.mappingGamepad = gamepad;
                 for (int i = 0; i < rows.count && (rows.heapBits || rows.count <= 128); ++i) {
                     if (!(Read<std::uint32_t>(bits + (i / 32) * 4) & (1u << (i % 32)))) continue;
                     const auto entry = rows.data + i * 24;
@@ -117,13 +148,9 @@
                     const auto package = Read<NameValue>(row + 0x10), asset = Read<NameValue>(row + 0x18);
                     if (!package.comparison || !asset.comparison || package.number || asset.number) continue;
                     std::vector<std::string> keys;
-                    for (int j = 0; j < count; ++j) {
-                        const auto mapping = data + j * 80;
-                        const auto action = Read<Address>(mapping + 0x20);
-                        if (Read<std::uint32_t>(action + 0x18) != asset.comparison ||
-                            Read<std::uint32_t>(Read<Address>(action + 0x20) + 0x18) != package.comparison ||
-                            !ObjectValid(action)) continue;
-                        const auto key = Name(Read<std::uint32_t>(mapping + 0x28));
+                    const auto foundKeys = actionKeys.find((static_cast<std::uint64_t>(package.comparison) << 32) | asset.comparison);
+                    if (foundKeys != actionKeys.end()) for (const auto keyId : foundKeys->second) {
+                        const auto key = Name(keyId);
                         if (!key || *key == "None" || key->starts_with("Gamepad_") != (device == 1)) continue;
                         const auto label = ItemKeyLabel(*key, gamepad);
                         if (std::find(keys.begin(), keys.end(), label) == keys.end()) keys.push_back(label);
@@ -132,6 +159,10 @@
                     for (const auto& key : keys) { if (!joined.empty()) joined += " / "; joined += key; }
                     labels.emplace(*id, joined.empty() ? "未绑定" : std::move(joined));
                 }
+            }
+            else {
+                itemInput.mappingSnapshot.clear();
+                itemInput.mappingGamepad.clear();
             }
             const auto deviceName = device == 0 ? "键鼠" : device == 1 ? "手柄 " + gamepad : "等待输入设备";
             const bool changed = itemInput.labels != labels || itemInput.device != deviceName;

@@ -112,6 +112,13 @@ int main()
     TestRawOnlyAndMultipleDevicesKeepThePressOwnedUntilRelease();
     TestUnboundMenuClickAndRecordingActivationDoNotCaptureTheirOwnRelease();
     TestFocusResetAndMessageMapping();
+    CHECK(!gloss::input::ForwardOverlayMessage(false, WM_MOUSEMOVE));
+    CHECK(!gloss::input::ForwardOverlayMessage(false, WM_SETCURSOR));
+    CHECK(!gloss::input::ForwardOverlayMessage(false, WM_KEYUP));
+    CHECK(gloss::input::ForwardOverlayMessage(false, WM_SETFOCUS));
+    CHECK(gloss::input::ForwardOverlayMessage(false, WM_KILLFOCUS));
+    CHECK(gloss::input::ForwardOverlayMessage(true, WM_MOUSEMOVE));
+    CHECK(gloss::input::ForwardOverlayMessage(true, WM_KEYUP));
     TestRawFilteringKeepsOtherButtonsAxesAndWheel();
     if (failures) return 1;
     std::cout << "GlossTrainer mouse shortcut tests passed (0 failures)\n";

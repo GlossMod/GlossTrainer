@@ -292,3 +292,30 @@ Debug / Release 两配置的 PBZ 构建与 13 套测试共 26 次运行全部通
 - 正式 ASI SHA-256：`5AA17A2B609E3414E7317537048A280DA1F98A303C12E16B2EBBA8BD6CB75CB9`。
 
 22:27 确认无 PBZ 进程后，将正式包部署至 `E:\steam\steamapps\common\PBZ\platform\steam`，替换 ASI 和双语说明，Loader 与其配置原样保留。旧安装五个文件和完整配置树已备份，独立复核五个安装文件、五个备份及四个用户数据文件的哈希均一致；用户数据目录未改动，`scripts` 中仅加载 `GlossTrainer.asi`。见 [部署回执](../../output/pbz-release-v1.0.1-20261029/deploy-20261029-222738/receipt.json)、[最终复核](../../output/pbz-release-v1.0.1-20261029/release-deployment-verification.json)。本轮未启动游戏，不新增实机验证结论。
+
+## 2026-10-30 三项高优先级性能修复
+
+- 游戏 Tick 使用轻量 IsReady；物品目录改为不可变共享快照，渲染快照不再逐帧复制名称和描述，旧快照在新发布后仍安全可读。
+- 隐藏菜单的普通鼠标/键盘消息跳过 ImGui 绘制锁，保留焦点通知及既有快捷键、原始输入释放和 IME 路径。
+- 按键映射改为单遍索引，精确比较设备、映射与装饰字段；未改变时复用标签。仍每250ms线性读取以检测游戏内原地重映射。
+- Debug/Release PBZ完整构建通过；PBZGameplayTests、PBZMouseShortcutTests、PBZImeTests、PBZItemActionIndexTests均最终通过。Gameplay Debug首次设置保存两条断言失败，随后重跑通过，原因未确定，保留原始失败日志。IME候选/组合窗口回读因本机IMM不支持而跳过，其余集成断言通过。
+- 原始证据：[性能修复验证目录](../../output/pbz-performance-20261030/)。未进行游戏内帧时间采样，不能据此保证用户反馈的所有卡顿均消失。全库存周期回读、同步图片加载及隐藏覆盖层GPU提交不在本次三项修改范围。
+
+## 2026-10-30 现场卡顿诊断与游戏语言缓存隔离
+
+- 现场已加载模块与前次Release文件SHA256一致，部署hash、原始日志和开关快照见[现场证据](../../output/pbz-live-stutter-20261030/)。WPR因系统性能分析策略失败（0xc5585011），没有取得ETW样本，不能将源码热点认定为持续掉帧根因。
+- 修复已确认的语言缓存错误：从游戏真实配置 `%LOCALAPPDATA%/ProjectPBZ/Saved/Config/Windows/GameUserSettings.ini` 的 `CultureName` 分区为 `item_catalog_<culture>.cache`，不读取旧的无语言缓存；实际语言未知时禁用缓存复用与写入。现有后台监测线程每秒读取配置，游戏线程只读取短字符串；切换语言清除当前目录并重新验证解析。游戏配置写入可能稍晚于语言切换，检测以落盘配置为准。
+- 新增低频性能统计，每10秒记录Tick、labels、inventory、images、combat、items的calls/avg/max/over2ms；分区有包含关系，不能直接相加。日志写入仍在游戏线程，仅低频汇总，统计不包含其自身输出耗时。
+- PBZItemCacheTests增加文化解析测试：en-us/zh-cn、大小写规范化、缺失/空值/非法路径字符。Debug/Release构建与测试证据位于上述现场目录。尚未加载诊断构建进行游戏内验证。
+
+### 2026-10-30 复现后的实测热点修复
+
+原始证据：../../output/pbz-live-stutter-20261030/reproduced-before-fix.log。00:32:07采样窗口Tick平均11.751ms/max102.218ms，labels平均3.353ms/max37.225ms，库存7次平均51.397ms，combat平均3.391ms；区段有嵌套不可相加。菜单隐藏仍有明显开销。
+
+修复：物品页隐藏或离开时暂停周期物品维护和图片队列，保留发放force回读；FName解码使用校验块地址/header的线程局部缓存；缺失名称按名称池版本负缓存，池变化重新扫描，读取失败不缓存；自动战斗功能均关闭时跳过绑定检查。新增10秒SEH读取故障计数，以继续定位异常读取。Debug/Release完整构建和缓存、Gameplay、CombatRules、ActionIndex测试通过。日志为本目录根output中的fix-*.log。尚未完成修复后游戏内性能对比，不宣称帧率恢复。
+
+### 2026-10-30 修复后性能观察（01:06—01:10）
+
+证据：[after-hotspot-fix.log](../../output/pbz-live-stutter-20261030/after-hotspot-fix.log)。菜单关闭稳定窗口Tick平均5.884—7.161ms；01:10:40窗口6.621ms/max22.704ms，items约0.001ms，images约0.001ms且不再出现labels/inventory采样，证明按需暂停生效。与旧窗口11.751ms相比该窗口约下降44%，非严格同场景基准。
+
+仍有问题：combat在01:10:40平均4.394ms，占Tick约66%，其余约2.225ms尚未分段；当前磁盘设置perfect_deflect/perfect_dodge/infinite_dark_source均为1，不等同于运行时状态证明。物品页打开后库存仍约50.584ms、labels max35.246ms；01:09:50 items max1545.898ms，目录重建/文本处理等内部阶段尚未细分不能认定具体函数。读取故障绝大多数窗口0，仅一次1，无证据支持持续SEH风暴。未采集实际呈现FPS，不能据Tick次数推算显示帧率。

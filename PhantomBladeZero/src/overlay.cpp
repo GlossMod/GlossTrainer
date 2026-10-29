@@ -1854,6 +1854,7 @@ namespace gloss::overlay
             return;
         if (visible.exchange(show) == show)
             return;
+        gameplay::GetBackend().SetItemPageActive(show && settings.page == 2);
         input::SetMenuVisible(show);
         if (ImGui::GetCurrentContext())
         {
@@ -2056,6 +2057,7 @@ namespace gloss::overlay
             ImGui::EndGroup();
             ImGui::SetCursorPos(ImVec2(184 * scale, 88 * scale));
             ImGui::BeginChild("content", ImVec2(752 * scale, 520 * scale), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+            gameplay::GetBackend().SetItemPageActive(Visible() && settings.page == 2);
             switch (settings.page)
             {
             case 0: Overview(renderer, snapshot, scale); break;
