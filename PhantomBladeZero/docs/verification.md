@@ -277,3 +277,18 @@ PBZItemScanTests 在 Debug / Release 均为 0 failures，覆盖批次上限、�
 可选按键装饰表发现每次玩家会话/背包身份变化后只检查对象数组前缀一次，随后只检查新追加对象，50ms/512对象上限；不再完整循环扫描。同一会话已经检查过的槽位若复用为该表，需要下一次会话变化才会重新发现，物品描述可能显示“按键待读取”。缓存保存的是当前语言文本，切换游戏语言后需删除缓存再启动以重新解析。
 
 验证：PBZ Debug/Release构建成功，扫描频率、完成后不重扫、尾部新增和数组缩小的Debug/Release测试均为0失败。原始证据见 [output/pbz-item-cache-20261029](../../output/pbz-item-cache-20261029/)。尚未在真实游戏内验证；缓存序列化的多行与转义往返、版本不符及截断失败保留旧内容，Debug/Release自动测试均0失败。
+
+## 2026-10-29 v1.0.1 发布验证
+
+按用户指定更新日志发布：“修复 获取物品导致卡顿的问题；实现可以自定义界面按键”。统一版本常量与模块说明已更新为 1.0.1，自定义菜单键沿用前一节实现。源码提交 `7765d10344de53678cd49ff6396f110089a6ddc3` 包含物品扫描调度、文本缓存和对应测试；在独立工作树固定该提交验证，未纳入其他会话尚在编辑的战斗功能文件。
+
+Debug / Release 两配置的 PBZ 构建与 13 套测试共 26 次运行全部通过，见 [结果](../../output/pbz-release-v1.0.1-20261029/tests.json)、[Debug 构建](../../output/pbz-release-v1.0.1-20261029/build-debug.log)、[Release 构建](../../output/pbz-release-v1.0.1-20261029/build-release.log)。PowerShell 5/7 打包各通过 29 项，便携包升级契约各通过 45 项，共 148 项，见 [发行工具结果](../../output/pbz-release-v1.0.1-20261029/release-tools-results.json)。升级契约是模拟目录复制，不是游戏内验证。
+
+代码和标签 `PhantomBladeZero/v1.0.1` 已推送，触发 [本次 CI](https://github.com/GlossMod/GlossTrainer/actions/runs/40890532412)。本轮没有新增帧耗时、真实物品发放或菜单组合键的游戏内验证。物品文本缓存首次写盘失败后，本进程不会自动重试；换游戏语言需清除缓存，已有扫描前缀中的对象槽位复用可能延迟发现可选装饰表。正式附件和本地部署以下文最终回执为准。
+
+[v1.0.1 正式版本](https://github.com/GlossMod/GlossTrainer/releases/tag/PhantomBladeZero/v1.0.1) 已发布。云端 Debug、Release 及发布任务均成功；下载正式 ZIP、SHA256SUMS 与 CI 候选包，核对来源提交、artifact digest、附件 digest、ZIP 字节一致性及五个包内文件的哈希全部通过，见 [发行核验](../../output/pbz-release-v1.0.1-20261029/published-verification.json)、[CI API](../../output/pbz-release-v1.0.1-20261029/ci-result.json)、[源码审查](../../output/pbz-release-v1.0.1-20261029/source-review.json)。
+
+- 正式 ZIP SHA-256：`8B2D345E4E687E07EEDEE0F171010055D08875EC2368ABF41AAE043F8771F66E`。
+- 正式 ASI SHA-256：`5AA17A2B609E3414E7317537048A280DA1F98A303C12E16B2EBBA8BD6CB75CB9`。
+
+22:27 确认无 PBZ 进程后，将正式包部署至 `E:\steam\steamapps\common\PBZ\platform\steam`，替换 ASI 和双语说明，Loader 与其配置原样保留。旧安装五个文件和完整配置树已备份，独立复核五个安装文件、五个备份及四个用户数据文件的哈希均一致；用户数据目录未改动，`scripts` 中仅加载 `GlossTrainer.asi`。见 [部署回执](../../output/pbz-release-v1.0.1-20261029/deploy-20261029-222738/receipt.json)、[最终复核](../../output/pbz-release-v1.0.1-20261029/release-deployment-verification.json)。本轮未启动游戏，不新增实机验证结论。
