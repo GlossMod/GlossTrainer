@@ -4,14 +4,14 @@
 
 ## 注册游戏
 
-[Scripts/release-games.json](../Scripts/release-games.json) 是构建与打包入口注册表；[resolve-release.ps1](../Scripts/resolve-release.ps1) 在本地及 CI 中使用同一套解析与校验规则。游戏 ID 区分大小写，只能含字母和数字，以字母开头。每项指定本游戏的 target、版本源码、验证 target 列表所在文件、中文 `readme` 和英文 `readmeEn` 模板、releaseNotes、打包脚本、打包测试、安装测试和 Release ASI 路径。当前仅注册真实存在的 `BlackMythWukong`；第二游戏只在自动测试夹具内出现。
+[Scripts/release-games.json](../Scripts/release-games.json) 是构建与打包入口注册表；[resolve-release.ps1](../Scripts/resolve-release.ps1) 在本地及 CI 中使用同一套解析与校验规则。游戏 ID 区分大小写，只能含字母和数字，以字母开头。每项指定本游戏的 target、版本源码、验证 target 列表所在文件、中文 `readme` 和英文 `readmeEn` 模板、releaseNotes、打包脚本、打包测试、安装测试和 Release ASI 路径。当前注册 `BlackMythWukong` 与 `PhantomBladeZero`，按各自版本、产物和安装说明发布。
 
 版本的唯一来源仍是各游戏自己的 `src/runtime.hpp` 中的 `Version`。注册表不再存一份版本，修改一个游戏的版本不会改变另一个游戏。解析器拒绝未知或重复游戏、裸标签、跨游戏标签、与源码不一致的版本、非法路径和不匹配的 ASI target。
 
 新增游戏时：
 
 1. 在与游戏 ID 同名的独立目录添加其源码、构建 target、版本、验证和发行说明；根 xmake 根据注册游戏自动引入模块。验证 target 名也应加游戏前缀；解析器强制所有游戏的 build / test target 全局唯一，冲突将直接拒绝发布。版本、验证、README 和 releaseNotes 源文件强制放在对应 ID 的游戏目录内。
-2. 在注册表添加唯一游戏 ID 及对应入口，确认该游戏的构建输出为 `build/release/<target>.asi`。当前内置打包器支持 `asi-win64`；不同分发格式需要单独实现对应打包与验证流程，不能直接套用 ASI 包。
+2. 在注册表添加唯一游戏 ID 及对应入口，确认该游戏的构建输出为 `build/release/<target>.asi`；文件名与 target 不同时可声明安全的 `artifactName`（例如 PBZ 的 `GlossTrainer.asi`），`artifact` 必须精确匹配 `build/release/<artifactName>`，各游戏不得复用产物路径。当前内置打包器支持 `asi-win64`；不同分发格式需要单独实现对应打包与验证流程，不能直接套用 ASI 包。
 3. 客户端更新检查必须按游戏标签前缀和本游戏附件筛选，不能依赖仓库全局 `/releases/latest`。给新游戏配置自己的更新通道和安装目录。
 4. 手动执行 Actions，指定该游戏 ID，核对其 Debug / Release 和包回归，再推送自己的标签。
 
@@ -86,3 +86,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\test-release-i
 每次发布在 PowerShell 5.1 / 7 运行便携包和游戏隔离测试。隔离夹具覆盖两游戏相同版本、输出目录共用、独立测试列表、跨游戏 / 版本混配拒绝、未知游戏、重复 ID 和路径越界拒绝；它不宣称验证了尚未实现的第二款游戏。
 
 应用更新检查仅提示手工下载，不自动下载、运行安装器或替换正在使用的 ASI。游戏内特性与发布包验证记录在各游戏自己的 `docs/verification.md`，例如[黑神话验证记录](../BlackMythWukong/docs/verification.md)。
+
+PBZ 的发行包复制到游戏 `platform/steam`，与其中的 `PBZ.exe` 同级；详见 [PBZ 安装说明](../PhantomBladeZero/docs/release-readme.md)。根 `Scripts/install.ps1` 与 `xmake bi` 仍只服务悟空，PBZ 使用包内复制安装与独立包布局回归。

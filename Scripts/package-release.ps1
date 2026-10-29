@@ -219,7 +219,7 @@ $loaderStream = [IO.File]::OpenRead($verifiedLoaderArchive)
 $loaderZip = New-Object IO.Compression.ZipArchive($loaderStream, [IO.Compression.ZipArchiveMode]::Read, $false)
 try {
     # The pinned official ZIP contains only dinput8.dll. The loader also supports
-    # version.dll; renaming it matches install.ps1 and the game's direct import.
+    # version.dll; every registered game validates this loading layout separately.
     if ($loaderZip.Entries.Count -ne 1 -or $loaderZip.Entries[0].FullName -cne 'dinput8.dll') {
         throw 'Pinned Loader archive has an unexpected layout.'
     }

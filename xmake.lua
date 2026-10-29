@@ -1,7 +1,7 @@
 option("game")
     set_default("BlackMythWukong")
     set_showmenu(true)
-    set_description("Build a registered game or the development-only PhantomBladeZero UI module")
+    set_description("Build a registered game")
     after_check(function (option)
         import("core.base.json")
         local selected = option:value() or "BlackMythWukong"
@@ -12,9 +12,7 @@ option("game")
         for _, entry in ipairs(registry.games) do
             if entry.id == selected then registered = true end
         end
-        -- PhantomBladeZero is a UI-only development module, not a releasable game yet.
-        -- Keep it out of the release registry until installation is validated.
-        assert(registered or selected == "PhantomBladeZero", "Unknown game: " .. selected)
+        assert(registered, "Unknown registered game: " .. selected)
         assert(os.isfile(path.join(os.projectdir(), selected, "xmake.lua")), "Game build module is missing: " .. selected)
     end)
 option_end()

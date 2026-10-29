@@ -32,6 +32,8 @@ $ids = @($registry.games | ForEach-Object { $_.id })
 if (@($ids | Sort-Object -Unique).Count -ne $ids.Count) { throw 'Duplicate game IDs in release registry.' }
 foreach ($id in $ids) { if ($id -cnotmatch '^[A-Za-z][A-Za-z0-9]*$') { throw 'Invalid game ID in release registry.' } }
 $ownedTargets = @{}
+$ownedArtifacts = @{}
+$artifactNames = @{}
 $testInventories = @{}
 foreach ($registeredGame in $registry.games) {
     if ($registeredGame.target -cnotmatch '^[A-Za-z][A-Za-z0-9]*$') { throw 'Invalid registered game target.' }
@@ -46,6 +48,14 @@ foreach ($registeredGame in $registry.games) {
         if ($ownedTargets.ContainsKey($targetName)) { throw "Duplicate build or validation target '$targetName' across release games." }
         $ownedTargets[$targetName] = $registeredGame.id
     }
+    $artifactName = "$($registeredGame.target).asi"
+    if ($null -ne $registeredGame.PSObject.Properties['artifactName']) { $artifactName = $registeredGame.artifactName }
+    if ($artifactName -isnot [string] -or $artifactName -cnotmatch '^[A-Za-z][A-Za-z0-9_-]*\.asi\z' -or
+        $artifactName -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\.asi\z') { throw 'Invalid registered artifact name.' }
+    if ($registeredGame.artifact -cne "build/release/$artifactName") { throw 'Artifact must match the registered game artifact name.' }
+    if ($ownedArtifacts.ContainsKey($registeredGame.artifact)) { throw 'Duplicate artifact path across release games.' }
+    $ownedArtifacts[$registeredGame.artifact] = $registeredGame.id
+    $artifactNames[$registeredGame.id] = $artifactName
     $testInventories[$registeredGame.id] = $gameTests
 }
 $selected = @($registry.games | Where-Object { $_.id -ceq $Game })
@@ -59,14 +69,13 @@ $version = $versionMatches[0].Groups[1].Value
 $expectedTag = "$Game/v$version"
 if ($Tag -and $Tag -cne $expectedTag) { throw "Release tag '$Tag' does not match source version '$expectedTag'." }
 foreach ($field in @('releaseNotes', 'readme', 'readmeEn', 'validationFile', 'packageScript', 'packageTests', 'installerTests')) { [void](Resolve-SourceFile $entry.$field) }
-if ($entry.artifact -cne "build/release/$($entry.target).asi") { throw 'Artifact must match the registered game target.' }
 $tests = $testInventories[$Game]
 $stem = "GlossTrainer-$Game-v$version-win64"
 $result = [pscustomobject][ordered]@{
     game = $Game; name = $entry.name; version = $version; tag = $expectedTag; versionTag = "v$version"
     target = $entry.target; versionFile = $entry.versionFile; validationFile = $entry.validationFile
     readme = $entry.readme; readmeEn = $entry.readmeEn; releaseNotes = $entry.releaseNotes; packageScript = $entry.packageScript; packageTests = $entry.packageTests
-    installerTests = $entry.installerTests; artifact = $entry.artifact; tests = $tests
+    installerTests = $entry.installerTests; artifact = $entry.artifact; artifactName = $artifactNames[$Game]; tests = $tests
     archiveName = "$stem.zip"; checksumName = "$stem.SHA256SUMS.txt"; manifestName = "$stem.manifest.json"
     outputDirectory = "output/releases/$Game/v$version"; candidateName = "release-candidate-$Game-v$version"
 }

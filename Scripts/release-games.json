@@ -15,6 +15,22 @@
       "installerTests": "Scripts/test-install.ps1",
       "artifact": "build/release/BlackMythWukong.asi",
       "format": "asi-win64"
+    },
+    {
+      "id": "PhantomBladeZero",
+      "name": "Phantom Blade Zero",
+      "target": "PBZ",
+      "artifactName": "GlossTrainer.asi",
+      "versionFile": "PhantomBladeZero/src/runtime.hpp",
+      "validationFile": "PhantomBladeZero/validation/xmake.lua",
+      "readme": "PhantomBladeZero/docs/release-readme.md",
+      "readmeEn": "PhantomBladeZero/docs/release-readme-en.md",
+      "releaseNotes": "PhantomBladeZero/docs/release-notes.md",
+      "packageScript": "Scripts/package-release.ps1",
+      "packageTests": "Scripts/test-package-release.ps1",
+      "installerTests": "PhantomBladeZero/validation/test-install-package.ps1",
+      "artifact": "build/release/GlossTrainer.asi",
+      "format": "asi-win64"
     }
   ]
 }

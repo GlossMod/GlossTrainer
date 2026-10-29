@@ -2,19 +2,20 @@
 param(
     [string]$Artifact,
     [string]$LoaderArchive,
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [string]$Game = 'BlackMythWukong'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
-$sourceRelease = & (Join-Path $PSScriptRoot 'resolve-release.ps1') -Game BlackMythWukong
+$sourceRelease = & (Join-Path $PSScriptRoot 'resolve-release.ps1') -Game $Game
 if ([string]::IsNullOrWhiteSpace($Artifact)) { $Artifact = Join-Path $PSScriptRoot ('../' + $sourceRelease.artifact) }
 if ([string]::IsNullOrWhiteSpace($LoaderArchive)) {
     $LoaderArchive = Join-Path $PSScriptRoot ('../' + $sourceRelease.outputDirectory + '/cache/Ultimate-ASI-Loader/v10.0.0/Ultimate-ASI-Loader_x64.zip')
 }
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $PSScriptRoot ('../output/package-validation/BlackMythWukong/v' + $sourceRelease.version)
+    $OutputDirectory = Join-Path $PSScriptRoot ("../output/package-validation/$Game/v" + $sourceRelease.version)
 }
 $packager = Join-Path $PSScriptRoot 'package-release.ps1'
 $source = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -43,6 +44,7 @@ function Bytes-Sha256([byte[]]$Bytes) {
     finally { $sha.Dispose() }
 }
 function Invoke-Packager([string]$Name, [string[]]$Arguments, [int]$ExpectedExit = 0, [string]$ExpectedMessage, [switch]$UseCache) {
+    if ($Game -cne 'BlackMythWukong' -and '-Game' -notin $Arguments) { $Arguments += @('-Game', $Game) }
     if (-not $UseCache -and '-LoaderArchive' -notin $Arguments) { $Arguments += @('-LoaderArchive', $loaderPath) }
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -87,10 +89,17 @@ try {
     Assert-Condition (Test-Path -LiteralPath $loaderPath -PathType Leaf) "Offline tests require a pinned official Loader ZIP. Pass -LoaderArchive with its cached path: $loaderPath"
     Assert-Condition ((Get-FileHash -LiteralPath $loaderPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $loaderSha256) 'Offline Loader archive does not match the pinned SHA-256'
     Pass 'offline Loader fixture matches the pinned official x64 release'
-    $fixtureInputs = @($sourceRelease.versionFile, $sourceRelease.readme, $sourceRelease.readmeEn, $sourceRelease.releaseNotes, $sourceRelease.validationFile,
-        'Scripts\release-games.json', 'Scripts\package-release.ps1', 'Scripts\resolve-release.ps1', 'Scripts\test-package-release.ps1', 'Scripts\test-install.ps1', 'LICENSE')
+    # The resolver validates ownership across the entire registry. Include every
+    # registered game's sources so adding a game cannot break another's tests.
+    $fixtureInputs = @('Scripts\release-games.json', 'Scripts\resolve-release.ps1', 'LICENSE')
+    $sourceRegistry = [IO.File]::ReadAllText((Join-Path $source 'Scripts/release-games.json')) | ConvertFrom-Json
+    foreach ($registeredGame in $sourceRegistry.games) {
+        foreach ($field in @('versionFile', 'readme', 'readmeEn', 'releaseNotes', 'validationFile', 'packageScript', 'packageTests', 'installerTests')) {
+            $fixtureInputs += $registeredGame.$field
+        }
+    }
     $fixtureInputs += @(Get-ChildItem -LiteralPath (Join-Path $source 'licenses') -File | ForEach-Object { 'licenses\' + $_.Name })
-    foreach ($relative in $fixtureInputs) {
+    foreach ($relative in @($fixtureInputs | Sort-Object -Unique)) {
         $target = Join-Path $fixture $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $source $relative) -Destination $target
@@ -99,15 +108,15 @@ try {
     [IO.File]::AppendAllText((Join-Path $fixture $sourceRelease.readme), "`nRELEASE README FIXTURE`n", $utf8)
     [IO.File]::AppendAllText((Join-Path $fixture $sourceRelease.readmeEn), "`nENGLISH RELEASE README FIXTURE`n", $utf8)
     # No fixtures access a game, download data, or write outside output/.
-    foreach ($relative in @('data\reference.exe', 'data\reference.rar', 'Saved\save.sav', 'scripts\GlossTrainer\ui.ini', 'scripts\GlossTrainer\hotkeys.ini', 'scripts\GlossTrainer\trainer.ini', 'Scripts\install.ps1', 'BlackMythWukong\docs\install.md')) {
+    foreach ($relative in @('data\reference.exe', 'data\reference.rar', 'Saved\save.sav', 'scripts\GlossTrainer\ui.ini', 'scripts\GlossTrainer\hotkeys.ini', 'scripts\GlossTrainer\trainer.ini', 'Scripts\install.ps1', "$Game/docs/install.md")) {
         $target = Join-Path $fixture $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
         [IO.File]::WriteAllText($target, 'MUST NOT SHIP')
     }
     $version = [regex]::Match([IO.File]::ReadAllText((Join-Path $fixture $sourceRelease.versionFile)), 'Version\[\]\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
     Assert-Condition (-not [string]::IsNullOrEmpty($version)) 'Fixture source version missing'
-    $tag = 'BlackMythWukong/v' + $version
-    $stem = "GlossTrainer-BlackMythWukong-v$version-win64"
+    $tag = "$Game/v$version"
+    $stem = "GlossTrainer-$Game-v$version-win64"
     $releaseDirectory = Join-Path $testRoot 'release'
     $common = @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', $releaseDirectory, '-Tag', $tag, '-SourceRevision', ('1' * 40))
     Invoke-Packager 'valid x64 ASI and verified Loader produce a portable release' $common
@@ -129,7 +138,9 @@ try {
     Pass 'official dinput8 DLL is renamed to version DLL without modification'
     $expectedIni = "[GlobalSets]`r`nDontLoadFromDllMain=1`r`nLoadPlugins=1`r`nLoadFromScriptsOnly=1`r`nDebugLog=1`r`n"
     Assert-Condition ([Text.Encoding]::ASCII.GetString($contents['version.ini']) -ceq $expectedIni) 'Loader configuration differs'
-    Assert-Condition ([IO.File]::ReadAllText((Join-Path $source 'Scripts\install.ps1')).Contains($expectedIni.Replace("`r`n", '`r`n'))) 'Installer configuration changed without updating release settings'
+    if ($Game -ceq 'BlackMythWukong') {
+        Assert-Condition ([IO.File]::ReadAllText((Join-Path $source 'Scripts\install.ps1')).Contains($expectedIni.Replace("`r`n", '`r`n'))) 'Installer configuration changed without updating release settings'
+    }
     Pass 'Loader uses deferred InitializeASI loading from scripts with logging'
 
     $packagedReadme = [Text.Encoding]::UTF8.GetString($contents['README.md'])
@@ -137,10 +148,9 @@ try {
         Assert-Condition ($packagedReadme.Contains($expectedText)) "Release README required text missing: $expectedText"
     }
     # Code points keep this script ASCII-compatible with Windows PowerShell 5.1.
-    foreach ($codepoints in @(
-        @(0x9ed1, 0x795e, 0x8bdd, 0xff1a, 0x609f, 0x7a7a, 0x5185, 0x7f6e, 0x4fee, 0x6539, 0x5668),
-        @(0x5b89, 0x88c5, 0x65b9, 0x6cd5), @(0x5305, 0x542b, 0x529f, 0x80fd), @(0x7f72, 0x540d), @(0x5c0f, 0x83ab)
-    )) {
+    $chineseSections = @(@(0x5b89, 0x88c5, 0x65b9, 0x6cd5), @(0x5305, 0x542b, 0x529f, 0x80fd), @(0x7f72, 0x540d), @(0x5c0f, 0x83ab))
+    if ($Game -ceq 'BlackMythWukong') { $chineseSections += ,@(0x9ed1, 0x795e, 0x8bdd, 0xff1a, 0x609f, 0x7a7a, 0x5185, 0x7f6e, 0x4fee, 0x6539, 0x5668) }
+    foreach ($codepoints in $chineseSections) {
         $text = -join @($codepoints | ForEach-Object { [char]$_ })
         Assert-Condition ($packagedReadme.Contains($text)) "User-facing README section or attribution missing: $text"
     }
@@ -151,10 +161,13 @@ try {
     }
     Pass 'README contains requested sections version attribution and all complete licenses'
     $packagedReadmeEn = [Text.Encoding]::UTF8.GetString($contents['readme_en.md'])
-    foreach ($expectedText in @('ENGLISH RELEASE README FIXTURE', "GlossTrainer v$version", 'Black Myth: Wukong In-Game Trainer',
+    foreach ($expectedText in @('ENGLISH RELEASE README FIXTURE', "GlossTrainer v$version", $sourceRelease.name,
         '## Installation', '## Features', '## Credits', '## About', '## licenses', 'Current version', 'Latest version', 'Author:',
         'version.dll', 'scripts', 'GlossTrainer.asi', 'README.md')) {
         Assert-Condition ($packagedReadmeEn.Contains($expectedText)) "English README required text missing: $expectedText"
+    }
+    if ($Game -ceq 'BlackMythWukong') {
+        Assert-Condition ($packagedReadmeEn.Contains('Black Myth: Wukong In-Game Trainer')) 'English Wukong README title missing'
     }
     foreach ($text in @($packagedReadme, $packagedReadmeEn)) {
         foreach ($url in @('https://github.com/GlossMod/GlossTrainer/blob/master/LICENSE',
@@ -173,7 +186,7 @@ try {
     Assert-Condition (-not $contents.ContainsKey('release-manifest.json')) 'Audit manifest leaked into the install ZIP'
     $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
     Assert-Condition ($manifest.schemaVersion -eq 3 -and $manifest.project -ceq 'GlossTrainer' -and
-        $manifest.game -ceq 'BlackMythWukong' -and $manifest.version -ceq $version -and
+        $manifest.game -ceq $Game -and $manifest.version -ceq $version -and
         $manifest.tag -ceq $tag -and $manifest.architecture -ceq 'x64' -and
         $manifest.entryPoint -ceq 'InitializeASI' -and $manifest.sourceRevision -ceq ('1' * 40)) 'Manifest metadata differs'
     Assert-Condition ($manifest.archive.name -ceq [IO.Path]::GetFileName($zipPath) -and $manifest.archive.sha256 -ceq $initialHash -and $manifest.archive.size -eq (Get-Item -LiteralPath $zipPath).Length) 'Manifest archive receipt differs'
@@ -214,7 +227,7 @@ try {
     # have the same version and share an output directory to detect collisions.
     $secondGame = 'FixtureGame'
     New-Item -ItemType Directory -Path (Join-Path $fixture "$secondGame/src") -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $fixture 'BlackMythWukong/src/runtime.hpp') -Destination (Join-Path $fixture "$secondGame/src/runtime.hpp")
+    Copy-Item -LiteralPath (Join-Path $fixture $sourceRelease.versionFile) -Destination (Join-Path $fixture "$secondGame/src/runtime.hpp")
     [IO.File]::WriteAllText((Join-Path $fixture "$secondGame/readme.md"), "SECOND GAME README v{{VERSION}}`n{{LICENSES}}", $utf8)
     [IO.File]::WriteAllText((Join-Path $fixture "$secondGame/readme_en.md"), "SECOND GAME ENGLISH README v{{VERSION}}`n{{LICENSES}}", $utf8)
     [IO.File]::WriteAllText((Join-Path $fixture "$secondGame/tests.lua"), 'target("FixtureGameTests")', $utf8)
@@ -233,7 +246,7 @@ try {
     Pass 'same-directory cross-game packaging preserves the first archive checksum and manifest'
     Invoke-Packager 'cross-game tag cannot package another selected game' @('-Artifact', $artifactPath, '-Game', $secondGame, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'cross-game'), '-Tag', $tag) 1 'does not match selected game'
     Invoke-Packager 'unscoped legacy tag cannot publish a game' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'legacy-tag'), '-Tag', "v$version") 1 'Release tag must be'
-    Invoke-Packager 'mismatching tag is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-tag'), '-Tag', 'BlackMythWukong/v999.999.999') 1 'does not match source version'
+    Invoke-Packager 'mismatching tag is rejected' @('-Artifact', $artifactPath, '-SourceRoot', $fixture, '-OutputDirectory', (Join-Path $testRoot 'bad-tag'), '-Tag', "$Game/v999.999.999") 1 'does not match source version'
     Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot 'bad-tag'))) 'Rejected tag created output'
 
     $englishTemplate = Join-Path $fixture $sourceRelease.readmeEn
@@ -310,7 +323,7 @@ try {
 catch { $failure = $_.Exception.Message; throw }
 finally {
     if (Test-Path -LiteralPath $testRoot -PathType Container) {
-        $report = [ordered]@{ passed = ($null -eq $failure); checks = $checks; powerShell = $PSVersionTable.PSVersion.ToString(); artifact = $Artifact; loaderArchive = $loaderPath; failure = $failure; results = @($results.ToArray()) }
+        $report = [ordered]@{ passed = ($null -eq $failure); game = $Game; checks = $checks; powerShell = $PSVersionTable.PSVersion.ToString(); artifact = $Artifact; loaderArchive = $loaderPath; failure = $failure; results = @($results.ToArray()) }
         $snapshot = Join-Path $testRoot 'input.asi'
         if (Test-Path -LiteralPath $snapshot -PathType Leaf) { $report.artifactSha256 = (Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash.ToLowerInvariant() }
         [IO.File]::WriteAllText((Join-Path $testRoot 'results.json'), ($report | ConvertTo-Json -Depth 6) + "`n", $utf8)

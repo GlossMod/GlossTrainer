@@ -1,6 +1,6 @@
 # 影之刃零 · GlossTrainer
 
-版本 **0.1.0 动态适配测试版**，Windows x64 / C++20 / Dear ImGui / MinHook。游戏内物品目录、发放和动态图标已经用户确认可用。战斗包含无限杀气、无限暗源、完美格挡判定和自动完美闪避；连招按键随当前设备和映射读取。本轮移除免死模式，设置生命改为设置最大生命并回血，新增自定义快捷键。构建及本地测试通过；各项实机验证范围见验证记录。
+版本 **1.0.0**，Windows x64 / C++20 / Dear ImGui / MinHook。游戏内物品目录、发放和动态图标已经用户确认可用。战斗包含无限杀气、无限暗源、完美格挡判定和自动完美闪避；连招按键随当前设备和映射读取。本轮移除免死模式，设置生命改为设置最大生命并回血，新增自定义快捷键。构建及本地测试通过；各项实机验证范围见验证记录。
 
 沿用黑神话：悟空模块的窗口比例、金色强调色、亮暗主题、导航与输入处理。显示概览、修改功能、物品、设置、关于五页；传送页已隐藏。God 模式及目标/NPC 清除入口已移除，金币、伤害/防御/姿态倍率、移速、无冷却等未适配项保持隐藏。用户已明确消耗条为杀气，使用一个“无限杀气”开关。“可提交”仅表示调用条件成立，状态读回与实际战斗效果分别记录。
 
@@ -33,7 +33,7 @@ xmake build PBZLocalizationTests
 .\build\release\PBZLocalizationTests.exe
 ```
 
-产物为 `build/release/GlossTrainer.asi`，构建目标仍叫 `PBZ`；Debug 使用 `-m debug`，产物位于 `build/debug/`。旧文件 `PBZ.asi` 必须移出游戏的 scripts 目录，避免重复加载。配置不改变默认的悟空模块，也未将开发中的 PBZ 加入正式发布注册表。
+产物为 `build/release/GlossTrainer.asi`，构建目标仍叫 `PBZ`；Debug 使用 `-m debug`，产物位于 `build/debug/`。旧文件 `PBZ.asi` 必须移出游戏的 scripts 目录，避免重复加载。PBZ 已注册独立的正式发布通道 `PhantomBladeZero/vX.Y.Z`，默认构建仍为悟空模块。
 
 存在本地 `Tests/host.cpp` 时，可构建和运行图形宿主预览：
 
@@ -59,6 +59,8 @@ xmake build PBZHost
 历史部署使用 `platform/steam/version.dll`、`version.ini`、`scripts/PBZ.asi` 的加载链，主程序为同目录的 `PBZ.exe`；Loader 为已核验的 Ultimate ASI Loader v10.0.0 x64。新部署改用 `scripts/GlossTrainer.asi`。实际动态图标与资源单次 +1 已验证；新战斗开关、输入设备切换和改键显示需使用本轮模块继续实测。更新前退出游戏，保留存档及旧文件备份；现有 `xmake bi` 与根安装脚本仍为悟空专用，不能用于 PBZ。
 
 验证范围与证据见 [验证记录](docs/verification.md)。图形宿主成功不代表真实游戏内兼容或功能验证。
+
+正式发行 ZIP 内含 Loader、`scripts/GlossTrainer.asi` 和双语说明。将包内 `version.dll`、`version.ini` 与 `scripts` 一起复制到 `platform/steam`（与该目录 `PBZ.exe` 同级），升级保留配置。完整玩家说明见[中文发行说明](docs/release-readme.md)与[English](docs/release-readme-en.md)。
 
 实现分层与已知边界见 [原生适配说明](docs/native-adapter.md)。早期静态调查见 [修改项可行性分析](docs/feature-feasibility.md)，后续动态结论以验证记录为准。
 

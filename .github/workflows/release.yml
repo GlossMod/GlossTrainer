@@ -125,7 +125,7 @@ jobs:
         run: |
           $release = & ./Scripts/resolve-release.ps1 -Game $env:RELEASE_GAME
           foreach ($engine in @('powershell.exe', 'pwsh.exe')) {
-            & $engine -NoProfile -ExecutionPolicy Bypass -File $release.packageTests -Artifact $release.artifact -LoaderArchive "$($release.outputDirectory)/cache/Ultimate-ASI-Loader/v10.0.0/Ultimate-ASI-Loader_x64.zip" -OutputDirectory "output/package-validation/$($release.game)/v$($release.version)"
+            & $engine -NoProfile -ExecutionPolicy Bypass -File $release.packageTests -Game $release.game -Artifact $release.artifact -LoaderArchive "$($release.outputDirectory)/cache/Ultimate-ASI-Loader/v10.0.0/Ultimate-ASI-Loader_x64.zip" -OutputDirectory "output/package-validation/$($release.game)/v$($release.version)"
             if ($LASTEXITCODE -ne 0) { throw "Release package regression failed in $engine." }
             & $engine -NoProfile -ExecutionPolicy Bypass -File ./Scripts/test-release-isolation.ps1 -OutputDirectory "output/channel-validation/$($release.game)/v$($release.version)"
             if ($LASTEXITCODE -ne 0) { throw "Release isolation regression failed in $engine." }

@@ -48,8 +48,7 @@ namespace {
 }
 int main(int argc, char** argv) {
     try {
-        Check(argc == 2, "missing runtime evidence directory");
-        const auto root = std::filesystem::canonical(argv[1]);
+        Check(argc <= 2, "usage: PBZItemIconsTests [runtime evidence directory]");
         auto rgba = Solid("/Game/Test");
         rgba.data[0] = 31; rgba.data[2] = 69;
         auto decoded = Decode(rgba);
@@ -85,14 +84,34 @@ int main(int argc, char** argv) {
         }
         decoded = Decode(edge);
         Check(decoded.width == 256 && decoded.height == 1 && decoded.pixels[0] == 255 && decoded.pixels[2] == 0 && decoded.pixels[3] == 128, "downsample caused transparent color fringe");
-        std::ifstream input(root / "heishang.dxt5", std::ios::binary);
-        Check(input.good(), "missing real game BC3 payload");
-        ItemImageResult real{1, "/Game/Heishang", 512, 512, Format::Bc3,
-            std::vector<std::uint8_t>(std::istreambuf_iterator<char>(input), {}), {}};
-        decoded = Decode(std::move(real));
-        Check(decoded.width == 256 && decoded.height == 256 && decoded.pixels.size() == 256 * 256 * 4, "real game image failed");
-        std::ofstream output(root / "heishang-cache256.rgba", std::ios::binary);
-        output.write(reinterpret_cast<const char*>(decoded.pixels.data()), decoded.pixels.size()); output.close();
+        ItemImageResult largeBc3{1, "/Game/Synthetic512", 512, 512, Format::Bc3, {}, {}};
+        const std::array<std::uint8_t, 8> opaqueAlpha{255, 0, 0, 0, 0, 0, 0, 0};
+        for (int block = 0; block < 128 * 128; ++block) {
+            largeBc3.data.insert(largeBc3.data.end(), opaqueAlpha.begin(), opaqueAlpha.end());
+            largeBc3.data.insert(largeBc3.data.end(), red.begin(), red.end());
+        }
+        decoded = Decode(largeBc3);
+        Check(decoded.width == 256 && decoded.height == 256 && decoded.pixels.size() == 256 * 256 * 4,
+            "512x512 BC3 downsample dimensions wrong");
+        bool solidRed = true;
+        for (std::size_t i = 0; i < decoded.pixels.size(); i += 4) {
+            solidRed = solidRed && decoded.pixels[i] == 255 && decoded.pixels[i + 1] == 0 &&
+                decoded.pixels[i + 2] == 0 && decoded.pixels[i + 3] == 255;
+        }
+        Check(solidRed, "512x512 BC3 downsample changed opaque red pixels");
+        // Real game captures are optional local evidence, never required by CI.
+        if (argc == 2) {
+            const auto root = std::filesystem::canonical(argv[1]);
+            std::ifstream input(root / "heishang.dxt5", std::ios::binary);
+            Check(input.good(), "missing real game BC3 payload");
+            ItemImageResult real{1, "/Game/Heishang", 512, 512, Format::Bc3,
+                std::vector<std::uint8_t>(std::istreambuf_iterator<char>(input), {}), {}};
+            decoded = Decode(std::move(real));
+            Check(decoded.width == 256 && decoded.height == 256 && decoded.pixels.size() == 256 * 256 * 4, "real game image failed");
+            std::ofstream output(root / "heishang-cache256.rgba", std::ios::binary);
+            output.write(reinterpret_cast<const char*>(decoded.pixels.data()), decoded.pixels.size()); output.close();
+            Check(output.good(), "failed to write real game decoded evidence");
+        }
 
         gloss::gameplay::ResetItemImages(1);
         Context(); Frame();

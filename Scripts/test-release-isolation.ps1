@@ -41,6 +41,25 @@ try {
     }
     Check ($first.tests.Count -eq 1 -and $first.tests[0] -ceq 'FirstGameTests' -and $second.tests[0] -ceq 'SecondGameTests') 'validation target inventories stay in their game'
     Check ($first.readmeEn -ceq 'FirstGame/readme_en.md' -and $second.readmeEn -ceq 'SecondGame/readme_en.md') 'English README sources stay in their game'
+    Check ($first.artifactName -ceq 'FirstGame.asi' -and $second.artifactName -ceq 'SecondGame.asi') 'legacy entries default the artifact name to their build target'
+    $entries[1].artifactName = 'GlossTrainer.asi'; $entries[1].artifact = 'build/release/GlossTrainer.asi'; Save-Registry
+    $custom = & $resolver -SourceRoot $root -Game SecondGame
+    Check ($custom.target -ceq 'SecondGame' -and $custom.artifactName -ceq 'GlossTrainer.asi' -and $custom.artifact -ceq 'build/release/GlossTrainer.asi') 'registered artifact name may differ from the build target'
+    foreach ($invalidName in @('../escape.asi', 'sub/Trainer.asi', 'C:\Trainer.asi', 'Trainer.dll', 'Trainer.asi.exe', '', 'NUL.asi', 'Trainer.ASI', $null)) {
+        $entries[1].artifactName = $invalidName; Save-Registry
+        Reject "unsafe artifact name rejected: $invalidName" { & $resolver -SourceRoot $root -Game SecondGame } 'Invalid registered artifact name'
+    }
+    $entries[1].artifactName = "Trainer.asi`n"; Save-Registry
+    Reject 'artifact name cannot end in a newline' { & $resolver -SourceRoot $root -Game SecondGame } 'Invalid registered artifact name'
+    $entries[1].artifactName = @('Trainer.asi', 'Other.asi'); Save-Registry
+    Reject 'artifact name must be a single string' { & $resolver -SourceRoot $root -Game SecondGame } 'Invalid registered artifact name'
+    $entries[1].artifactName = 'GlossTrainer.asi'; $entries[1].artifact = 'build/release/Other.asi'; Save-Registry
+    Reject 'artifact path must match its registered file name' { & $resolver -SourceRoot $root -Game SecondGame } 'Artifact must match'
+    $entries[1].artifactName = 'FirstGame.asi'; $entries[1].artifact = 'build/release/FirstGame.asi'; Save-Registry
+    Reject 'custom artifact name cannot share another games binary path' { & $resolver -SourceRoot $root -Game FirstGame } 'Duplicate artifact path'
+    $entries[1].artifactName = 'firstgame.asi'; $entries[1].artifact = 'build/release/firstgame.asi'; Save-Registry
+    Reject 'artifact ownership is case insensitive on Windows' { & $resolver -SourceRoot $root -Game FirstGame } 'Duplicate artifact path'
+    $entries[1].Remove('artifactName'); $entries[1].artifact = 'build/release/SecondGame.asi'; Save-Registry
     $entries[1].readmeEn = 'FirstGame/readme_en.md'; Save-Registry
     Reject 'cross-game English README rejected' { & $resolver -SourceRoot $root -Game SecondGame } 'must belong to its game directory'
     $entries[1].readmeEn = 'SecondGame/missing-en.md'; Save-Registry
@@ -94,7 +113,7 @@ try {
         try { $unknownOutput = & xmake f -y -P $root --game=UnknownGame 2>&1; $unknownExit = $LASTEXITCODE }
         finally { $ErrorActionPreference = $previousPreference }
         [IO.File]::WriteAllText((Join-Path $root 'unknown-game-config.log'), ($unknownOutput -join "`n"), $utf8)
-        Check ($unknownExit -ne 0 -and ($unknownOutput -join "`n").Contains('Unknown registered game')) 'xmake rejects an unregistered game even with a build directory'
+        Check ($unknownExit -ne 0 -and ($unknownOutput -join "`n") -match 'Unknown (registered game|game:)') 'xmake rejects an unregistered game even with a build directory'
     } finally { Pop-Location }
     $callerConfigAfter = if (Test-Path -LiteralPath $callerConfig) { (Get-FileHash -LiteralPath $callerConfig).Hash } else { $null }
     Check ($callerConfigHash -ceq $callerConfigAfter) 'fixture configuration preserves caller xmake settings'

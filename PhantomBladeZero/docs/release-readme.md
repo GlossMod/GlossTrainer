@@ -1,0 +1,53 @@
+# 影之刃零内置修改器
+
+GlossTrainer v{{VERSION}} · Windows x64
+
+[简体中文](README.md) · [English](readme_en.md)
+
+## 安装方法
+
+1. 保存并正常退出游戏，解压发行 ZIP。
+2. 将 `version.dll`、`version.ini` 和 `scripts` 文件夹一起复制到游戏的 `platform/steam`，与该目录的 `PBZ.exe` 同级。
+3. 启动游戏，按 **Insert** 打开或隐藏菜单。功能快捷键默认未绑定，可在修改功能页设置。
+
+```text
+PBZ/platform/steam/
+  PBZ.exe
+  version.dll
+  version.ini
+  scripts/
+    GlossTrainer.asi
+```
+
+ZIP 已包含 Ultimate ASI Loader v10.0.0 x64，无需另行下载。已有其他插件的同名 Loader 时先核对归属。升级前退出游戏并备份旧文件，移出旧的 `scripts/PBZ.asi`，避免与 `GlossTrainer.asi` 重复加载。不要删除其他插件。
+
+配置与日志在 `scripts/GlossTrainer/PBZ/`。发行包不含默认配置，保留原有 `ui.ini`、`hotkeys.ini`、`features.ini` 和 `language.ini`。卸载时退出游戏后移除 `scripts/GlossTrainer.asi`；只有确认 Loader 无其他使用者时才移除 `version.dll` 与 `version.ini`。
+
+## 包含功能
+
+- 无限杀气、无限暗源、自动完美格挡判定、自动完美闪避及无敌模式。
+- 读取生命、设置最大生命并回血、恢复生命、药品及终结技补充。部分操作可能修改存档。
+- 游戏内动态物品目录和图标、分类搜索、数量确认与库存增量核对。唯一类物品限制单次 1 件，普通物品单次最多 999。
+- 自动保存已验证的开关，下次进入游戏及对应功能就绪后恢复；一次性操作不会重放。
+- 自定义键盘快捷键、中文 / English 界面、亮暗主题、缩放和布局记忆。
+- 独立 `PhantomBladeZero/v` 更新通道，在设置与关于页检查更新，手动前往发布页下载。
+
+支持 `CL-301524_JKS-17219` Windows x64 主程序，SHA-256：`7b4fcd286a350780faf0824d73aa150b21cbf1bccde883e6a96386cbe09973b4`。其他构建将禁用原生调用。新战斗行为与跨场景效果仍需逐项实机验证，以[验证记录](https://github.com/GlossMod/GlossTrainer/blob/master/PhantomBladeZero/docs/verification.md)为准。物品名称和描述使用游戏语言。
+
+## 关于
+
+当前版本：v{{VERSION}}。最新版本在关于页查询；无发行或网络失败会明确提示，不影响现有功能，修改器不自动安装更新。
+
+## 署名
+
+By: 小莫
+
+- [主 LICENSE · GNU GPL v3](https://github.com/GlossMod/GlossTrainer/blob/master/LICENSE)
+- [源码](https://github.com/GlossMod/GlossTrainer)
+- [影之刃零下载](https://github.com/GlossMod/GlossTrainer/releases?q=PhantomBladeZero%2Fv&expanded=true)
+- [赞助作者](https://sponsor.aoe.top/)
+- [申请制作游戏修改器](https://www.glossmod.com/commissions)
+
+## licenses
+
+{{LICENSES}}

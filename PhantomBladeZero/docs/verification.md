@@ -1,6 +1,6 @@
 # PBZ 实现与验证记录
 
-日期：2026-10-29。版本：0.1.0 动态适配测试版。本文按阶段保留历史验证；最新全量物品与界面收敛记录见本文末尾。**本轮新版已构建、测试并部署，尚未完成新版实机验证；旧版实机结果不能替代本轮验证。**
+日期：2026-10-29。当前版本：1.0.0。本文按阶段保留历史验证；最新版本与验证范围见本文末尾。0.1.0 阶段的部署记录不代表当前产物已部署，旧版实机结果不能替代新版验证。
 
 ## 初始实现范围（历史）
 
@@ -188,3 +188,45 @@ REA 原生反编译后端不可用，核心资源容器未解密；本轮没有�
 针对最大生命加成偏差，已实现最多两次受界限控制的加法/乘法补偿，每次引擎调用后复核 pawn/ASC/属性对象指针与索引；零斜率、超范围和无法求解的效果不继续猜值。Debug/Release 构建通过，新增各 15 项数值边界检查通过，见 [测试](../../output/pbz-combat-20261029/health-tests.json)。修正版 [GlossTrainer.asi](../../output/pbz-combat-20261029/package-health-final/GlossTrainer.asi) SHA-256 `8C8997A7AE820D5EF0C019030B10961D58C2246A875752B611C1429D49343359` **仅准备，未部署、未实机验证**。用户明确选择“先保留当前版本”，未再次替换游戏文件。
 
 仍待实机覆盖：最大生命补偿版、上下调上限、复活/换图与同 pawn 属性对象替换、设备切换及游戏改键、快捷键重启持久化、完美格挡真实接触条件。源码审查和本地测试不能替代这些验证。
+
+## 2026-10-29 基础设置、版本更新与中英文界面
+
+实现内容：
+
+- 五个可逆功能开关以稳定 ID 保存到 `GlossTrainer/PBZ/features.ini`。经验证成功的启用才记入；用户关闭会取消自动启用。加载后等待能力和真实状态回读，再在游戏线程恢复；一次性发物品、恢复生命等动作不保存、不重放。失败恢复在同一会话不自动重试。关闭待办跨加载保留；玩家属性或 cheat 对象重绑时主动失效旧请求和回读。
+- 启动界面异步检查更新；设置、关于页均提供手动重试。仅接受 `PhantomBladeZero/vX.Y.Z` 与对应 `GlossTrainer-PhantomBladeZero-vX.Y.Z-win64.zip`，忽略悟空和裸版本。检查结果只提示，不禁用功能，不自动安装。网络错误可重试，暂无正式发布则明确显示。首轮真实宿主请求得到“暂无正式发布版本”，见下列日志。
+- 关于页同步版本、作者、GPL v3、源码、下载、赞助和制作申请入口；沿用双主题卡片布局。
+- 设置页提供中文 / English，保存到 `GlossTrainer/PBZ/language.ini`，下次加载保留。468 项翻译覆盖 UI、目录、快捷键及常见状态；控件 ID 保持稳定。Toast 按当前语言格式化，物品名、描述和用户文本保持原文；未知的底层诊断不猜译。原子保存失败保留原语言，同帧翻译指针有效。
+
+| 验证 | 结果与证据 |
+| --- | --- |
+| PBZ 与可视化 fixture 的 Debug / Release 构建 | 均通过：[Debug](../../output/pbz-basics-20261029/build-debug-final.log)、[Release](../../output/pbz-basics-20261029/build-release-final.log) |
+| Gameplay / Update / Localization 三套回归 | 两配置全部 exitCode=0，共六次运行；[汇总](../../output/pbz-basics-20261029/tests-final.json)，[可重跑脚本](../../output/pbz-basics-20261029/validate.ps1) |
+| 开关记忆 | 覆盖全部五个开关往返、固定参数、无读回/未就绪等待、失败不循环重试、未验证启用不保存、一次性动作排除、坏配置、原子写失败保留文件、关闭覆盖正在执行的恢复、加载后补发关闭 |
+| 版本检查 | 覆盖游戏渠道隔离、版本排序、发布稳定性、安装包与链接来源、分页/体积限制、重复请求、失败后重试；[实际网络日志](../../output/pbz-basics-20261029/visual-about-dark-final/artifact/GlossTrainer/PBZ/logs/trainer.log) |
+| 语言设置 | 覆盖中英文持久化、非法配置回退、写失败保留原选择、临时字符串及跨线程指针生命周期、参数错误/快捷键冲突翻译、库存诊断保留游戏物品名 |
+| 双语关于页 | DX12 中文暗色、DX11 英文亮色可视化通过并查看：[中文](../../output/pbz-basics-20261029/final-zh-dark-about/open.png)、[English](../../output/pbz-basics-20261029/final-en-light-about/open.png) |
+| 英文功能页 | DX12 暗色可视化通过并查看：[截图](../../output/pbz-basics-20261029/final-en-dark-features/open.png) |
+| 设置页 | 中文暗色、英文亮色及英文暗色下半页通过并查看：[中文](../../output/pbz-basics-20261029/final-zh-dark-settings/open.png)、[English](../../output/pbz-basics-20261029/final-en-light-settings/open.png)、[记忆与更新](../../output/pbz-basics-20261029/final-en-dark-settings-bottom/open.png) |
+| UI 原型 | 本轮 custom-imagegen 的 gpt-image-2.5 返回 HTTP 429 usage_limit_reached；已查看并复用既有关于页与语言设置双主题原型。[记录与原型链接](../../output/pbz-basics-20261029/ui/prototype-review.md)、[提示词](../../output/pbz-basics-20261029/ui/prompt.txt)、[失败原始日志](../../output/pbz-basics-20261029/ui/generation.log) |
+| 最终产物 | [GlossTrainer.asi](../../output/pbz-basics-20261029/package/GlossTrainer.asi)、[哈希回执](../../output/pbz-basics-20261029/package/receipt.json)，尚未部署到游戏 |
+
+最终 SHA-256：`B186CB0E3A117FE3D39D4923C047BAD3C9BD81001428CF6F0B2551265217558B`。六组可视化来自最终常见诊断词条补充前的相同布局构建，各自 ASI 哈希记录于截图同目录的 `result.json`；最终源码已另行完成两配置构建及六次回归。
+
+首次生产 ASI 自动输入宿主因打开菜单时 `foreground-target=0` 未通过，[原始失败记录](../../output/pbz-basics-20261029/host-about-dark/result.json) 保留。后续六组使用明确打开菜单的 visual-only fixture，证明布局和渲染，不证明生产输入链或游戏效果。本轮没有安装或进行游戏内重启/换图测试，仍需用最终产物在真实游戏确认自动恢复；不能把本地测试或历史实机结果视为本轮实机验证。
+
+## 2026-10-29 版本更新为 1.0.0
+
+按用户要求将 PBZ 的统一版本常量从 `0.1.0` 更新为 `1.0.0`，同步模块 README。标题、设置、关于页、启动日志和更新比较均读取该常量；测试中的旧版本样本及历史证据保持原样。
+
+PBZ 在 Debug / Release 均构建通过，`PBZUpdateTests` 两配置全部通过，包含使用真实编译版本进行当前版本判断的用例。[测试汇总](../../output/pbz-v1.0.0-20261029/tests.json)、[Debug 构建](../../output/pbz-v1.0.0-20261029/build-debug.log)、[Release 构建](../../output/pbz-v1.0.0-20261029/build-release.log)。此次仅更新版本与说明，没有新增游戏内验证。
+
+新版产物：[GlossTrainer.asi](../../output/pbz-v1.0.0-20261029/package/GlossTrainer.asi)，SHA-256 `B327C0889EB01069FE7D2BAF412B879D68FD50B2E4D85E38645C1BEFA91B782B`；[回执](../../output/pbz-v1.0.0-20261029/package/receipt.json)。尚未部署或发布，前文 0.1.0 产物与截图仅作历史记录。
+
+## 2026-10-29 v1.0.0 正式发布准备
+
+PBZ 已加入独立发布注册表，标签 `PhantomBladeZero/v1.0.0`，目标 `PBZ`，产物通过 `artifactName` 显式映射为 `build/release/GlossTrainer.asi`。注册器拒绝非法文件名、路径不匹配和跨游戏复用；默认悟空产物路径保持兼容。CI 按游戏运行 11 个 PBZ 验证目标，打包包含固定 Loader、唯一 ASI 及双语玩家说明，最终发布 ZIP 与 SHA256SUMS。根安装脚本仍为悟空专用。
+
+完整预检：[Debug / Release 22 次 C++ 回归](../../output/pbz-release-20261029/tests.json) 全部通过；[发布工具汇总](../../output/pbz-release-20261029/release-tools-summary.json) 共 206 项通过，覆盖 PS5/PS7 的 PBZ、悟空打包与通道隔离。PBZ 的便携包安装契约在 [PS5](../../output/pbz-release/installer/ps5-d9007011793b4fd0b4132e2005e02c79/results.json)、[PS7](../../output/pbz-release/installer/ps7-29f528120a474e9aad759990e491f955/results.json) 各通过 45 项，证明模拟复制升级保留配置和其他插件；不是游戏内验证。图标测试新增确定性 512×512 BC3 缩小验证，真实游戏图片改为可选，云端无需本机游戏样本。
+
+中文/English 界面与原子保存源码已纳入本次提交；版本仍为 1.0.0。当前发布步骤会由标签触发 Actions，并在成功后回读附件、核对来源提交与哈希、备份本地安装并部署该发行包内的 ASI。最终发行与部署结果以后续记录为准。
