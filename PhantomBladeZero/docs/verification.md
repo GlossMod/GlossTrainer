@@ -230,3 +230,14 @@ PBZ 已加入独立发布注册表，标签 `PhantomBladeZero/v1.0.0`，目标 `
 完整预检：[Debug / Release 22 次 C++ 回归](../../output/pbz-release-20261029/tests.json) 全部通过；[发布工具汇总](../../output/pbz-release-20261029/release-tools-summary.json) 共 206 项通过，覆盖 PS5/PS7 的 PBZ、悟空打包与通道隔离。PBZ 的便携包安装契约在 [PS5](../../output/pbz-release/installer/ps5-d9007011793b4fd0b4132e2005e02c79/results.json)、[PS7](../../output/pbz-release/installer/ps7-29f528120a474e9aad759990e491f955/results.json) 各通过 45 项，证明模拟复制升级保留配置和其他插件；不是游戏内验证。图标测试新增确定性 512×512 BC3 缩小验证，真实游戏图片改为可选，云端无需本机游戏样本。
 
 中文/English 界面与原子保存源码已纳入本次提交；版本仍为 1.0.0。当前发布步骤会由标签触发 Actions，并在成功后回读附件、核对来源提交与哈希、备份本地安装并部署该发行包内的 ASI。最终发行与部署结果以后续记录为准。
+
+## 2026-10-29 v1.0.0 正式发布
+
+源码提交 `a09a4fe9fc3a0916ab3ee5eeb001ce43f7d6c962` 与标签 `PhantomBladeZero/v1.0.0` 已推送。[GitHub Actions](https://github.com/GlossMod/GlossTrainer/actions/runs/40859438625) 的 Debug、Release、打包及发布任务均成功；[正式版本](https://github.com/GlossMod/GlossTrainer/releases/tag/PhantomBladeZero/v1.0.0) 已发布，包含 Windows x64 ZIP 和 SHA256SUMS，非草稿、非预发布，保留仓库原有 Latest 标记。
+
+已下载正式附件与 CI 候选包，核对候选 artifact digest、来源提交、ZIP 完整性、正式附件 API digest、校验文件及包内五个文件的大小和 SHA-256。正式 ZIP 与 CI 候选 ZIP 字节一致，见 [核验回执](../../output/pbz-release-20261029/published-verification.json)、[CI 结果](../../output/pbz-release-20261029/ci-result.json)、[候选清单](../../output/pbz-release-20261029/ci-candidate-verified/GlossTrainer-PhantomBladeZero-v1.0.0-win64.manifest.json)。
+
+- 正式 ZIP SHA-256：`1554F6887545B1FBB1C7F0FB3AD458566603029573B4EC3D49D649D49687E93A`。
+- 正式 `GlossTrainer.asi` SHA-256：`92DA3B8BF71F48246F54F3231B16DD3F50B5324BA6EA5D4B7A6509F27EBE71BB`。
+
+本机编译与云端编译产物的哈希不同；此次部署以正式发行包为准。以上发布和文件核验不新增游戏内功能验证。
