@@ -1,0 +1,7 @@
+bcdec v0.985 by Sergii "iOrange" Kudlai
+Source: https://github.com/iOrange/bcdec
+Pinned commit: 80859ed3b7afb1c527a2a99d70c61457bea72d0c
+Included source: PhantomBladeZero/src/third_party/bcdec.h
+
+The complete upstream dual MIT / Unlicense text is preserved at the end of that header.
+GlossTrainer uses the MIT option.

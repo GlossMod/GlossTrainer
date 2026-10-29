@@ -10,6 +10,7 @@ GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个
 | 模块                                         | 说明                                         |
 | -------------------------------------------- | -------------------------------------------- |
 | [BlackMythWukong](BlackMythWukong/readme.md) | 《黑神话：悟空》的功能、安装、使用及适配说明 |
+| [PhantomBladeZero](PhantomBladeZero/readme.md) | 《影之刃零》内置修改器测试版，含原生调用、状态读回与亮暗 UI，部分功能待验证 |
 
 ## 关于项目
 
