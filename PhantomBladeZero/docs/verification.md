@@ -241,3 +241,5 @@ PBZ 已加入独立发布注册表，标签 `PhantomBladeZero/v1.0.0`，目标 `
 - 正式 `GlossTrainer.asi` SHA-256：`92DA3B8BF71F48246F54F3231B16DD3F50B5324BA6EA5D4B7A6509F27EBE71BB`。
 
 本机编译与云端编译产物的哈希不同；此次部署以正式发行包为准。以上发布和文件核验不新增游戏内功能验证。
+
+18:57 用户再次确认退出游戏后，已完成正式包在 `E:\steam\steamapps\common\PBZ\platform\steam` 的部署核验。执行时已有 ASI 与正式包哈希相同，因此保留 ASI、Loader 和 Loader 配置，补齐双语玩家说明；安装目录五个发行文件均与候选清单一致。现有安装文件与完整用户配置已备份，配置逐文件哈希保持一致，`scripts` 下仅有一个 `GlossTrainer.asi`。见 [部署与备份回执](../../output/pbz-release-20261029/deploy-20261029-185715/receipt.json)、[最终独立复核](../../output/pbz-release-20261029/release-deployment-verification.json)。此次没有启动游戏或新增实机功能验证。
