@@ -421,3 +421,14 @@ CE MCP 核对 CL-301524_JKS-17219 的反射布局、函数入口、本地对象�
 本地 Debug / Release 的 PBZ 构建及全部 20 套验证目标共 40 次测试通过；上述边界修复后追加两配置 PBZ / NativeHookLifecycle 构建与测试，每配置 402 checks、0 failures。见[测试清单](../../output/pbz-release-v1.1.0-20261030/tests.json)。既有游戏内物品加载及飞行验证见前文，本轮追加修复尚无新增实机复测。
 
 发行使用 `PhantomBladeZero/v1.1.0` 独立通道，先对推送提交执行云端候选包构建、审查，再在同一提交创建标签发布。最终 CI、正式附件和哈希核验以下文记录为准。
+
+源码提交 `c2674c242359e120f2928a3d9c833981b97e127d` 已推送；[候选构建](https://github.com/GlossMod/GlossTrainer/actions/runs/41048020691) 的 Debug / Release 构建及全部测试通过，下载核对 artifact digest、来源提交、ZIP 校验值和五文件清单后，在同一提交创建并推送 `PhantomBladeZero/v1.1.0` 标签。见[候选核验](../../output/pbz-release-v1.1.0-20261030/preflight/preflight-candidate-verification.json)。
+
+本地最终 PowerShell 5 / 7 各通过打包 29 项、安装保留配置 45 项及通道隔离 45 项，共 238 项，见[发行工具结果](../../output/pbz-release-v1.1.0-20261030/release-tools-results.json)。初始 Loader 缓存下载网络失败与一次错误缓存哈希拒绝均保留证据，后使用符合固定官方 SHA-256 的缓存通过；不将失败尝试记为成功。安装回归使用模拟目录，没有改写游戏安装。
+
+[v1.1.0 正式版本](https://github.com/GlossMod/GlossTrainer/releases/tag/PhantomBladeZero/v1.1.0) 已发布，[正式 CI](https://github.com/GlossMod/GlossTrainer/actions/runs/41049838244) 的 Debug、Release 和发布作业全部成功，非草稿、非预发布。回读确认发布说明与标签源码一致；下载正式附件，核对附件 API digest、CI 候选包 digest、来源提交、标签指向、ZIP 字节一致性及全部五个包内文件的大小和 SHA-256。见[正式核验](../../output/pbz-release-v1.1.0-20261030/publication/published-verification.json)、[Release API](../../output/pbz-release-v1.1.0-20261030/publication/published-release.json)、[CI API](../../output/pbz-release-v1.1.0-20261030/publication/ci-result.json)。候选下载曾因连接重置中断，最终通过分段下载与完整摘要核对完成，未跳过文件校验。
+
+- 正式 ZIP SHA-256：`82830a4566d3320f9450ff4c1adad1c5766cc794fd0fde50aa587261d412d6eb`。
+- 正式 `GlossTrainer.asi` SHA-256：`63b234083d256bfc809d57b5c209c9e4e4441f577538b240a2e51b7c721cf8f5`。
+
+本节是源码推送、正式发行与附件验证记录；未替换正在使用的游戏 ASI，也不新增游戏内效果验证。前文已安装的本地 1.1.0 构建与本次云端正式产物哈希不同。
