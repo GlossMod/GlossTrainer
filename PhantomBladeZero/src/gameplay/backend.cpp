@@ -1,4 +1,5 @@
 #include "backend.hpp"
+#include "item_quantity.hpp"
 #include "toggle_settings.hpp"
 #include <algorithm>
 #include <exception>
@@ -29,6 +30,8 @@ namespace gloss::gameplay {
         for (const auto& feature : Catalog())
             capabilities_.push_back({feature.id, false, feature.unavailableReason});
         toggleIntents_.resize(ToggleCatalog().size());
+        for (std::size_t i = 0; i < toggleIntents_.size(); ++i)
+            toggleIntents_[i].parameters = DefaultParameters(*FindFeature(ToggleCatalog()[i].onFeatureId));
     }
 
     bool Backend::InitializeSettings(const std::filesystem::path& file, std::string* error) {
@@ -51,7 +54,9 @@ namespace gloss::gameplay {
             settingsInitialized_ = true;
             for (std::size_t i = 0; i < toggleIntents_.size(); ++i) {
                 auto& intent = toggleIntents_[i];
-                intent.enabled = data.at(ToggleCatalog()[i].id);
+                const auto& saved = data.at(ToggleCatalog()[i].id);
+                intent.enabled = saved.enabled;
+                intent.parameters = saved.parameters;
                 intent.restorePending = intent.enabled;
             }
         }
@@ -71,7 +76,8 @@ namespace gloss::gameplay {
             file = settingsFile_;
             revision = settingsRevision_;
             for (std::size_t i = 0; i < toggleIntents_.size(); ++i)
-                data.emplace(ToggleCatalog()[i].id, toggleIntents_[i].enabled);
+                data.emplace(ToggleCatalog()[i].id, toggle_settings::Entry{
+                    toggleIntents_[i].enabled, toggleIntents_[i].parameters});
         }
         std::string message;
         bool saved{};
@@ -90,6 +96,11 @@ namespace gloss::gameplay {
         return ready_;
     }
 
+    bool Backend::ItemsReady() const {
+        std::lock_guard lock(mutex_);
+        return ready_ && itemsReady_;
+    }
+
     Snapshot Backend::GetSnapshot() const {
         std::lock_guard lock(mutex_);
         Snapshot result{ready_, generation_, status_, capabilities_, statistics_,
@@ -97,7 +108,7 @@ namespace gloss::gameplay {
         if (settingsInitialized_) {
             for (std::size_t i = 0; i < toggleIntents_.size(); ++i)
                 result.togglePreferences.push_back({ToggleCatalog()[i].id, toggleIntents_[i].enabled,
-                    toggleIntents_[i].restorePending});
+                    toggleIntents_[i].restorePending, toggleIntents_[i].parameters});
         }
         return result;
     }
@@ -116,9 +127,15 @@ namespace gloss::gameplay {
         }
         // No automatic retry after failure or unknown effects in this session.
         intent.restorePending = false;
-        if (!request.restoration && state == RequestState::Verified && intent.enabled != enabled) {
-            intent.enabled = enabled;
-            ++settingsRevision_;
+        if (!request.restoration && state == RequestState::Verified) {
+            const auto* feature = FindFeature(request.featureId);
+            const std::vector<std::string> parameters(request.arguments.begin() + feature->fixedArguments.size(),
+                request.arguments.end());
+            if (intent.enabled != enabled || (enabled && intent.parameters != parameters)) {
+                intent.enabled = enabled;
+                if (enabled) intent.parameters = parameters;
+                ++settingsRevision_;
+            }
         }
     }
 
@@ -135,7 +152,9 @@ namespace gloss::gameplay {
                 return Active(record.state) && (record.request.featureId == toggle.onFeatureId ||
                     record.request.featureId == toggle.offFeatureId);
             })) continue;
-            if (observed->enabled == intent.restoreEnabled) {
+            const auto* onFeature = FindFeature(toggle.onFeatureId);
+            if (observed->enabled == intent.restoreEnabled && (!intent.restoreEnabled ||
+                EquivalentParameters(*onFeature, observed->parameters, intent.parameters))) {
                 intent.restorePending = false;
                 continue;
             }
@@ -146,6 +165,8 @@ namespace gloss::gameplay {
             const auto* feature = FindFeature(featureId);
             Request request{nextRequestId_++, generation_, featureId, feature->fixedArguments,
                 now + std::chrono::seconds(5), true, intent.revision};
+            if (intent.restoreEnabled)
+                request.arguments.insert(request.arguments.end(), intent.parameters.begin(), intent.parameters.end());
             queue_.push_back(request);
             records_.push_back({request, RequestState::Pending, "正在恢复记住的开关状态"});
             TrimHistory();
@@ -260,9 +281,11 @@ namespace gloss::gameplay {
         std::chrono::milliseconds lifetime, Clock::time_point now) {
         const auto* feature = FindFeature(featureId);
         if (!feature) return {false, 0, "未知功能"};
-        if (values.empty()) {
-            for (const auto& param : feature->params) values.push_back(param.defaultValue);
-        }
+        bool toggleEnabled{};
+        const auto toggleIndex = ToggleIndex(featureId, toggleEnabled);
+        // Closing a toggle never consumes the editor's possibly invalid draft.
+        if (toggleIndex < ToggleCatalog().size() && !toggleEnabled) values.clear();
+        if (values.empty()) values = DefaultParameters(*feature);
         std::string error;
         if (!ValidateParameters(*feature, values, error)) return {false, 0, std::move(error)};
         if (lifetime <= std::chrono::milliseconds::zero() || lifetime > std::chrono::seconds(60))
@@ -270,8 +293,6 @@ namespace gloss::gameplay {
 
         std::lock_guard lock(mutex_);
         ExpirePending(now);
-        bool toggleEnabled{};
-        const auto toggleIndex = ToggleIndex(featureId, toggleEnabled);
         const bool rememberToggle = settingsInitialized_ && toggleIndex < toggleIntents_.size();
         if (rememberToggle && !toggleEnabled) {
             auto& intent = toggleIntents_[toggleIndex];
@@ -298,8 +319,11 @@ namespace gloss::gameplay {
             const auto item = std::find_if(items_.begin(), items_.end(), [&](const auto& entry) { return entry.key == values[0]; });
             if (item == items_.end()) return {false, 0, "所选物品已失效，请重新选择"};
             if (!item->available) return {false, 0, item->reason.empty() ? "该物品暂时无法获取" : item->reason};
-            const int quantity = std::stoi(values[1]); // The Int parameter was validated above.
+            int quantity{};
+            if (!ParseItemQuantity(values[1], quantity)) return {false, 0, "发放数量必须为有效的正整数"};
             if (quantity > item->maxQuantity) return {false, 0, "数量超过该物品单次获取上限"};
+            if (item->owned >= 0 && !ItemQuantityFitsInventory(item->owned, quantity))
+                return {false, 0, "当前数量加请求数量会溢出，未执行"};
         }
         const auto capability = std::find_if(capabilities_.begin(), capabilities_.end(), [&](const auto& item) {
             return item.featureId == featureId;

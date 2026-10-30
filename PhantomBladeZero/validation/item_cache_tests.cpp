@@ -36,6 +36,12 @@ int main() {
     std::istringstream truncated("hash\n\"key\" \"name\" \"category\" \"unfinished");
     check(!gloss::gameplay::ReadItemTextCache(truncated, "hash", values));
     check(values.size() == 1);
+    // The early checkpoint contains valid names before their lazy descriptions
+    // are resolved. An empty raw value must survive loading as an empty value.
+    std::istringstream nameOnly("hash\n\"prop:new\" \"New name\" \"Prop\" \"\"\n");
+    check(gloss::gameplay::ReadItemTextCache(nameOnly, "hash", values));
+    check(values.size() == 1 && values.at("prop:new").entry.name == "New name");
+    check(values.at("prop:new").raw.empty() && values.at("prop:new").entry.description.empty());
     std::cout << "Item cache: " << failures << " failures\n";
     return failures ? 1 : 0;
 }

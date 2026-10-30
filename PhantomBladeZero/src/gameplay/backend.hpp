@@ -31,11 +31,13 @@ namespace gloss::gameplay {
         bool known{};
         bool enabled{};
         std::string reason;
+        std::vector<std::string> parameters; // Observed on-parameters, not editor drafts.
     };
     struct TogglePreference {
         std::string id;
         bool enabled{}; // Saved user intent, separate from observed game state.
         bool restorePending{};
+        std::vector<std::string> parameters; // Last verified successful on-parameters.
     };
     struct ItemEntry {
         std::string key, name, description, category;
@@ -111,6 +113,7 @@ namespace gloss::gameplay {
         bool FlushSettings(std::string* error = nullptr);
         Snapshot GetSnapshot() const;
         bool IsReady() const;
+        bool ItemsReady() const;
         void SetItemPageActive(bool active) { itemPageActive_.store(active, std::memory_order_relaxed); }
         bool ItemPageActive() const { return itemPageActive_.load(std::memory_order_relaxed); }
         // Session key identifies the player/world context. Any key/readiness change
@@ -140,6 +143,7 @@ namespace gloss::gameplay {
             bool restorePending{};
             bool restoreEnabled{true};
             std::uint64_t revision{};
+            std::vector<std::string> parameters;
         };
 
         mutable std::mutex mutex_;

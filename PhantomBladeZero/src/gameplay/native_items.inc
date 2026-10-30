@@ -72,7 +72,7 @@
             std::string nameKey;
             std::vector<ItemTextSource> descriptionFields;
             std::string rawDescription;
-            bool nameInputValid{}, named{};
+            bool nameInputValid{}, named{}, descriptionComplete{};
         };
         struct NativeItemCatalog {
             std::string session;
@@ -80,9 +80,9 @@
             std::uint32_t backpackIndex{};
             std::vector<NativeItem> rows;
             std::array<ItemSparseMap, 5> tables{};
-            std::size_t parsed{};
+            std::size_t parsed{}, described{}, descriptionField{}, cacheHits{};
             bool built{}, complete{};
-            Clock::time_point nextRefresh{}, nextProgress{};
+            Clock::time_point nextRefresh{}, nextProgress{}, started{};
         };
         NativeItemCatalog itemCatalog;
 
@@ -365,12 +365,16 @@
             key = *value;
             return true;
         }
-        std::string ItemSoftTextureKey(Address row, Address rowType, std::string_view propertyName, int* resultOffset = nullptr) {
+        int ItemSoftTextureOffset(Address rowType, std::string_view propertyName) {
             const auto property = FindProperty(rowType, propertyName);
-            if (!ItemFieldType(property, "SoftObjectProperty", 40)) return {};
+            if (!ItemFieldType(property, "SoftObjectProperty", 40)) return -1;
             const auto offset = Read<std::int32_t>(property + 0x44);
             if (offset < 0 || offset + 40 > Read<std::int32_t>(rowType + 0xa8) ||
-                !ClassNamed(Read<Address>(property + 0x70), "Texture2D")) return {};
+                !ClassNamed(Read<Address>(property + 0x70), "Texture2D")) return -1;
+            return offset;
+        }
+        std::string ItemSoftTextureKey(Address row, int offset) {
+            if (offset < 0) return {};
             const auto soft = row + offset;
             const auto subPath = ItemString(soft + 24);
             if (!subPath || !subPath->empty()) return {};
@@ -383,47 +387,58 @@
             };
             const auto package = decode(soft + 8), asset = decode(soft + 16);
             if (!package.starts_with("/Game/") || asset.empty() || asset == "None") return {};
-            if (resultOffset) *resultOffset = offset;
             return package + '.' + asset;
         }
-        void ItemDescriptionSources(NativeItem& item, Address rowType) {
+        struct ItemDescriptionLayout {
+            std::vector<ItemTextSource> fields;
+            int arrayOffset{-1}, stride{};
+        };
+        ItemDescriptionLayout ItemDescriptionFields(ItemKind kind, Address rowType) {
+            ItemDescriptionLayout layout;
             const auto field = [&](std::string_view name, int offset) {
-                if (ItemTextField(rowType, name, offset)) item.descriptionFields.push_back({offset});
+                if (ItemTextField(rowType, name, offset)) layout.fields.push_back({offset});
             };
             std::string_view arrayName;
             int arrayOffset{}, stride{};
-            if (item.kind == ItemKind::Prop) {
+            if (kind == ItemKind::Prop) {
                 field("ItemDescription", 0x58); field("IPDescription", 0x88);
                 field("FunctionalDescription", 0xb8); field("Subhead", 0xe8); field("ItemSignature", 0x118);
-            } else if (item.kind == ItemKind::Accessory) {
+            } else if (kind == ItemKind::Accessory) {
                 field("AccessoryDesc", 0xf8); field("IPDesc", 0x128); field("ShortIntroduction", 0x1e8);
-            } else if (item.kind == ItemKind::Medicine) {
+            } else if (kind == ItemKind::Medicine) {
                 field("Desc", 0x58); field("ShortIntroduction", 0x280);
                 arrayName = "AbilityDesc"; arrayOffset = 0x88; stride = 48;
-            } else if (item.kind == ItemKind::MainWeapon) {
+            } else if (kind == ItemKind::MainWeapon) {
                 field("EquipDescription", 0x2b8); field("Simple", 0x2e8); field("ShortIntroduction", 0x6d8);
                 arrayName = "WeaponAbilityDesc"; arrayOffset = 0x318; stride = 96;
             } else {
                 field("EquipDescription", 0x340); field("SimpleDesc", 0x370); field("ShortIntroduction", 0x7b0);
                 arrayName = "WeaponAbilityDesc"; arrayOffset = 0x3a0; stride = 96;
             }
-            if (arrayName.empty()) return;
+            if (arrayName.empty()) return layout;
             const auto property = FindProperty(rowType, arrayName);
-            if (!PropertyLayout(property, "ArrayProperty", 16, arrayOffset)) return;
+            if (!PropertyLayout(property, "ArrayProperty", 16, arrayOffset)) return layout;
             const auto inner = Read<Address>(property + 0x78);
-            if (!ItemFieldType(inner, "StructProperty", stride)) return;
+            if (!ItemFieldType(inner, "StructProperty", stride)) return layout;
             const auto structure = Read<Address>(inner + 0x70);
-            if (!ObjectValid(structure) || Read<std::int32_t>(structure + 0xa8) != stride) return;
+            if (!ObjectValid(structure) || Read<std::int32_t>(structure + 0xa8) != stride) return layout;
             if (stride == 48) {
-                if (ObjectName(structure) != "FlowLocText") return;
+                if (ObjectName(structure) != "FlowLocText") return layout;
             } else if (ObjectName(structure) != "WeaponAbilityDescEntry" ||
-                !ItemTextField(structure, "WeaponTitle", 0) || !ItemTextField(structure, "WeaponDesc", 48)) return;
-            const auto count = Read<std::int32_t>(item.row + arrayOffset + 8);
-            const auto capacity = Read<std::int32_t>(item.row + arrayOffset + 12);
+                !ItemTextField(structure, "WeaponTitle", 0) || !ItemTextField(structure, "WeaponDesc", 48)) return layout;
+            layout.arrayOffset = arrayOffset;
+            layout.stride = stride;
+            return layout;
+        }
+        void ItemDescriptionSources(NativeItem& item, const ItemDescriptionLayout& layout) {
+            item.descriptionFields = layout.fields;
+            if (layout.arrayOffset < 0) return;
+            const auto count = Read<std::int32_t>(item.row + layout.arrayOffset + 8);
+            const auto capacity = Read<std::int32_t>(item.row + layout.arrayOffset + 12);
             if (count < 0 || count > 32 || capacity < count || capacity > 128) return;
             for (int i = 0; i < std::min(count, 8); ++i) {
-                item.descriptionFields.push_back({arrayOffset, i, stride, 0});
-                if (stride == 96) item.descriptionFields.push_back({arrayOffset, i, stride, 48});
+                item.descriptionFields.push_back({layout.arrayOffset, i, layout.stride, 0});
+                if (layout.stride == 96) item.descriptionFields.push_back({layout.arrayOffset, i, layout.stride, 48});
             }
         }
         Address ItemDescriptionAddress(const NativeItem& item, const ItemTextSource& source) {
@@ -452,24 +467,33 @@
                 for (const auto& item : itemCatalog.rows) entries.push_back(item.entry);
                 if (dustItem) entries.push_back(*dustItem);
             }
-            if (!itemCatalog.complete) for (const auto& [key, value] : cachedItemText) {
-                auto entry = value.entry;
-                entry.available = false;
-                entry.owned = -1;
-                entry.reason = "等待当前游戏目录验证";
-                entries.push_back(std::move(entry));
+            if (!itemCatalog.complete) {
+                std::unordered_map<std::string, bool> published;
+                const auto preview = [&](ItemEntry entry) {
+                    entry.available = false;
+                    entry.owned = -1;
+                    entry.reason = "等待当前游戏目录验证";
+                    published.emplace(entry.key, true);
+                    entries.push_back(std::move(entry));
+                };
+                // Cold starts can show names as they arrive; a cache is only a
+                // browsing preview until this session's full catalog is checked.
+                for (const auto& item : itemCatalog.rows) if (item.named) preview(item.entry);
+                for (const auto& [key, value] : cachedItemText)
+                    if (!published.contains(key)) preview(value.entry);
             }
             GetBackend().PublishItems(std::move(entries), ready, std::move(status));
         }
         void ItemInvalidate(std::string reason) {
             dustItem.reset();
             itemCatalog.rows.clear();
-            itemCatalog.parsed = 0;
+            itemCatalog.parsed = itemCatalog.described = itemCatalog.descriptionField = 0;
             itemCatalog.built = itemCatalog.complete = false;
             itemCatalog.nextRefresh = Clock::now() + std::chrono::milliseconds(1500);
             ItemPublish(false, std::move(reason));
         }
         bool ItemBuildCatalog(Address backpack, std::string& reason) {
+            const auto started = Clock::now();
             const auto backpackType = Read<Address>(backpack + 0x10);
             if (!ItemTextEntriesValid()) { reason = "本地化入口指令与版本契约不符"; return false; }
             std::vector<NativeItem> rows;
@@ -484,6 +508,13 @@
                 }
                 const auto getter = FindFunction(backpackType, table.getter);
                 const auto rowType = Read<Address>(FindProperty(getter, "ReturnValue") + 0x70);
+                // Every row in this table has the same reflected layout. Resolve
+                // it once, rather than traversing those fields for all 790 rows.
+                const auto iconProperty = table.kind == ItemKind::Prop ? "ItemIcon" :
+                    table.kind == ItemKind::Medicine || table.kind == ItemKind::Accessory ? "HighPrecisionTexture" : "RenderIcon";
+                const auto iconOffset = ItemSoftTextureOffset(rowType, iconProperty);
+                const auto fallbackOffset = ItemSoftTextureOffset(rowType, table.kind == ItemKind::Medicine ? "SoftTexture" : "Icon");
+                const auto descriptions = ItemDescriptionFields(table.kind, rowType);
                 int allocatedCount{};
                 for (std::int32_t slot = 0; slot < layout.count; ++slot) {
                     bool allocated{};
@@ -518,17 +549,16 @@
                     item.row = mapEntry.value;
                     item.slot = slot;
                     item.nameInputValid = ItemFlowInput(item.row + table.nameOffset, item.nameKey);
-                    const auto iconProperty = table.kind == ItemKind::Prop ? "ItemIcon" :
-                        table.kind == ItemKind::Medicine || table.kind == ItemKind::Accessory ? "HighPrecisionTexture" : "RenderIcon";
-                    item.entry.iconKey = ItemSoftTextureKey(item.row, rowType, iconProperty, &item.iconOffset);
-                    auto fallbackKey = ItemSoftTextureKey(item.row, rowType,
-                        table.kind == ItemKind::Medicine ? "SoftTexture" : "Icon", &item.iconFallbackOffset);
+                    item.iconOffset = iconOffset;
+                    item.iconFallbackOffset = fallbackOffset;
+                    item.entry.iconKey = ItemSoftTextureKey(item.row, iconOffset);
+                    auto fallbackKey = ItemSoftTextureKey(item.row, fallbackOffset);
                     if (item.entry.iconKey.empty()) {
                         item.entry.iconKey = std::move(fallbackKey);
                         item.iconOffset = item.iconFallbackOffset;
                         item.iconFallbackOffset = -1;
                     } else if (fallbackKey.empty() || fallbackKey == item.entry.iconKey) item.iconFallbackOffset = -1;
-                    ItemDescriptionSources(item, rowType);
+                    ItemDescriptionSources(item, descriptions);
                     rows.push_back(std::move(item));
                 }
                 ItemSparseMap after;
@@ -542,8 +572,11 @@
                 itemCatalog.tables[tableIndex] = layout;
             }
             itemCatalog.rows = std::move(rows);
-            itemCatalog.parsed = 0;
+            itemCatalog.parsed = itemCatalog.described = itemCatalog.descriptionField = itemCatalog.cacheHits = 0;
             itemCatalog.built = true;
+            itemCatalog.started = started;
+            gloss::Log(std::format("PBZ item catalog layout built: rows={} elapsed={:.3f}ms", itemCatalog.rows.size(),
+                std::chrono::duration<double, std::milli>(Clock::now() - started).count()));
             return true;
         }
         using ItemAmounts = std::unordered_map<std::uint64_t, std::int64_t>;
@@ -618,6 +651,56 @@
             }
             return changed;
         }
+        bool ItemRefreshDescriptions(const Context& context, Address backpack) {
+            if (itemCatalog.described == itemCatalog.rows.size()) return true;
+            ItemLoadingBudget budget(Clock::now(), std::chrono::milliseconds(1), 8);
+            bool changed{};
+            std::size_t rowsVisited{};
+            while (itemCatalog.described < itemCatalog.rows.size() && rowsVisited < 64 && budget.Continue(Clock::now())) {
+                auto& item = itemCatalog.rows[itemCatalog.described];
+                if (!item.named || item.descriptionComplete || itemCatalog.descriptionField == item.descriptionFields.size()) {
+                    if (item.named && !item.descriptionComplete) {
+                        item.entry.description = ItemFormattedDescription(item.rawDescription);
+                        changed = true;
+                    }
+                    item.descriptionComplete = true;
+                    ++itemCatalog.described;
+                    itemCatalog.descriptionField = 0;
+                    ++rowsVisited;
+                    continue;
+                }
+                if (!ItemBackpackMatches(context, backpack) || !ItemCurrentRow(item)) {
+                    ItemInvalidate("文本解析期间会话或物品表已变化");
+                    return false;
+                }
+                const auto address = ItemDescriptionAddress(item, item.descriptionFields[itemCatalog.descriptionField]);
+                std::string key;
+                if (address && ItemFlowInput(address, key)) {
+                    const auto description = ItemResolveText(address);
+                    if (faulted.load()) { ItemInvalidate("物品文本解析异常，目录已停用"); return false; }
+                    if (description && !description->empty() && *description != key &&
+                        item.rawDescription.find(*description) == std::string::npos) {
+                        if (!item.rawDescription.empty()) item.rawDescription += "\n\n";
+                        item.rawDescription += *description;
+                    }
+                }
+                ++itemCatalog.descriptionField;
+                budget.Consume();
+            }
+            if (!ItemBackpackMatches(context, backpack)) { ItemInvalidate("文本解析期间会话或物品表已变化"); return false; }
+            const auto now = Clock::now();
+            const bool complete = itemCatalog.described == itemCatalog.rows.size();
+            if (complete) {
+                SaveItemCache();
+                gloss::Log(std::format("PBZ item catalog descriptions complete: rows={} elapsed={:.3f}ms", itemCatalog.rows.size(),
+                    std::chrono::duration<double, std::milli>(now - itemCatalog.started).count()));
+            }
+            if (complete || (changed && now >= itemCatalog.nextProgress)) {
+                ItemPublish(true, std::format("已从游戏加载 {} 件物品；数量定期回读", itemCatalog.rows.size()));
+                itemCatalog.nextProgress = now + std::chrono::milliseconds(250);
+            }
+            return true;
+        }
         void RefreshItems(const Context& context, bool force = false) {
             PerformanceScope performance(5);
             if (stopping.load() || faulted.load() || !LocalGameThread()) return;
@@ -662,25 +745,28 @@
             }
             if (!itemCatalog.complete) {
                 if (!ItemTextEntriesValid()) { ItemInvalidate("本地化入口已变化，目录解析停止"); return; }
-                // One row per Tick bounds localization work even for weapon ability arrays.
-                const auto end = std::min(itemCatalog.parsed + 1, itemCatalog.rows.size());
-                for (; itemCatalog.parsed < end; ++itemCatalog.parsed) {
+                // Names make the catalog usable first. Cached/empty rows do not
+                // consume one entire Tick each, and long descriptions run later.
+                ItemLoadingBudget budget(Clock::now(), std::chrono::milliseconds(2), 32);
+                LoadItemCache();
+                while (itemCatalog.parsed < itemCatalog.rows.size() && budget.Continue(Clock::now())) {
                     auto& item = itemCatalog.rows[itemCatalog.parsed];
                     if (!ItemBackpackMatches(context, backpack) || !ItemCurrentRow(item)) {
                         ItemInvalidate("解析期间会话或物品表已变化，等待重新建立目录");
                         return;
                     }
                     const auto& table = ItemTables[static_cast<std::size_t>(item.kind)];
-                    LoadItemCache();
                     const auto cached = cachedItemText.find(item.entry.key);
                     if (cached != cachedItemText.end()) {
                         item.entry.name = cached->second.entry.name;
                         item.rawDescription = cached->second.raw;
                         item.entry.description = ItemFormattedDescription(item.rawDescription);
                         item.named = true;
-                        continue;
-                    }
-                    if (item.nameInputValid) {
+                        ++itemCatalog.cacheHits;
+                        // An empty cached description may be from the early
+                        // name-only checkpoint. Revisit it under the lazy budget.
+                        item.descriptionComplete = !item.rawDescription.empty();
+                    } else if (item.nameInputValid) {
                         const auto name = ItemResolveText(item.row + table.nameOffset);
                         if (faulted.load()) { ItemInvalidate("物品文本解析异常，目录已停用"); return; }
                         if (name && !name->empty() && *name != item.nameKey) {
@@ -688,28 +774,14 @@
                             item.named = true;
                         }
                     }
-                    for (const auto& source : item.descriptionFields) {
-                        if (!ItemBackpackMatches(context, backpack) || !ItemCurrentRow(item)) {
-                            ItemInvalidate("文本解析期间会话或物品表已变化");
-                            return;
-                        }
-                        const auto address = ItemDescriptionAddress(item, source);
-                        std::string key;
-                        if (!address || !ItemFlowInput(address, key)) continue;
-                        const auto description = ItemResolveText(address);
-                        if (faulted.load()) { ItemInvalidate("物品文本解析异常，目录已停用"); return; }
-                        if (!description || description->empty() || *description == key) continue;
-                        if (item.rawDescription.find(*description) != std::string::npos) continue;
-                        if (!item.rawDescription.empty()) item.rawDescription += "\n\n";
-                        item.rawDescription += *description;
-                    }
-                    item.entry.description = ItemFormattedDescription(item.rawDescription);
+                    ++itemCatalog.parsed;
+                    budget.Consume();
                 }
                 if (!ItemBackpackMatches(context, backpack)) { ItemInvalidate("目录解析后玩家会话变化"); return; }
                 if (itemCatalog.parsed != itemCatalog.rows.size()) {
                     if (now >= itemCatalog.nextProgress) {
                         ItemPublish(false, std::format("正在解析游戏物品名称：{} / {}", itemCatalog.parsed, itemCatalog.rows.size()));
-                        itemCatalog.nextProgress = now + std::chrono::milliseconds(500);
+                        itemCatalog.nextProgress = now + std::chrono::milliseconds(250);
                     }
                     return;
                 }
@@ -719,9 +791,12 @@
                 RefreshDust(context);
                 if (!ItemBackpackMatches(context, backpack)) { ItemInvalidate("目录库存回读后玩家会话变化"); return; }
                 ItemPublish(true, std::format("已从游戏加载 {} 件物品；数量定期回读", itemCatalog.rows.size()));
+                gloss::Log(std::format("PBZ item catalog names ready: rows={} cacheHits={} elapsed={:.3f}ms", itemCatalog.rows.size(), itemCatalog.cacheHits,
+                    std::chrono::duration<double, std::milli>(Clock::now() - itemCatalog.started).count()));
                 itemCatalog.nextRefresh = now + std::chrono::milliseconds(1500);
                 return;
             }
+            if (!ItemRefreshDescriptions(context, backpack)) return;
             if (!force && now < itemCatalog.nextRefresh) return;
             // Recheck table identities before reusing any FName from the catalog.
             for (std::size_t index = 0; index < std::size(ItemTables); ++index) {
@@ -735,7 +810,8 @@
             const bool changed = ItemRefreshAmounts(backpack);
             const bool resourceChanged = RefreshDust(context);
             if (!ItemBackpackMatches(context, backpack)) { ItemInvalidate("库存刷新后玩家会话变化"); return; }
-            if (changed || resourceChanged || force) ItemPublish(true, std::format("已从游戏加载 {} 件物品及角色资源；数量已回读", itemCatalog.rows.size()));
+            if (changed || resourceChanged || force || !GetBackend().ItemsReady())
+                ItemPublish(true, std::format("已从游戏加载 {} 件物品及角色资源；数量已回读", itemCatalog.rows.size()));
             itemCatalog.nextRefresh = now + std::chrono::milliseconds(1500);
         }
         bool ItemImageLoadSignature(Address function) {
@@ -918,9 +994,8 @@
                 return {RequestState::Failed, "物品发放请求格式错误"};
             int quantity{};
             const auto& text = request.arguments[1];
-            const auto parsed = std::from_chars(text.data(), text.data() + text.size(), quantity);
-            if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || quantity < 1 || quantity > 999)
-                return {RequestState::Failed, "发放数量必须为 1 至 999 的整数"};
+            if (!ParseItemQuantity(text, quantity))
+                return {RequestState::Failed, "发放数量必须为有效的正整数"};
             if (!itemCatalog.complete || itemCatalog.session != context.Key() ||
                 !ItemBackpackMatches(context, itemCatalog.backpack))
                 return {RequestState::Failed, "当前会话的物品目录尚未就绪"};
@@ -944,7 +1019,7 @@
             const auto before = ItemOwned(backpack, item);
             if (!before) return {RequestState::Failed, "无法读取发放前库存，未执行"};
             if (item.kind != ItemKind::Prop && *before != 0) return {RequestState::Failed, "已拥有该物品，未重复发放"};
-            if (*before > static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max()) - quantity)
+            if (!ItemQuantityFitsInventory(*before, quantity))
                 return {RequestState::Failed, "当前数量加请求数量会溢出，未执行"};
             alignas(8) std::array<std::byte, 16> parameters{};
             if (item.kind == ItemKind::Prop) {

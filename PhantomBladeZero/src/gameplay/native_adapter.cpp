@@ -1,7 +1,9 @@
 #include "native_adapter.hpp"
 #include "backend.hpp"
 #include "item_images.hpp"
+#include "item_quantity.hpp"
 #include "item_scan_schedule.hpp"
+#include "item_loading_budget.hpp"
 #include "performance_scope.hpp"
 #include "item_action_index.hpp"
 #include "item_text_cache.hpp"
@@ -10,6 +12,12 @@
 #include "item_richtext.hpp"
 #include "combat_rules.hpp"
 #include "attribute_rules.hpp"
+#include "movement_rules.hpp"
+#include "extended_rules.hpp"
+#include "resource_rules.hpp"
+#include "cooldown_rules.hpp"
+#include "tag_rules.hpp"
+#include <MinHook.h>
 #include "../runtime.hpp"
 #include <bcrypt.h>
 #include <algorithm>
@@ -125,12 +133,21 @@ namespace gloss::gameplay::native {
             }
             return observed == expected && restored;
         }
+        thread_local bool cacheExecutableQueries{};
+        thread_local std::unordered_map<Address, bool> executablePages;
         bool Executable(Address address) {
+            const auto page = address & ~Address{0xfff};
+            if (cacheExecutableQueries) {
+                const auto found = executablePages.find(page);
+                if (found != executablePages.end()) return found->second;
+            }
             MEMORY_BASIC_INFORMATION info{};
             if (!VirtualQuery(reinterpret_cast<void*>(address), &info, sizeof(info)) || info.State != MEM_COMMIT)
                 return false;
-            return !(info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+            const bool executable = !(info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
                 (info.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
+            if (cacheExecutableQueries) executablePages.insert_or_assign(page, executable);
+            return executable;
         }
         std::optional<std::string> Name(std::uint32_t id) {
             const auto blockIndex = id >> 16;
@@ -544,17 +561,39 @@ namespace gloss::gameplay::native {
             if (parameters.result < 0) return {};
             return parameters.result;
         }
+        void ExtendedResourcePreChange(void* object, const void* attribute, float* proposed, bool baseValue) noexcept;
+        std::vector<ToggleState> ExtendedToggleStates(const Context& context);
         #include "native_attributes.inc"
         #include "native_combat.inc"
+        #include "native_movement.inc"
+        void RefreshExtendedCapabilities(const ToggleState& state) {
+            // Components can arrive after the initial session bind. Reuse the
+            // observed contract for both the toggle and its flight actions.
+            for (const auto& toggle : ToggleCatalog()) {
+                if (toggle.id != state.id) continue;
+                const auto* feature = FindFeature(toggle.onFeatureId);
+                if (feature && feature->functionName == "Native_ExtendedFeature" && state.known)
+                    GetBackend().SetCapability(toggle.onFeatureId, true, "参数契约已核对，可提交调用");
+            }
+            if (state.id == "flight") {
+                for (const auto id : {"flight_up", "flight_down"})
+                    GetBackend().SetCapability(id, state.known, state.known ? "飞行契约已核对；执行时另行检查启用状态" : state.reason);
+            }
+        }
         void PublishToggles(const Context& context) {
             const auto invulnerable = ReadGameplayTagCount(context, "CharacterState.Stand.Invulnerable.Debug");
-            GetBackend().PublishToggleStates({
+            std::vector<ToggleState> states{
                 ShachiToggleState(),
                 DarkSourceToggleState(),
                 PerfectDeflectState(context),
                 PerfectDodgeState(context),
                 {"invulnerable", invulnerable.has_value(), invulnerable.value_or(0) > 0, invulnerable ? "能力系统无敌标签实时回读" : "无敌状态未读回"}
-            });
+            };
+            for (auto& state : ExtendedToggleStates(context)) {
+                RefreshExtendedCapabilities(state);
+                states.push_back(std::move(state));
+            }
+            GetBackend().PublishToggleStates(std::move(states));
         }
         bool Signature(Address function, const ExpectedFunction& expected, std::string& reason) {
             if (!ObjectValid(function) || ObjectName(function) != expected.name ||
@@ -756,6 +795,11 @@ namespace gloss::gameplay::native {
             return true;
         }
         #include "native_items.inc"
+        #include "native_damage.inc"
+        #include "native_cooldown.inc"
+        #include "native_stealth.inc"
+        #include "native_progress.inc"
+        #include "native_extended.inc"
 
         ExecutionResult Execute(const Request& request) {
             if (stopping.load() || faulted.load() || !LocalGameThread()) return {RequestState::Failed, "游戏线程条件失效"};
@@ -767,6 +811,11 @@ namespace gloss::gameplay::native {
             const auto* feature = FindFeature(request.featureId);
             if (request.featureId == "grant_item") return GrantItem(*context, request);
             if (request.featureId == "set_max_health") return SetMaxHealth(*context, request);
+            if (feature && (feature->functionName == "Native_ExtendedFeature" || feature->functionName == "Native_ExtendedAction")) {
+                const auto result = ExecuteExtended(*context, request);
+                PublishToggles(*context);
+                return result;
+            }
             if (feature && feature->functionName == "Native_InfiniteDarkSource") {
                 const auto result = ExecuteDarkSource(request);
                 PublishToggles(*context);
@@ -847,6 +896,12 @@ namespace gloss::gameplay::native {
         }
         void Tick(Context context) {
             PerformanceScope performance(0);
+            // Hundreds of identity checks can touch the same executable page.
+            // Share its protection query only within this synchronous Tick.
+            struct ExecutableQueryScope {
+                ExecutableQueryScope() { executablePages.clear(); cacheExecutableQueries = true; }
+                ~ExecutableQueryScope() { cacheExecutableQueries = false; executablePages.clear(); }
+            } executableQueryScope;
             static auto nextFaultReport = Clock::now() + std::chrono::seconds(10);
             if (Clock::now() >= nextFaultReport) {
                 gloss::Log(std::format("PBZ perf read faults: {}", readFaults.exchange(0)));
@@ -874,6 +929,12 @@ namespace gloss::gameplay::native {
                 // Invalidate queued work/read-back and re-arm saved toggles before rebinding.
                 GetBackend().SetRuntimeState(false, "玩家对象已变化，等待重新绑定", key);
                 CombatSessionChanged(context);
+                const bool movementRestored = MovementSessionChanged(context);
+                const bool extendedRestored = ExtendedSessionChanged(context);
+                if (!movementRestored || !extendedRestored) {
+                    GetBackend().SetRuntimeState(false, "原参数尚未恢复；飞行时请移动到空旷处", key);
+                    return;
+                }
                 const bool combatReady = BindCombat(context);
                 if (darkSourceEnabled && (!combatReady || !FillDarkSource())) darkSourceEnabled = false;
                 if (faulted.load()) return;
@@ -899,6 +960,8 @@ namespace gloss::gameplay::native {
                     if (feature.functionName == "Native_SetMaxHealth") ready = MaxHealthReady(context);
                     if (feature.functionName == "Native_PerfectDeflect") ready = PerfectTagFunction(true) && PerfectTagFunction(false);
                     if (feature.functionName == "Native_PerfectDodge") ready = DodgeContract(context) && DodgeInputAction(context);
+                    if ((feature.functionName == "Native_ExtendedFeature" || feature.functionName == "Native_ExtendedAction") && !feature.fixedArguments.empty())
+                        ready = feature.id.ends_with("_off") || ExtendedCapability(context, feature.fixedArguments[0], reason);
                     GetBackend().SetCapability(feature.id, ready, ready ? "参数契约已核对，可提交调用" :
                         (reason.empty() ? feature.unavailableReason : reason));
                 }
@@ -906,6 +969,7 @@ namespace gloss::gameplay::native {
             }
             static auto nextReadback = Clock::time_point{};
             const auto now = Clock::now();
+            MovementTick(context);
             if (now >= nextReadback) {
                 PublishReadback(ReadHealth(context), &context);
                 PublishToggles(context);
@@ -922,7 +986,10 @@ namespace gloss::gameplay::native {
             originalActorProcessEvent(object, function, parameters);
             if (combatCleanupRequested.load() && !insideAdapter && LocalGameThread()) {
                 insideAdapter = true;
-                CombatCleanup();
+                const bool combat = CombatCleanup();
+                const bool movement = MovementCleanup();
+                const bool extended = ExtendedCleanup();
+                combatCleanupComplete.store(combat && movement && extended);
                 insideAdapter = false;
                 return;
             }
@@ -1044,6 +1111,12 @@ namespace gloss::gameplay::native {
             GetBackend().SetRuntimeState(false, "无法固定适配器模块生命周期，未安装回调"); return false;
         }
         modulePinned.store(true);
+        const auto minHookStatus = MH_Initialize();
+        if (minHookStatus == MH_OK || minHookStatus == MH_ERROR_ALREADY_INITIALIZED) {
+            PrepareEconomyHooks();
+            PrepareCooldownHook();
+            PrepareShachiCostHooks();
+        }
         originalActorProcessEvent = reinterpret_cast<ProcessEvent>(base + ActorProcessEventRva);
         GetBackend().SetRuntimeState(false, "版本已核对，等待本地玩家与游戏线程 Tick");
         monitorThread = CreateThread(nullptr, 0, MonitorController, nullptr, 0, nullptr);
@@ -1063,7 +1136,11 @@ namespace gloss::gameplay::native {
             }
         }
         stopping.store(true);
-        const bool combatRestored = RestoreShachiHooks();
+        const bool shachiRestored = RestoreShachiHooks();
+        const bool damageRestored = RestoreDamageHooks();
+        const bool cooldownRestored = RestoreCooldownHooks();
+        const bool economyRestored = RestoreExtendedHooks();
+        const bool combatRestored = shachiRestored && damageRestored && cooldownRestored && economyRestored;
         GetBackend().SetRuntimeState(false, "适配器正在停止；模块固定到进程退出");
         if (monitorThread) {
             if (WaitForSingleObject(monitorThread, 1500) != WAIT_OBJECT_0) return false;
@@ -1113,11 +1190,16 @@ namespace gloss::gameplay::native {
         for (const auto& state : snapshot.toggleStates) {
             if (!first) text += ',';
             first = false;
-            text += std::format("{{\"id\":{},\"known\":{},\"enabled\":{},\"reason\":{}}}",
+            text += std::format("{{\"id\":{},\"known\":{},\"enabled\":{},\"reason\":{},\"parameters\":[",
                 JsonString(state.id), state.known, state.enabled, JsonString(state.reason));
+            for (std::size_t i = 0; i < state.parameters.size(); ++i) {
+                if (i) text += ',';
+                text += JsonString(state.parameters[i]);
+            }
+            text += "]}";
         }
-        text += std::format("],\"itemsReady\":{},\"itemCount\":{},\"itemCatalogStatus\":{},\"requests\":[",
-            snapshot.itemsReady, snapshot.items.size(), JsonString(snapshot.itemCatalogStatus));
+        text += std::format("],\"itemPageActive\":{},\"itemsReady\":{},\"itemCount\":{},\"itemCatalogStatus\":{},\"requests\":[",
+            GetBackend().ItemPageActive(), snapshot.itemsReady, snapshot.items.size(), JsonString(snapshot.itemCatalogStatus));
         first = true;
         for (const auto& record : snapshot.requests) {
             if (!first) text += ',';

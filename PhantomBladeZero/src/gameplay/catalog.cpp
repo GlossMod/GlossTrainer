@@ -1,4 +1,5 @@
 #include "catalog.hpp"
+#include "item_quantity.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -29,6 +30,48 @@ namespace gloss::gameplay {
             const auto separator = value.find(':');
             return separator == std::string_view::npos ? UnsignedId(value) :
                 UnsignedId(value.substr(0, separator)) && UnsignedId(value.substr(separator + 1));
+        }
+        struct ExtendedToggle {
+            ToggleDef toggle;
+            std::vector<ParamDef> parameters;
+        };
+        const std::vector<ExtendedToggle>& ExtendedToggles() {
+            static const auto definitions = [] {
+                std::vector<ExtendedToggle> result;
+                const auto add = [&](std::string id, std::string title, std::string description,
+                    int category, std::vector<ParamDef> parameters = {}) {
+                    const auto on = id + "_on", off = id + "_off";
+                    result.push_back({{std::move(id), std::move(title), std::move(description),
+                        category, 1, on, off}, std::move(parameters)});
+                };
+                const auto value = [](std::string label, std::string initial, double low, double high) {
+                    return std::vector<ParamDef>{Number("value", std::move(label), std::move(initial), low, high)};
+                };
+                add("infinite_health", "无限生命", "保护当前生命；关闭后恢复正常生命变化。", 1);
+                add("infinite_pure_shachi", "无限纯杀气", "保护玩家纯杀气消耗；以游戏实际状态为准。", 2);
+                add("invisible", "隐身", "调整敌人对玩家的感知；开关与感知效果需回读验证。", 1);
+                add("weapon_switch_cooldown", "武器切换无冷却", "保护武器切换冷却路径；关闭后恢复正常冷却。", 2);
+                add("instant_break", "瞬间破防", "修改实际破防路径；只在适配完成后可用。", 2);
+                add("poise_damage", "姿态伤害倍率", "调整玩家造成的姿态伤害。", 2, value("姿态伤害倍率", "1", 0.1, 100));
+                add("one_hit_kill", "一击必杀", "调整玩家攻击的伤害结算；效果需实际回读验证。", 2);
+                add("damage", "伤害倍率", "调整玩家造成的伤害，关闭后恢复原始结算。", 2, value("伤害倍率", "1", 0.1, 100));
+                add("defense", "防御倍率", "调整玩家防御结算，关闭后恢复原始结算。", 1, value("防御倍率", "1", 0.1, 100));
+                add("shachi_cost", "杀气消耗倍率", "调整玩家杀气消耗。", 2, value("杀气消耗倍率", "1", 0, 10));
+                add("pure_shachi_gain", "纯杀气获取倍率", "调整玩家纯杀气获取。", 2, value("纯杀气获取倍率", "1", 0, 100));
+                add("infinite_medicine", "无限药品", "阻止药品使用次数降低；关闭后恢复正常消耗。", 1);
+                add("infinite_items", "无限物品", "阻止可消耗物品扣减；不发放新物品。", 3);
+                add("infinite_shop_stock", "无限商店库存", "保护商店库存消耗；需核对实际商店交易路径。", 3);
+                add("move_speed", "移动速度倍率", "调整玩家移动速度；关闭后恢复原值。", 4, value("移动速度倍率", "1", 0.1, 5));
+                add("player_speed", "玩家速度倍率", "调整玩家时间速度，不改变全局时间倍率。", 4, value("玩家速度倍率", "1", 0.1, 5));
+                add("ai_speed", "AI 速度倍率", "调整 AI 时间速度；关闭后恢复原值。", 4, value("AI 速度倍率", "1", 0.1, 5));
+                add("game_speed", "游戏速度倍率", "全局时间倍率，同时影响角色、AI 和世界时间。", 4, value("游戏速度倍率", "1", 0.1, 3));
+                add("jump_height", "跳跃高度倍率", "调整玩家跳跃高度；关闭后恢复原值。", 4, value("跳跃高度倍率", "1", 0.1, 10));
+                add("gravity", "重力倍率", "调整玩家重力；关闭后恢复原值。", 4, value("重力倍率", "1", 0, 5));
+                add("fov", "视野范围", "调整游戏相机视野；关闭后恢复原值。", 5, value("视野角度", "90", 30, 150));
+                add("flight", "飞行", "启用玩家飞行并指定速度；关闭后恢复原移动模式。", 4, value("飞行速度", "600", 50, 5000));
+                return result;
+            }();
+            return definitions;
         }
     }
 
@@ -69,7 +112,7 @@ namespace gloss::gameplay {
             add("refill_ultimate", "终结技大量补给", "提高背包终结技次数和上限至 2147083648 并充满；可能写入进度，不能按普通补满撤销。", 2, 1, "GM_InfiniteUltimateShachi", {}, true);
             add("grant_item", "获取物品", "从物品目录选择并获取指定数量。", 3, 2, "Native_GrantItem",
                 {{"item_key", "物品", ParamType::String, "", 0, 0, 256},
-                 Number("quantity", "数量", "1", 1, 999, ParamType::Int)}, true);
+                 Number("quantity", "数量", "1", 1, MaxItemQuantity, ParamType::Int)}, true);
             add("fill_materials", "材料补满", "材料范围、上限和存档结果待验证。", 3, 2, "GM_FillAllMaterilas", {}, true);
             for (const auto& item : std::vector<std::pair<std::string, std::string>>{
                 {"medicine", "药品"}, {"accessory", "饰品"}}) {
@@ -116,23 +159,28 @@ namespace gloss::gameplay {
             add("is_travel_complete", "查询跨地图任务", "回读跨地图加载任务状态。", 5, 3, "GM_IsTravelComplete");
             add("set_cycle", "设置周目", "周目参数与进度影响未验证。", 5, 3, "GM_SetCycleCount",
                 {Number("cycle", "周目", "1", 0, 999, ParamType::Int)}, true);
-            for (const auto& placeholder : std::vector<std::pair<std::string, std::string>>{
-                {"money", "设置金币"}, {"damage", "伤害倍率"},
-                {"defense", "防御倍率"}, {"poise_damage", "姿态伤害倍率"}, {"move_speed", "移动速度"},
-                {"game_speed", "游戏速度"}, {"cooldown", "技能无冷却"}}) {
-                add(placeholder.first, placeholder.second, "仅有字段或通用接口线索，尚未确认玩家对象与实际玩法路径。",
-                    placeholder.first == "money" ? 3 : (placeholder.first == "stamina" ? 1 :
-                    (placeholder.first == "move_speed" || placeholder.first == "game_speed" ? 4 : 2)), 1, "");
-                if (placeholder.first == "game_speed") {
-                    result.back().page = 1;
-                    result.back().functionName = "SetGlobalTimeDilation";
-                    result.back().description = "全局时间倍率，同时影响角色、AI 和世界时间；设为 1 恢复正常速度。";
-                    result.back().params = {Number("speed", "游戏速度", "1", 0.1, 3.0)};
-                    result.back().unavailableReason = "等待原生入口适配与时间缩放回读验证";
-                } else {
-                    result.back().unavailableReason = "未适配：缺少可验证的玩家属性或调用路径";
+            for (const auto& definition : ExtendedToggles()) {
+                for (const bool enabled : {true, false}) {
+                    const auto& toggle = definition.toggle;
+                    add(enabled ? toggle.onFeatureId : toggle.offFeatureId, toggle.title,
+                        toggle.description, toggle.category, toggle.page, "Native_ExtendedFeature",
+                        enabled ? definition.parameters : std::vector<ParamDef>{}, false,
+                        {toggle.id, enabled ? "on" : "off"});
                 }
             }
+            add("remaining_days", "设置剩余天数", "修改剩余天数；可能写入存档，执行后不会自动重放。", 5, 1,
+                "Native_ExtendedAction", {Number("value", "剩余天数", "66", 0, 66, ParamType::Int)}, true, {"remaining_days"});
+            add("unlock_66_days", "解锁六十六天难度", "解锁六十六天难度选项；执行后不会自动重放。", 5, 1,
+                "Native_ExtendedAction", {}, true, {"unlock_66_days"});
+            for (const bool up : {true, false}) {
+                const std::string id = up ? "flight_up" : "flight_down";
+                add(id, up ? "飞行上升" : "飞行下降", "按指定距离调整飞行高度。", 4, 1,
+                    "Native_ExtendedAction", {Number("value", "移动距离", "100", 1, 10000)}, false, {id});
+            }
+            // Page zero keeps legacy request IDs available without duplicate UI entries.
+            add("game_speed", "游戏速度", "兼容旧调用；使用游戏速度开关管理自动恢复。", 4, 0,
+                "SetGlobalTimeDilation", {Number("speed", "游戏速度", "1", 0.1, 3)});
+            add("money", "设置金币", "缺少可验证的玩家属性或调用路径。", 3, 0, "");
             return result;
         }();
         return features;
@@ -145,7 +193,8 @@ namespace gloss::gameplay {
     }
 
     const std::vector<ToggleDef>& ToggleCatalog() {
-        static const std::vector<ToggleDef> toggles{
+        static const auto toggles = [] {
+            std::vector<ToggleDef> result{
             {"infinite_dark_source", "无限暗源", "补满并锁定械兵使用的暗源；不改变暗源上限。", 2, 1,
                 "infinite_dark_source_on", "infinite_dark_source_off"},
             {"infinite_shachi", "无限杀气", "锁定当前杀气，允许自然恢复；不改变杀气上限。", 2, 1,
@@ -156,8 +205,40 @@ namespace gloss::gameplay {
                 "perfect_dodge_on", "perfect_dodge_off"},
             {"invulnerable", "无敌模式", "能力系统无敌标签；状态根据游戏实时回读。", 1, 1,
                 "state_invulnerable_on", "state_invulnerable_off"}
-        };
+            };
+            for (const auto& definition : ExtendedToggles()) result.push_back(definition.toggle);
+            return result;
+        }();
         return toggles;
+    }
+
+    const std::vector<ParamDef>& ToggleParameters(const ToggleDef& toggle) {
+        static const std::vector<ParamDef> empty;
+        const auto* feature = FindFeature(toggle.onFeatureId);
+        return feature ? feature->params : empty;
+    }
+
+    std::vector<std::string> DefaultParameters(const FeatureDef& feature) {
+        std::vector<std::string> values;
+        for (const auto& param : feature.params) values.push_back(param.defaultValue);
+        return values;
+    }
+
+    bool EquivalentParameters(const FeatureDef& feature, const std::vector<std::string>& left,
+        const std::vector<std::string>& right) {
+        std::string error;
+        if (!ValidateParameters(feature, left, error) || !ValidateParameters(feature, right, error)) return false;
+        for (std::size_t i = 0; i < left.size(); ++i) {
+            if (left[i] == right[i]) continue;
+            if (feature.params[i].type == ParamType::Float || feature.params[i].type == ParamType::Int) {
+                double a{}, b{};
+                std::from_chars(left[i].data(), left[i].data() + left[i].size(), a);
+                std::from_chars(right[i].data(), right[i].data() + right[i].size(), b);
+                if (std::abs(a - b) <= 0.000001 * std::max({1.0, std::abs(a), std::abs(b)})) continue;
+            }
+            return false;
+        }
+        return true;
     }
 
     bool ValidateParameters(const FeatureDef& feature, const std::vector<std::string>& values, std::string& error) {

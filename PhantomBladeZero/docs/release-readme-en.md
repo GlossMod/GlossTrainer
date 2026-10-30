@@ -8,7 +8,7 @@ GlossTrainer v{{VERSION}} · Windows x64
 
 1. Save and exit the game normally, then extract the release ZIP.
 2. Copy `version.dll`, `version.ini` and the `scripts` folder into `platform/steam`, alongside that directory's `PBZ.exe`.
-3. Start the game and press **Insert** (the default) to show or hide the menu. Click the key box under Settings > Menu and layout to record a new combination or restore the default. Ctrl / Shift / Alt are supported; Esc cancels. Changes are saved automatically. Feature hotkeys are initially unbound; assign them on the Features page.
+3. Start the game and press **Insert** (the default) to show or hide the menu. Click the key box under Settings > Menu and layout to record a new combination or restore the default. Ctrl / Shift / Alt are supported; Esc cancels. Changes are saved automatically. Flight up/down defaults to **Page Up / Page Down**, moving 100 units per press. Other new feature hotkeys start unbound. Configure them on the Features page; existing bindings and explicitly cleared bindings are preserved.
 
 ```text
 PBZ/platform/steam/
@@ -25,10 +25,17 @@ Configuration and logs are stored in `scripts/GlossTrainer/PBZ/`. No default pre
 
 ## Features
 
-- Infinite Sha Chi, Infinite Dark Source, automatic perfect deflect, automatic perfect dodge and invulnerability.
+- Infinite health, Sha Chi, pure Sha Chi segments and Dark Source; automatic perfect deflect, automatic perfect dodge and invulnerability.
+- Damage, defense, poise damage and pure Sha Chi gain multipliers; one-hit kill, instant break, stealth and weapon-switch cooldown.
+- Sha Chi cost multiplier for heavy attacks and Shachi ability Blueprint costs. Damage-induced Sha Chi loss is unchanged; native FengLei conversion is not covered.
+- No medicine, item or shop-stock consumption.
+- Movement, player, AI and global game speed, jump height, gravity and FOV. Noclip flight uses configurable Page Up / Page Down keys, default step 100. Flight stays enabled when the exit capsule is obstructed.
+- Edit remaining days and unlock the 66-day difficulty; progress is saved by the game.
 - Read health, set maximum health and heal, restore health, refill medicine and ultimate resources. Some actions may change save data.
 - Live item catalog and icons, category search, quantity confirmation and verified inventory increments. Unique items are limited to one per request; ordinary items to 999.
-- Remember verified toggles and restore them when the game and feature are ready. One-time actions are never replayed.
+- Consciousness Dust no longer has the trainer's 999-per-request limit. Enter the desired amount directly; the resulting total must fit the game's signed 32-bit integer range (up to 2,147,483,647).
+- Cached entries and resolved names appear first, with descriptions filled in batches. Granting remains disabled until the current scene's catalog has been validated.
+- Remember verified toggles and multiplier values and restore them when the game and feature are ready. Failed parameter edits keep the last successful value. One-time actions are never replayed.
 - Custom keyboard hotkeys, Chinese / English interface, light / dark themes, scaling and saved layout.
 - Game-specific `PhantomBladeZero/v` update channel and manual download links in Settings and About.
 

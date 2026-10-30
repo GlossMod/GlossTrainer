@@ -58,6 +58,7 @@
             return CombatBindingCurrent();
         }
         void ProtectShachi(void* object, const void* attribute, float* proposed, bool baseValue) noexcept {
+            ExtendedResourcePreChange(object, attribute, proposed, baseValue);
             // No UObject calls, allocation or exceptions in this leaf. The engine already
             // owns the parameter; never patch permanent attribute data or its maximum.
             __try {
@@ -323,14 +324,12 @@
                 shachiEnabled = darkSourceEnabled = perfectDodgeEnabled = perfectDeflectEnabled = false;
                 // A fault forbids further engine calls, but local hooks can stop
                 // even when no valid pawn remains. Never clear an unverified tag.
-                if (!deflectContribution.owned || (!faulted.load() && RemoveDeflectContribution()))
-                    combatCleanupComplete.store(true);
-                return true;
+                return !deflectContribution.owned || (!faulted.load() && RemoveDeflectContribution());
             }
             return false;
         }
         void CombatTick(const Context& context) {
-            if (CombatCleanup()) return;
+            if (combatCleanupRequested.load()) { CombatCleanup(); return; }
             if (!perfectDodgeEnabled && !perfectDeflectEnabled) return;
             if (!CombatBindingCurrent()) return;
             if (perfectDeflectEnabled && !EnsurePerfectDeflect(context)) {

@@ -43,6 +43,11 @@ namespace gloss::gameplay {
     const std::vector<FeatureDef>& Catalog();
     const std::vector<ToggleDef>& ToggleCatalog();
     const FeatureDef* FindFeature(std::string_view id);
+    const std::vector<ParamDef>& ToggleParameters(const ToggleDef& toggle);
+    std::vector<std::string> DefaultParameters(const FeatureDef& feature);
+    // Compares validated values by type; numeric serialization may differ.
+    bool EquivalentParameters(const FeatureDef& feature, const std::vector<std::string>& left,
+        const std::vector<std::string>& right);
     // Validates user parameters only. Name accepts an existing FName comparison ID
     // in decimal or 0x hex form, optionally followed by :number (both uint32).
     bool ValidateParameters(const FeatureDef& feature, const std::vector<std::string>& values,

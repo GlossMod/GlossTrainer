@@ -6,6 +6,7 @@
 #include "update.hpp"
 #include "gameplay/backend.hpp"
 #include "gameplay/catalog.hpp"
+#include "gameplay/item_quantity.hpp"
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <shellapi.h>
@@ -90,6 +91,7 @@ namespace gloss::overlay
             std::string key;
             int quantity{1};
             std::uint64_t generation{};
+            std::array<char, 64> quantityText{'1'};
         } itemSelection;
         struct ItemReceipt
         {
@@ -124,17 +126,18 @@ namespace gloss::overlay
             std::vector<hotkeys::Action> actions;
             for (const auto& toggle : gameplay::ToggleCatalog())
             {
-                if (toggle.page == 1 && gameplay::FindFeature(toggle.onFeatureId) && gameplay::FindFeature(toggle.offFeatureId))
-                    actions.push_back({ToggleHotkeyId(toggle.id), {}, toggle.title});
+                const auto* on = gameplay::FindFeature(toggle.onFeatureId);
+                if (toggle.page == 1 && on && gameplay::FindFeature(toggle.offFeatureId))
+                    actions.push_back({ToggleHotkeyId(toggle.id), gameplay::DefaultParameters(*on), toggle.title});
             }
             for (const auto& feature : gameplay::Catalog())
             {
                 const bool paired = std::any_of(gameplay::ToggleCatalog().begin(), gameplay::ToggleCatalog().end(),
                     [&](const auto& toggle) { return toggle.onFeatureId == feature.id || toggle.offFeatureId == feature.id; });
                 if (feature.page != 1 || feature.functionName.empty() || paired) continue;
-                std::vector<std::string> defaults;
-                for (const auto& param : feature.params) defaults.push_back(param.defaultValue);
-                actions.push_back({ActionHotkeyId(feature.id), std::move(defaults), feature.title});
+                const hotkeys::Chord defaultChord = feature.id == "flight_up" ? hotkeys::Chord{VK_PRIOR, 0} :
+                    feature.id == "flight_down" ? hotkeys::Chord{VK_NEXT, 0} : hotkeys::Chord{};
+                actions.push_back({ActionHotkeyId(feature.id), gameplay::DefaultParameters(feature), feature.title, defaultChord});
             }
             auto& registry = hotkeys::GetRegistry();
             registry.Configure(std::move(actions));
@@ -519,7 +522,24 @@ namespace gloss::overlay
                 ImGui::TextDisabled(Text("尚无请求。点击操作按钮后在此查看执行进度。"));
             EndCard();
         }
-        std::vector<ParameterEditor> &EditorsFor(const gameplay::FeatureDef &feature)
+        std::vector<std::string> SavedToggleParameters(const gameplay::ToggleDef& definition,
+            const gameplay::Snapshot& snapshot)
+        {
+            const auto* feature = gameplay::FindFeature(definition.onFeatureId);
+            if (!feature) return {};
+            std::string error;
+            const auto preference = std::find_if(snapshot.togglePreferences.begin(), snapshot.togglePreferences.end(),
+                [&](const auto& value) { return value.id == definition.id; });
+            if (preference != snapshot.togglePreferences.end() && gameplay::ValidateParameters(*feature, preference->parameters, error))
+                return preference->parameters;
+            const auto observed = std::find_if(snapshot.toggleStates.begin(), snapshot.toggleStates.end(),
+                [&](const auto& value) { return value.id == definition.id && value.known; });
+            if (observed != snapshot.toggleStates.end() && gameplay::ValidateParameters(*feature, observed->parameters, error))
+                return observed->parameters;
+            return gameplay::DefaultParameters(*feature);
+        }
+        std::vector<ParameterEditor> &EditorsFor(const gameplay::FeatureDef &feature,
+            const std::vector<std::string>* initialValues = nullptr)
         {
             const auto [entry, inserted] = parameterEditors.try_emplace(feature.id);
             if (inserted)
@@ -530,7 +550,8 @@ namespace gloss::overlay
                 for (std::size_t parameterIndex = 0; parameterIndex < feature.params.size(); ++parameterIndex)
                 {
                     const auto& param = feature.params[parameterIndex];
-                    const auto& initial = restored ? restored->parameters[parameterIndex] : param.defaultValue;
+                    const auto& initial = initialValues ? (*initialValues)[parameterIndex] :
+                        restored ? restored->parameters[parameterIndex] : param.defaultValue;
                     ParameterEditor editor;
                     editor.text.resize(param.maxLength + 1);
                     std::copy_n(initial.data(), std::min(initial.size(), param.maxLength), editor.text.data());
@@ -779,8 +800,10 @@ namespace gloss::overlay
             const bool enabled = known && observed->enabled;
             const auto *onFeature = gameplay::FindFeature(definition.onFeatureId);
             const auto *offFeature = gameplay::FindFeature(definition.offFeatureId);
-            const bool capable = onFeature && offFeature && FeatureReady(snapshot, *onFeature) && FeatureReady(snapshot, *offFeature);
+            const bool onReady = onFeature && FeatureReady(snapshot, *onFeature);
+            const bool offReady = offFeature && FeatureReady(snapshot, *offFeature);
             const bool pending = ActiveRequest(snapshot, definition.onFeatureId) || ActiveRequest(snapshot, definition.offFeatureId);
+            const auto savedParameters = SavedToggleParameters(definition, snapshot);
             std::string reason = settings.debug ? (observed == snapshot.toggleStates.end() ? "尚无游戏状态回读" : observed->reason) :
                 known ? "切换此功能的开启或关闭状态。" : "暂未取得当前状态，请进入存档后稍候。";
             if (!onFeature || !offFeature)
@@ -800,24 +823,72 @@ namespace gloss::overlay
             RowText(definition.title.c_str(), scale);
             RowTooltip(description, reason, scale);
             ImGui::TableSetColumnIndex(1);
-            HotkeyCell(ToggleHotkeyId(definition.id), {}, scale);
+            hotkeys::GetRegistry().SetParameters(ToggleHotkeyId(definition.id), savedParameters);
+            HotkeyCell(ToggleHotkeyId(definition.id), savedParameters, scale);
             ImGui::TableSetColumnIndex(2);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextDisabled("—");
+            std::vector<std::string> values;
+            std::string error;
+            bool valid = onFeature != nullptr;
+            if (onFeature && !gameplay::ToggleParameters(definition).empty())
+            {
+                auto& editors = EditorsFor(*onFeature, &savedParameters);
+                if (onFeature->params.size() == 1)
+                {
+                    const float inputWidth = std::max(50 * scale, ImGui::GetContentRegionAvail().x - 72 * scale);
+                    ParameterInput(onFeature->params.front(), editors.front(), false, inputWidth);
+                    ImGui::SameLine(0, 8 * scale);
+                }
+                else
+                {
+                    for (std::size_t index = 0; index < onFeature->params.size(); ++index)
+                        ParameterInput(onFeature->params[index], editors[index]);
+                }
+                values = ParameterValues(*onFeature, editors);
+                valid = gameplay::ValidateParameters(*onFeature, values, error);
+                ImGui::BeginDisabled(!known || !enabled || !onReady || !valid || pending);
+                if (ImGui::Button(WidgetLabel("应用", "apply-toggle-parameters"), ImVec2(64 * scale, 0)))
+                {
+                    const auto result = gameplay::GetBackend().Submit(definition.onFeatureId, values);
+                    submissionNotice = {true, result.accepted, result.requestId, definition.onFeatureId, result.message};
+                }
+                ImGui::EndDisabled();
+                RowTooltip(description, !valid ? error : "开启后点击应用更新参数。", scale);
+            }
+            else
+            {
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextDisabled("—");
+            }
             ImGui::TableSetColumnIndex(3);
             const auto origin = ImGui::GetCursorScreenPos();
             const float contentHeight = rowHeight - ImGui::GetStyle().CellPadding.y * 2;
+            if (!known && offReady)
+            {
+                // An uncertain partial write can still retain a valid recovery path.
+                // Recovery is an explicit off request and ignores editor drafts.
+                ImGui::BeginDisabled(pending);
+                if (ImGui::Button(WidgetLabel("关闭", "recover-toggle-off"), ImVec2(64 * scale, 0)))
+                {
+                    const auto result = gameplay::GetBackend().Submit(definition.offFeatureId, {});
+                    submissionNotice = {true, result.accepted, result.requestId, definition.offFeatureId, result.message};
+                }
+                ImGui::EndDisabled();
+                RowTooltip(description, pending ? reason : "当前状态未确认；点击关闭尝试恢复原状态。", scale);
+                ImGui::PopID();
+                return;
+            }
             ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + (contentHeight - 20 * scale) * .5f));
-            ImGui::BeginDisabled(!capable || !known || pending);
+            // A bad editor draft must never prevent disabling an active feature.
+            ImGui::BeginDisabled(!known || pending || (enabled ? !offReady : (!onReady || !valid)));
             if (Toggle("##toggle", enabled, known, scale))
             {
                 // The target action is based only on the observed game state, never request history.
                 const auto &featureId = enabled ? definition.offFeatureId : definition.onFeatureId;
-                const auto result = gameplay::GetBackend().Submit(featureId);
+                const auto result = gameplay::GetBackend().Submit(featureId, enabled ? std::vector<std::string>{} : values);
                 submissionNotice = {true, result.accepted, result.requestId, featureId, result.message};
             }
             ImGui::EndDisabled();
-            RowTooltip(description, reason, scale);
+            RowTooltip(description, !enabled && !valid ? error : reason, scale);
             const char *label = Text(pending ? "处理中" : !known ? "状态未知" : enabled ? "已启用" : "已关闭");
             ImGui::PushFont(nullptr, 14);
             const auto textSize = ImGui::CalcTextSize(label);
@@ -865,7 +936,8 @@ namespace gloss::overlay
             const bool valid = gameplay::ValidateParameters(feature, values, error);
             if (valid) hotkeys::GetRegistry().SetParameters(ActionHotkeyId(feature.id), values);
             ImGui::BeginDisabled(!ready || !valid || active);
-            if (ImGui::Button(WidgetLabel(feature.params.empty() ? "执行" : "应用", "submit"), ImVec2((feature.params.empty() ? 84 : 64) * scale, 0)))
+            const bool flightStep = feature.id == "flight_up" || feature.id == "flight_down";
+            if (ImGui::Button(WidgetLabel(feature.params.empty() || flightStep ? "执行" : "应用", "submit"), ImVec2((feature.params.empty() ? 84 : 64) * scale, 0)))
             {
                 const auto result = gameplay::GetBackend().Submit(feature.id, std::move(values));
                 submissionNotice = {true, result.accepted, result.requestId, feature.id, result.message};
@@ -981,7 +1053,7 @@ namespace gloss::overlay
                 ImGui::TableSetupScrollFreeze(0, 1);
                 ImGui::TableSetupColumn(Text("功能"), ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableSetupColumn(Text("快捷键"), ImGuiTableColumnFlags_WidthFixed, 108 * scale);
-                ImGui::TableSetupColumn(Text("参数"), ImGuiTableColumnFlags_WidthFixed, 170 * scale);
+                ImGui::TableSetupColumn(Text("参数"), ImGuiTableColumnFlags_WidthFixed, 190 * scale);
                 ImGui::TableSetupColumn(Text("状态"), ImGuiTableColumnFlags_WidthFixed, 134 * scale);
                 ImGui::TableNextRow(ImGuiTableRowFlags_Headers, 36 * scale);
                 for (int column = 0; column < 4; ++column)
@@ -1135,7 +1207,13 @@ namespace gloss::overlay
                             [&](const auto& value) { return value.id == definition->id; });
                         if (state == snapshot.toggleStates.end() || !state->known) error = "尚未取得功能的当前状态。";
                         else if (ActiveRequest(snapshot, definition->onFeatureId) || ActiveRequest(snapshot, definition->offFeatureId)) error = "请求正在处理中，请稍候。";
-                        else feature = gameplay::FindFeature(state->enabled ? definition->offFeatureId : definition->onFeatureId);
+                        else
+                        {
+                            feature = gameplay::FindFeature(state->enabled ? definition->offFeatureId : definition->onFeatureId);
+                            // Shortcuts use the last successful on-parameters, never
+                            // unsubmitted editor drafts or stale queued binding values.
+                            invocation.parameters = state->enabled ? std::vector<std::string>{} : SavedToggleParameters(*definition, snapshot);
+                        }
                     }
                 }
                 else if (invocation.action.starts_with("action:")) feature = gameplay::FindFeature(std::string_view(invocation.action).substr(7));
@@ -1246,10 +1324,10 @@ namespace gloss::overlay
             return std::any_of(itemReceipts.begin(), itemReceipts.end(),
                 [&](const auto &receipt) { return receipt.key == key; });
         }
-        bool BrowsableItem(const gameplay::ItemEntry &item)
+        bool BrowsableItem(const gameplay::ItemEntry &item, bool loading)
         {
             return settings.debug || (!item.name.empty() && item.name != "未命名" &&
-                (item.available || (item.maxQuantity == 1 && item.owned > 0)));
+                (loading || item.available || (item.maxQuantity == 1 && item.owned > 0)));
         }
         void ItemThumbnail(const gameplay::ItemEntry &item, ImVec2 position, ImVec2 size, float scale)
         {
@@ -1303,8 +1381,10 @@ namespace gloss::overlay
                     ImGui::TextColored(accent, Text("正在获取，请稍候…"));
                 else if (ownedUnique)
                     ImGui::TextDisabled(Text("已拥有，不能重复获取。"));
-                else if (!snapshot.ready || !snapshot.itemsReady)
+                else if (!snapshot.ready)
                     ImGui::TextDisabled(Text("进入游戏存档后获取。"));
+                else if (!snapshot.itemsReady)
+                    ImGui::TextDisabled(Text("物品列表正在加载，请稍候。"));
                 else if (item.available)
                     ImGui::TextColored(accent, Text("点击图标获取"));
                 else
@@ -1363,6 +1443,8 @@ namespace gloss::overlay
         }
         void ItemsPage(const gameplay::Snapshot &snapshot, float scale)
         {
+            const auto browsable = [&](const gameplay::ItemEntry &item)
+                { return BrowsableItem(item, !snapshot.itemsReady); };
             static std::array<char, 256> search{};
             static std::string category;
             static std::size_t page{}, lastFingerprint{};
@@ -1391,7 +1473,7 @@ namespace gloss::overlay
             }
             std::vector<std::string> itemCategories;
             for (const auto &item : snapshot.items)
-                if (BrowsableItem(item) && !item.category.empty() &&
+                if (browsable(item) && !item.category.empty() &&
                     std::find(itemCategories.begin(), itemCategories.end(), item.category) == itemCategories.end())
                     itemCategories.push_back(item.category);
             if (!category.empty() && std::find(itemCategories.begin(), itemCategories.end(), category) == itemCategories.end())
@@ -1404,7 +1486,7 @@ namespace gloss::overlay
             const auto right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
             Label("物品", 24, ImGui::GetStyleColorVec4(ImGuiCol_Text));
             ImGui::SameLine(0, 16 * scale);
-            const auto browsableCount = std::count_if(snapshot.items.begin(), snapshot.items.end(), BrowsableItem);
+            const auto browsableCount = std::count_if(snapshot.items.begin(), snapshot.items.end(), browsable);
             ImGui::TextDisabled(Text("共 %zu 项"), static_cast<std::size_t>(browsableCount));
             ImGui::SetCursorPos(ImVec2(right - 268 * scale, headingY));
             ImGui::SetNextItemWidth(268 * scale);
@@ -1468,7 +1550,7 @@ namespace gloss::overlay
             const auto query = SearchText(search.data());
             std::vector<const gameplay::ItemEntry *> filtered;
             for (const auto &item : snapshot.items)
-                if (BrowsableItem(item) && (category.empty() || item.category == category) &&
+                if (browsable(item) && (category.empty() || item.category == category) &&
                     (SearchText(item.name).find(query) != std::string::npos ||
                         (item.key == "resource:consciousness_dust" && std::string_view("意识粉尘").find(query) != std::string_view::npos) ||
                         (settings.debug && SearchText(item.key).find(query) != std::string::npos)))
@@ -1564,18 +1646,56 @@ namespace gloss::overlay
                     if (item.owned >= 0)
                         ImGui::TextDisabled(Text("已持有：%lld"), static_cast<long long>(item.owned));
                     const int maximum = std::max(1, item.maxQuantity);
-                    ImGui::TextDisabled(Text("数量（1 ～ %d）"), maximum);
-                    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+                    const bool unrestricted = maximum == gameplay::MaxItemQuantity;
+                    if (unrestricted)
+                        ImGui::TextDisabled("%s", Text("数量（至少 1）"));
+                    else
+                        ImGui::TextDisabled(Text("数量（1 ～ %d）"), maximum);
+                    bool validQuantity = true;
                     ImGui::BeginDisabled(maximum == 1);
-                    if (ImGui::InputInt("##quantity", &itemSelection.quantity, 1, 10))
-                        itemSelection.quantity = std::clamp(itemSelection.quantity, 1, maximum);
+                    if (unrestricted)
+                    {
+                        const float buttonSize = ImGui::GetFrameHeight();
+                        const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+                        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 2 * (buttonSize + spacing));
+                        ImGui::InputText("##quantity", itemSelection.quantityText.data(), itemSelection.quantityText.size(),
+                            ImGuiInputTextFlags_CharsDecimal);
+                        validQuantity = gameplay::ParseItemQuantity(itemSelection.quantityText.data(), itemSelection.quantity);
+                        const auto stepQuantity = [&](int step) {
+                            itemSelection.quantity += step;
+                            const auto result = std::to_chars(itemSelection.quantityText.data(),
+                                itemSelection.quantityText.data() + itemSelection.quantityText.size() - 1, itemSelection.quantity);
+                            *result.ptr = '\0';
+                        };
+                        ImGui::SameLine(0, spacing);
+                        ImGui::PushButtonRepeat(true);
+                        ImGui::BeginDisabled(!validQuantity || itemSelection.quantity <= 1);
+                        if (ImGui::Button("-##quantity-minus", ImVec2(buttonSize, buttonSize)))
+                            stepQuantity(ImGui::GetIO().KeyCtrl ? -std::min(10, itemSelection.quantity - 1) : -1);
+                        ImGui::EndDisabled();
+                        ImGui::SameLine(0, spacing);
+                        ImGui::BeginDisabled(!validQuantity || itemSelection.quantity >= maximum);
+                        if (ImGui::Button("+##quantity-plus", ImVec2(buttonSize, buttonSize)))
+                            stepQuantity(ImGui::GetIO().KeyCtrl ? std::min(10, maximum - itemSelection.quantity) : 1);
+                        ImGui::EndDisabled();
+                        ImGui::PopButtonRepeat();
+                    }
+                    else
+                    {
+                        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+                        if (ImGui::InputInt("##quantity", &itemSelection.quantity, 1, 10))
+                            itemSelection.quantity = std::clamp(itemSelection.quantity, 1, maximum);
+                    }
                     ImGui::EndDisabled();
                     const bool busy = ItemPending(item.key);
+                    const bool fitsInventory = !unrestricted || item.owned < 0 ||
+                        gameplay::ItemQuantityFitsInventory(item.owned, itemSelection.quantity);
                     const bool canGrant = snapshot.ready && snapshot.itemsReady && item.available && item.maxQuantity > 0 && !busy &&
-                        itemSelection.quantity >= 1 && itemSelection.quantity <= maximum;
+                        validQuantity && fitsInventory && itemSelection.quantity >= 1 && itemSelection.quantity <= maximum;
                     if (!canGrant)
                         ImGui::TextWrapped("%s", Text(busy ? "正在获取此物品，请稍候。" : !snapshot.ready ? "请先进入游戏存档。" :
-                            !snapshot.itemsReady ? "物品列表正在加载，请稍候。" : item.reason.empty() ? "此物品暂不可获取。" : item.reason.c_str()));
+                            !snapshot.itemsReady ? "物品列表正在加载，请稍候。" : !validQuantity ? "请输入有效的正整数。" :
+                            !fitsInventory ? "当前数量加请求数量会溢出，未执行" : item.reason.empty() ? "此物品暂不可获取。" : item.reason.c_str()));
                     ImGui::Spacing();
                     if (ImGui::Button(WidgetLabel("取消"), ImVec2(140 * scale, 32 * scale)))
                     {

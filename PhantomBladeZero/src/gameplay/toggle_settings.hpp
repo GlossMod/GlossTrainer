@@ -9,11 +9,18 @@
 #include <string_view>
 
 namespace gloss::gameplay::toggle_settings {
-    using Data = std::map<std::string, bool>;
+    struct Entry {
+        bool enabled{};
+        std::vector<std::string> parameters;
+        operator bool() const { return enabled; }
+        Entry& operator=(bool value) { enabled = value; return *this; }
+    };
+    using Data = std::map<std::string, Entry>;
 
     inline Data Defaults() {
         Data data;
-        for (const auto& toggle : ToggleCatalog()) data.emplace(toggle.id, false);
+        for (const auto& toggle : ToggleCatalog())
+            data.emplace(toggle.id, Entry{false, DefaultParameters(*FindFeature(toggle.onFeatureId))});
         return data;
     }
 
@@ -38,8 +45,9 @@ namespace gloss::gameplay::toggle_settings {
         std::ifstream stream(file, std::ios::binary);
         if (!stream) { error = "无法读取功能设置文件"; return false; }
         auto parsed = Defaults();
+        std::map<std::string, std::map<std::string, std::string>> parameters;
         std::string section, line;
-        bool versionValid{};
+        std::string version;
         while (std::getline(stream, line)) {
             auto text = Trim(line);
             if (text.starts_with("\xef\xbb\xbf")) text.remove_prefix(3);
@@ -52,15 +60,34 @@ namespace gloss::gameplay::toggle_settings {
             if (equal == text.npos) continue;
             const auto key = Trim(text.substr(0, equal));
             const auto value = Trim(text.substr(equal + 1));
-            if (section == "meta" && key == "version") versionValid = value == "1";
+            if (section == "meta" && key == "version") version = value;
             else if (section == "toggles" && (value == "0" || value == "1")) {
                 const auto found = parsed.find(std::string(key));
                 if (found != parsed.end()) found->second = value == "1";
+            } else if (section.starts_with("parameters.")) {
+                const auto id = section.substr(std::string_view("parameters.").size());
+                if (parsed.contains(id)) parameters[id][std::string(key)] = value;
             }
         }
-        if (!stream.eof() || !versionValid) {
+        if (!stream.eof() || (version != "1" && version != "2")) {
             error = "功能设置文件格式或版本无效，使用默认关闭状态";
             return false;
+        }
+        if (version == "2") {
+            for (const auto& toggle : ToggleCatalog()) {
+                auto& entry = parsed.at(toggle.id);
+                const auto* feature = FindFeature(toggle.onFeatureId);
+                const auto saved = parameters.find(toggle.id);
+                if (saved == parameters.end()) continue;
+                for (std::size_t i = 0; i < feature->params.size(); ++i) {
+                    const auto value = saved->second.find(feature->params[i].name);
+                    if (value != saved->second.end()) entry.parameters[i] = value->second;
+                }
+                if (!ValidateParameters(*feature, entry.parameters, error)) {
+                    error = "功能设置参数无效：" + toggle.id + "；" + error;
+                    return false;
+                }
+            }
         }
         data = std::move(parsed);
         return true;
@@ -70,10 +97,23 @@ namespace gloss::gameplay::toggle_settings {
     // atomically on the same volume; every failure preserves the original file.
     inline bool Save(const std::filesystem::path& file, const Data& data, std::string& error) {
         error.clear();
-        std::string text = "[meta]\nversion=1\n\n[toggles]\n";
+        std::string text = "[meta]\nversion=2\n\n[toggles]\n";
         for (const auto& toggle : ToggleCatalog()) {
             const auto value = data.find(toggle.id);
             text += toggle.id + (value != data.end() && value->second ? "=1\n" : "=0\n");
+        }
+        for (const auto& toggle : ToggleCatalog()) {
+            const auto* feature = FindFeature(toggle.onFeatureId);
+            if (feature->params.empty()) continue;
+            const auto value = data.find(toggle.id);
+            const auto parameters = value != data.end() ? value->second.parameters : DefaultParameters(*feature);
+            if (!ValidateParameters(*feature, parameters, error)) {
+                error = "功能设置参数无效，保留原文件：" + toggle.id + "；" + error;
+                return false;
+            }
+            text += "\n[parameters." + toggle.id + "]\n";
+            for (std::size_t i = 0; i < feature->params.size(); ++i)
+                text += feature->params[i].name + "=" + parameters[i] + "\n";
         }
         std::error_code fileError;
         if (!file.parent_path().empty()) std::filesystem::create_directories(file.parent_path(), fileError);

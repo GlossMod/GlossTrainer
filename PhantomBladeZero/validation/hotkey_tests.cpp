@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <thread>
 
 namespace {
@@ -144,6 +145,34 @@ namespace {
         CHECK(loaded.Load(root / "does-not-exist.ini", error));
         CHECK(!r.Save(root / "hotkeys-roundtrip.ini" / "impossible.ini", error));
     }
+    void TestRemovedUpgradeBindingsCannotLoadOrInvoke(const std::filesystem::path& root) {
+        const auto path = root / "removed-upgrade.ini";
+        std::ofstream legacy(path, std::ios::binary);
+        legacy << "[toggle:ignore_upgrade_requirements]\nkey=85\nmodifiers=1\ncount=0\n"
+            "[action:ignore_upgrade_requirements_on]\nkey=86\nmodifiers=1\ncount=0\n"
+            "[action:ignore_upgrade_requirements_off]\nkey=87\nmodifiers=1\ncount=0\n"
+            "[action:heal]\nkey=72\nmodifiers=1\ncount=0\n";
+        legacy.close();
+        Registry registry; registry.Configure(Actions());
+        std::string error;
+        CHECK(registry.Load(path, error));
+        CHECK(registry.Get("action:heal")->chord == gloss::hotkeys::Chord{'H', Control});
+        for (const auto id : {"toggle:ignore_upgrade_requirements", "action:ignore_upgrade_requirements_on",
+            "action:ignore_upgrade_requirements_off"}) {
+            CHECK(!registry.Get(id));
+            CHECK(!registry.Set(id, {'U', Control}, {}, error));
+        }
+        for (const auto key : {'U', 'V', 'W'}) {
+            CHECK(!registry.Matches({static_cast<unsigned>(key), Control}, true, false));
+            CHECK(!registry.QueueKey({static_cast<unsigned>(key), Control}, true, false));
+        }
+        CHECK(registry.Drain().empty());
+        CHECK(registry.Save(path, error));
+        std::ifstream saved(path, std::ios::binary);
+        const std::string text{std::istreambuf_iterator<char>{saved}, {}};
+        CHECK(text.find("ignore_upgrade_requirements") == std::string::npos);
+        CHECK(text.find("action:heal") != std::string::npos);
+    }
     void TestConcurrentInputQueue() {
         Registry r; r.Configure(Actions()); std::string error;
         CHECK(r.Set("action:heal", {'H', 0}, {}, error));
@@ -158,13 +187,20 @@ namespace {
     void TestMenuBindingAndConflicts(const std::filesystem::path& root) {
         Registry r; r.Configure(Actions()); std::string error;
         const auto path = root / "menu-hotkeys.ini";
+        const auto saveMenu = [&](gloss::hotkeys::Chord chord) {
+            const bool saved = r.SetMenu(chord, path, error);
+            const auto lastError = GetLastError();
+            if (!saved) std::cerr << "Menu save failed for key=" << chord.key << ", modifiers=" << chord.modifiers
+                << ": " << error << "; win32=" << lastError << "; path=" << path.string() << '\n';
+            return saved;
+        };
         CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0});
         CHECK(r.MatchesMenu({VK_INSERT, 0}, true));
         CHECK(!r.MatchesMenu({VK_INSERT, 0}, false));
         CHECK(!r.MatchesMenu({VK_INSERT, Control}, true));
         CHECK(!r.Set("action:heal", {VK_INSERT, 0}, {}, error));
         CHECK(error.find("界面开关") != std::string::npos);
-        CHECK(r.SetMenu({'M', Control | Shift}, path, error));
+        CHECK(saveMenu({'M', Control | Shift}));
         CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control | Shift});
         CHECK(!r.MatchesMenu({VK_INSERT, 0}, true));
         CHECK(r.MatchesMenu({'M', Control | Shift}, true));
@@ -178,7 +214,7 @@ namespace {
         CHECK(error.find("恢复生命") != std::string::npos);
         CHECK(r.MenuChord() == gloss::hotkeys::Chord{'M', Control | Shift});
         CHECK(r.Set("action:heal", {}, {}, error));
-        CHECK(r.SetMenu({VK_INSERT, 0}, path, error));
+        CHECK(saveMenu({VK_INSERT, 0}));
         CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0});
         for (const auto chord : {gloss::hotkeys::Chord{}, gloss::hotkeys::Chord{VK_ESCAPE, 0}, gloss::hotkeys::Chord{VK_DELETE, Control}, gloss::hotkeys::Chord{VK_TAB, 0},
             gloss::hotkeys::Chord{VK_SHIFT, 0}, gloss::hotkeys::Chord{VK_F4, Alt}, gloss::hotkeys::Chord{VK_SPACE, Alt}, gloss::hotkeys::Chord{'K', Windows},
@@ -188,7 +224,7 @@ namespace {
             CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_INSERT, 0});
         }
         for (unsigned modifiers = 0; modifiers < 8; ++modifiers) {
-            CHECK(r.SetMenu({VK_HOME, modifiers}, path, error));
+            CHECK(saveMenu({VK_HOME, modifiers}));
             CHECK(r.MenuChord() == gloss::hotkeys::Chord{VK_HOME, modifiers});
         }
         r.Configure({});
@@ -287,6 +323,27 @@ namespace {
         CHECK(again.MenuChord() == restored.MenuChord());
         CHECK(again.Get("action:speed")->parameters[0] == "1.25");
     }
+    void TestTransientReplacementLock(const std::filesystem::path& root) {
+        Registry registry; registry.Configure(Actions()); std::string error;
+        const auto path = root / "menu-transient-lock.ini";
+        CHECK(registry.SetMenu({'M', Control}, path, error));
+        const auto file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        CHECK(file != INVALID_HANDLE_VALUE);
+        if (file == INVALID_HANDLE_VALUE) return;
+        // Prove this handle denies delete/rename before releasing it during the
+        // production save. The persistent-lock case above must still fail.
+        const auto deletion = CreateFileW(path.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, 0, nullptr);
+        CHECK(deletion == INVALID_HANDLE_VALUE);
+        if (deletion != INVALID_HANDLE_VALUE) CloseHandle(deletion);
+        std::thread release([file] { Sleep(10); CloseHandle(file); });
+        CHECK(registry.SetMenu({'N', Alt}, path, error));
+        release.join();
+        CHECK(registry.MenuChord() == gloss::hotkeys::Chord{'N', Alt});
+        Registry restored; restored.Configure(Actions());
+        CHECK(restored.Load(path, error));
+        CHECK(restored.MenuChord() == gloss::hotkeys::Chord{'N', Alt});
+    }
     void TestAllModifiersAndQueueCapacity() {
         Registry r; std::vector<Action> actions;
         for (int i = 0; i < 64; ++i) actions.push_back({"action:" + std::to_string(i), {"1"}, "测试功能"});
@@ -309,14 +366,91 @@ namespace {
         CHECK(r.QueueKey({'A' + (63 % 26), 63 / 26}, true, false));
         queue = r.Drain(); CHECK(queue.size() == 1); CHECK(queue[0].action == "action:63");
     }
+    std::vector<Action> FlightActions() {
+        auto actions = Actions();
+        actions.push_back({"action:flight_up", {"100"}, "飞行上升", {VK_PRIOR, 0}});
+        actions.push_back({"action:flight_down", {"100"}, "飞行下降", {VK_NEXT, 0}});
+        actions.push_back({"toggle:damage", {"1"}, "伤害倍率"});
+        return actions;
+    }
+    void TestFlightDefaultsAndExplicitClears(const std::filesystem::path& root) {
+        const auto path = root / "flight-defaults.ini";
+        Registry fresh; fresh.Configure(FlightActions()); std::string error;
+        CHECK(fresh.Load(root / "flight-new-user.ini", error));
+        CHECK(fresh.Get("action:flight_up")->chord == gloss::hotkeys::Chord{VK_PRIOR, 0});
+        CHECK(fresh.Get("action:flight_down")->chord == gloss::hotkeys::Chord{VK_NEXT, 0});
+        CHECK(ChordLabel({VK_PRIOR, 0}) == "PgUp");
+        CHECK(ChordLabel({VK_NEXT, Control}) == "Ctrl+PgDn");
+        CHECK(!fresh.Get("toggle:damage"));
+        CHECK(fresh.Dirty());
+        CHECK(fresh.Set("action:flight_up", {VK_HOME, Control}, {"250"}, error));
+        fresh.BeginCapture("action:flight_down", {"100"});
+        CHECK(fresh.QueueKey({VK_DELETE, 0}, true, true));
+        fresh.PumpCapture();
+        CHECK(!fresh.Get("action:flight_down"));
+        CHECK(fresh.Save(path, error));
+        Registry restored; restored.Configure(FlightActions()); CHECK(restored.Load(path, error));
+        CHECK(restored.Get("action:flight_up")->chord == gloss::hotkeys::Chord{VK_HOME, Control});
+        CHECK(restored.Get("action:flight_up")->parameters == std::vector<std::string>{"250"});
+        CHECK(!restored.Get("action:flight_down"));
+        CHECK(!restored.Dirty());
+        restored.Configure(FlightActions()); CHECK(restored.Load(path, error));
+        CHECK(!restored.Get("action:flight_down"));
+        CHECK(restored.QueueKey({VK_HOME, Control}, true, false));
+        const auto calls = restored.Drain();
+        CHECK(calls.size() == 1 && calls[0].parameters == std::vector<std::string>{"250"});
+    }
+    void TestFlightDefaultsDoNotReplaceExistingKeys(const std::filesystem::path& root) {
+        const auto path = root / "flight-legacy-conflicts.ini";
+        { std::ofstream stream(path); stream << "[action:heal]\nkey=33\nmodifiers=0\ncount=0\n[menu:toggle]\nkey=34\nmodifiers=0\ncount=0\n"; }
+        Registry legacy; legacy.Configure(FlightActions()); std::string error;
+        CHECK(legacy.Load(path, error));
+        CHECK(legacy.Get("action:heal")->chord == gloss::hotkeys::Chord{VK_PRIOR, 0});
+        CHECK(legacy.MenuChord() == gloss::hotkeys::Chord{VK_NEXT, 0});
+        CHECK(!legacy.Get("action:flight_up"));
+        CHECK(!legacy.Get("action:flight_down"));
+        CHECK(legacy.Set("action:heal", {}, {}, error));
+        CHECK(legacy.SetMenu({VK_INSERT, 0}, path, error));
+        Registry next; next.Configure(FlightActions()); CHECK(next.Load(path, error));
+        CHECK(!next.Get("action:flight_up"));
+        CHECK(!next.Get("action:flight_down"));
+        CHECK(next.Set("action:flight_up", {VK_PRIOR, 0}, {"150"}, error));
+        CHECK(next.Save(path, error));
+        Registry rebound; rebound.Configure(FlightActions()); CHECK(rebound.Load(path, error));
+        CHECK(rebound.Get("action:flight_up")->parameters[0] == "150");
+        CHECK(!rebound.Get("action:flight_down"));
+    }
+    void TestParameterizedToggleBinding(const std::filesystem::path& root) {
+        Registry r; r.Configure(FlightActions()); std::string error;
+        CHECK(r.Set("toggle:damage", {'D', Control}, {"2.5"}, error));
+        r.SetParameters("toggle:damage", {"3.5"});
+        r.SetParameters("toggle:damage", {}); // Wrong parameter shape must not replace the last value.
+        CHECK(r.QueueKey({'D', Control}, true, false));
+        auto queue = r.Drain();
+        CHECK(queue.size() == 1 && queue[0].parameters == std::vector<std::string>{"3.5"});
+        CHECK(r.Save(root / "parameterized-toggle.ini", error));
+        Registry restored; restored.Configure(FlightActions()); CHECK(restored.Load(root / "parameterized-toggle.ini", error));
+        CHECK(restored.Get("toggle:damage")->parameters == std::vector<std::string>{"3.5"});
+        CHECK(restored.Set("toggle:damage", {}, {}, error)); // Clearing needs no on-parameters.
+        CHECK(!restored.Get("toggle:damage"));
+        CHECK(restored.Save(root / "parameterized-toggle.ini", error));
+        CHECK(r.Load(root / "parameterized-toggle.ini", error));
+        CHECK(!r.Get("toggle:damage"));
+    }
 }
 
 int main(int argc, char** argv) {
-    const auto root = argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::path("output/pbz-combat-20261029/hotkeys");
+    const auto base = argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::path("output/pbz-combat-20261029/hotkeys");
+    // Debug and Release may run together. Never share fixtures or the atomic
+    // save's .tmp file across processes, even when a caller supplies one root.
+    const auto root = base / ("run-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
     std::filesystem::create_directories(root);
     TestDefaultsAndValidation(); TestEligibilityQueueAndPending(); TestCapturePriorityAndErrors();
-    TestPersistenceAndCatalogChange(root); TestConcurrentInputQueue(); TestAllModifiersAndQueueCapacity();
+    TestPersistenceAndCatalogChange(root); TestRemovedUpgradeBindingsCannotLoadOrInvoke(root);
+    TestConcurrentInputQueue(); TestAllModifiersAndQueueCapacity();
     TestMenuBindingAndConflicts(root); TestMenuCaptureAndSaveFailures(root); TestMenuPersistenceCompatibility(root);
+    TestTransientReplacementLock(root);
+    TestFlightDefaultsAndExplicitClears(root); TestFlightDefaultsDoNotReplaceExistingKeys(root); TestParameterizedToggleBinding(root);
     std::cout << checks << " checks, " << failures << " failures\n";
     return failures ? 1 : 0;
 }

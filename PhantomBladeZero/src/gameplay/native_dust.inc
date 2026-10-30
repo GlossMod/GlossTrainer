@@ -51,7 +51,7 @@
                 item.name = ItemFormattedDescription(*name);
                 item.category = "资源";
                 item.description = "角色持有的资源。输入需要增加的数量并确认，完成后显示实际增加结果。";
-                item.maxQuantity = 999;
+                item.maxQuantity = MaxItemQuantity;
                 dustItem = std::move(item);
             }
             const auto amount = DustAmount(context);
@@ -72,7 +72,7 @@
             const auto before = DustAmount(context);
             const auto name = dustItem->name;
             const auto function = FindFunction(Read<Address>(backpack + 0x10), "AddDustNum");
-            if (!before || *before > std::numeric_limits<std::int32_t>::max() - quantity ||
+            if (!before || !ItemQuantityFitsInventory(*before, quantity) ||
                 !DustFunctionValid(function) || !ItemBackpackMatches(context, backpack))
                 return {RequestState::Failed, "资源数量、整数上限或函数契约不符，未执行"};
             auto parameter = static_cast<std::int32_t>(quantity);

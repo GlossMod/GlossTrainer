@@ -334,3 +334,90 @@ Debug / Release 两配置的 PBZ 构建与 13 套测试共 26 次运行全部通
 - 正式 ASI SHA-256：`65B0C1F6B4E636260195C7D9EC6046F8F5F1C54E40F49649318F2F9983B03EE1`。
 
 用户确认保存退出且部署前再次确认无 PBZ 进程后，01:23 将正式包部署至 `E:\steam\steamapps\common\PBZ\platform\steam`。替换 ASI 和双语说明，Loader 与其配置保留；备份旧安装五个文件与完整用户数据目录。独立复核五个安装文件、五个备份、七个用户数据文件均通过，`scripts` 下仅有 `GlossTrainer.asi`。见 [部署回执](../../output/pbz-release-v1.0.2-20261030/deploy-20261030-012309/receipt.json)、[最终复核](../../output/pbz-release-v1.0.2-20261030/release-deployment-verification.json)。部署后未启动游戏，本次发布未新增 FPS 基准或游戏内功能验证。
+
+## 2026-10-30 意识尘埃数量输入解除 999 限制
+
+- 意识尘埃（搜索别名“意识粉尘”）移除单次 999 的人为上限。弹窗改为“数量（至少 1）”，允许自由输入正整数；UI、通用参数校验和原生发放入口同步调整，普通道具 999、唯一物品 1 的既有限制保留。
+- 使用完整文本整数解析，拒绝空值、负数、小数、尾随字符及超出 int32 的数值，不截断为其他数量。加减按钮在边界禁用，保留 Ctrl 加减 10；UI、后端和原生调用前检查库存总量，不能超过游戏 int32 上限 2,147,483,647。
+- PBZ Debug / Release 完整构建成功，PBZGameplayTests、PBZLocalizationTests 两种配置共 4 次测试通过。回归覆盖 1000、1000000、int32 最大值、原样传递请求参数、非法文本、库存相加溢出，以及普通与唯一物品限制。
+- DX12 暗色、DX11 亮色宿主截图均已查看，1000000 未被截断且可确认；2147483648 保留输入并提示无效，确认按钮禁用。宿主只验证渲染，输入来自本地 ImGui fixture；不代表真实游戏内发放验证。
+- [完整结果与产物哈希](../../output/pbz-dust-quantity-20261030/results.json)、[Debug 构建](../../output/pbz-dust-quantity-20261030/build-debug.log)、[Release 最终构建](../../output/pbz-dust-quantity-20261030/build-release-final.log)、[暗色实际截图](../../output/pbz-dust-quantity-20261030/ui/dark-large-dx12/quantity.png)、[亮色实际截图](../../output/pbz-dust-quantity-20261030/ui/light-large-dx11/quantity.png)、[越界输入截图](../../output/pbz-dust-quantity-20261030/ui/dark-overflow-dx12/quantity.png)。
+- 按仓库要求，先以 `model_providers.custom` / `gpt-image-2.5` 生成并查看[双主题原型](../../output/pbz-dust-quantity-20261030/ui/quantity-prototype.png)；[完整提示词](../../output/pbz-dust-quantity-20261030/ui/prompt.txt)与[原型核对](../../output/pbz-dust-quantity-20261030/ui/prototype-review.md)保存在根 output。
+- 构建产物：[GlossTrainer.asi](../../output/pbz-dust-quantity-20261030/release/GlossTrainer.asi)。本轮未部署到游戏目录，未验证大额资源实际发放、保存和重载。
+
+### 2026-10-30 18:16—18:20 新性能观察
+
+原始证据：[晚间日志](../../output/pbz-perf-review-20261030/trainer.log)，[隐藏菜单加权汇总](../../output/pbz-perf-review-20261030/hidden-summary.json)。18:16:18—18:18:59连续17窗口共5562 Tick，加权平均22.515ms（精确值见JSON），最大264.894ms；combat约5.90ms，items约0.001ms、images接近0。18:19:29隐藏窗口Tick平均48.976ms，combat6.871ms，差额约42.1ms未分段。18:15:56语言变更后items最大1860.676ms。read faults持续0。
+
+修正前次判断：combat目前不是总耗时的主要部分，大量时间落在未单独计时路径。当前源码候选包括EnsureCheat、MovementTick、每250ms PublishReadback/PublishToggles（后者遍历扩展功能契约）、Backend.Pump及锁等待。Tick边界不包含originalActorProcessEvent；计时为wall-clock，包含抢占和等待，不能直接当作CPU耗时或FPS。
+
+当前build/release与部署ASI的SHA256不同，不能将当前源码新增路径认定为现场二进制根因；本轮仅分析、保存证据，未部署或修改生产源码。下一轮需先建立部署构建对应关系，再细分未计时路径。
+
+## 2026-10-30 v1.1.0 功能扩展验证
+
+按用户截图查漏补缺，沿用已有物品发放、完美格挡、自动完美闪避和设置更新。意识尘埃、选中物品数量及位置传送不在本轮新增范围。版本唯一常量改为 1.1.0；本轮未提交、推送、打标签或发布 GitHub Release。
+
+CE MCP 核对 CL-301524_JKS-17219 的反射布局、函数入口、本地对象归属与操作结果。主程序 SHA-256 为 `7b4fcd286a350780faf0824d73aa150b21cbf1bccde883e6a96386cbe09973b4`。REA MCP 取得 PE 身份与资源证据，原生分析任务超时，未取得函数伪代码。实现依据主要来自 CE 读取与反汇编，不能称为 REA 已完成反编译。见[发现记录](../../output/pbz-feature-expansion-20261030/discovery.json)、[实现契约](../../output/pbz-feature-expansion-20261030/discovery-implementation.json)及[REA 原始记录](../../output/pbz-feature-expansion-20261030/rea/)。
+
+| 功能 | 已有运行时证据 | 验证边界 |
+| --- | --- | --- |
+| 飞行穿墙、升降、关闭恢复 | 开启、连续升降、空旷处关闭及模式/碰撞恢复回读；用户确认新版不闪退，墙体内关闭提示并保持飞行 | 未覆盖全部地图、死亡与过场组合 |
+| 移速、玩家/AI/游戏速度、跳跃、重力、FOV | 多组参数启用及关闭恢复通过；玩家速度增加同对象维护后稳定回读 | 不是全部动画、NPC 或相机模式的验证 |
+| 生命、纯杀气、纯杀气获取倍率 | 开关/参数回读及恢复通过，未抬高生命上限 | 纯杀气保留充能转段规则；未覆盖全部获取来源 |
+| 杀气消耗倍率 | 1.1.0 中启用 0.5，用户重击后记录 6 次临时蓝图消耗调整 | 受击削杀气不变；原生风雷转换未覆盖，未逐技能数值对照 |
+| 伤害、防御、破防倍率、一击必杀/破防 | 开关回读通过，早期构建记录 10 次临时结算调整 | 未作同敌人同招式的数值对照 |
+| 隐身 | 本修改器拥有的五项感知忽略标签添加/撤销回读 | 未独立验证每种 AI 实际行为 |
+| 药瓶不减、切武器冷却 | 用户使用药瓶和切武器后，药瓶保护计数 3、冷却查询计数 4 | 证明目标路径命中，未覆盖全部药品和槽位组合 |
+| 道具不减、商店库存不减 | 钩子创建、开启及关闭回读通过 | 实际扣减计数为 0，尚无真实消耗/购买验证 |
+| 无视装备升级费用 | 首次 1.1.0 开启回读通过，但用户重开升级页仍显示材料/尘埃，费用副本计数为 0；此轮实测失败 | 已定位 compiled-in 输出属性校验缺陷，修复后结果以下文为准；药品升级未覆盖 |
+| 剩余天数、六十六天解锁 | 天数以当前值 57 提交并回读；首次解锁、重复调用成功，重启进入存档后仍返回已解锁，当前难度未变 | 天数不同值尚未实测 |
+
+证据：[第一轮](../../output/pbz-feature-expansion-20261030/runtime-readback-1.json)、[第二轮](../../output/pbz-feature-expansion-20261030/runtime-readback-2.json)、[药瓶和冷却最终回读](../../output/pbz-feature-expansion-20261030/runtime-economy-final.json)、[进度操作](../../output/pbz-feature-expansion-20261030/runtime-progress.json)、[难度入口](../../output/pbz-feature-expansion-20261030/difficulty-unlock-evidence.json)、[飞行用户确认](../../output/pbz-feature-expansion-20261030/user-flight-confirmation.md)。临时测试开关已关闭，保留原先开启的暗源、完美格挡、自动完美闪避。
+
+参数保存采用兼容旧配置的 v2，失败请求不覆盖最后成功参数。飞行升降默认 Page Up / Page Down、步长 100；已有绑定、显式解绑和冲突检查保留。界面已按 custom-imagegen [原型](../../output/pbz-feature-expansion-20261030/ui-prototype.png)实现；[中英文和亮暗四种截图核对](../../output/pbz-feature-expansion-20261030/ui/visual-verification.json)通过。截图来自版本更新前的 1.0.2 构建，只证明初始可见区域布局，不证明 1.1.0 版本或游戏效果。
+
+可执行页查询缓存限制在单次同步 Tick 内，退出即清空。修复后日志中的 Tick 平均约 7–8 ms；与早期 24–49 ms 窗口场景和构建不同，不能作为受控基准或 FPS 提升比例。完整换图恢复和存档重载不在已通过范围。
+
+首轮 1.1.0 的 Debug / Release PBZ 构建及 11 套受影响测试共 22 次通过，见[最终测试清单](../../output/pbz-feature-expansion-20261030/tests-final.json)。其中资源规则每配置 122 项，原生钩子生命周期每配置 376 项，快捷键每配置 594 项。新增六组规则测试改为显式 xmake 目标，发布解析能识别全部 21 个测试目标；本轮实际执行的是上述 11 套受影响目标。升级修复后的追加验证以下文为准。
+
+首次快捷键测试在 Debug / Release 均出现文件替换失败；诊断证据为 Windows `ERROR_ACCESS_DENIED (5)`。保存操作现在只对短暂锁错误进行总计不超过 62 ms 的有界重试，持续失败保留原文件和菜单键。新增真实文件锁及进程独立测试目录，旧实现失败/新实现成功的受控探针与 12 个并发测试进程全部通过的证据见[热键修复](../../output/pbz-feature-expansion-20261030/hotkey-fix/verification.json)。原始失败日志保留。
+
+首轮 1.1.0 已按授权正常退出后安装，四份用户配置在复制前后哈希一致；[安装回执](../../output/pbz-feature-expansion-20261030/final-1.1.0/install-receipt.json)记录 ASI SHA-256 `33BA98460D5D12EA0C65A6C4306DB473CE19B135DF991CF62353922B58F69E50`。[启动日志](../../output/pbz-feature-expansion-20261030/final-1.1.0/trainer-current.log)确认 1.1.0 及九个预创建钩子成功；原有三个开关自动恢复。用户重击后的杀气倍率与重启后的难度解锁回读见[运行结果](../../output/pbz-feature-expansion-20261030/final-1.1.0/runtime-cost-upgrade-used.json)。升级页失败及 CE 探针断连记录见[用户确认与采样边界](../../output/pbz-feature-expansion-20261030/final-1.1.0/user-cost-upgrade-confirmation.md)。此产物的升级问题待下述修复构建替换。
+
+### 升级费用 compiled-in 路径修复
+
+静态反汇编确认 ProcessEvent 创建的 FFrame 将 MostRecentProperty 清空，compiled-in 的 StepExplicitProperty 不填充该字段，旧代码必然拒绝这类有效输出。修复为在原函数调用前后校验精确函数、本地背包、结构输出及 Bool 返回的 OutParm 记录、地址一致性和 wrapper 实际输出地址；链有长度上限、防环、重复字段及溢出拒绝。Blueprint 调用继续核对调用者变量类型。静态证据、143 项升级规则和 376 项原生钩子两配置结果见[修复验证](../../output/pbz-feature-expansion-20261030/upgrade-compiled/verification.json)。两配置完整 PBZ 构建也通过；未因这项修复改动其他功能。
+
+旧 1.1.0 在实际使用杀气与飞行功能后，[游戏线程清理返回成功并正常退出](../../output/pbz-feature-expansion-20261030/final-1.1.0/shutdown-result.json)。修复构建已于 18:52 安装并重启，四份配置哈希一致；该轮 ASI SHA-256 为 `99F86C06B94AFB366C0158F377CEBA04725D58441F590A7965CBC1CEE013776A`，见[安装回执](../../output/pbz-feature-expansion-20261030/final-1.1.0-upgrade-fix/install-receipt.json)。用户复测确认依然需要消耗材料，并表示无法实现就不做；此功能实机验证失败，现已撤下，见下节。原失败证据保留，不将编译和规则测试记作游戏内成功。
+
+## 2026-10-30 撤下升级需求绕过与物品加载优化（1.1.0）
+
+根据[用户反馈](../../output/pbz-remove-upgrade-20261030/user-confirmation.md)，移除“无视装备升级需求”的目录项、原生钩子、状态恢复、专属翻译与测试目标。旧开关配置和快捷键不能恢复、设置或触发该功能，按当前目录保存时会丢弃旧键；安装时保留的旧配置即使仍含该键，也会被忽略。原有十个手动升级/满级入口保留。当前运行时不再包含该能力，开关总数为 27，发行工具可发现的测试目标为 20。
+
+物品页长时间显示 0 项存在两个原因：缓存记录在当前会话验证前均为不可获取、库存未知，旧界面会把这些合法名称记录全部隐藏；旧加载流程每 Tick 只处理一行，并等待全部长说明读取完才发布就绪目录。现在先展示缓存及增量名称，目录验证前仍禁止获取；名称和库存验证完成即可使用，说明随后补齐。每种表行类型只反射一次图标/说明布局，名称每批最多 32 行、约 2 ms，说明每批最多 8 个字段、约 1 ms，未命名隐藏行跳过说明。隐藏页暂停维护和 1.5 秒库存回读周期保持原有行为。
+
+补充覆盖缓存空说明的后续补读、说明完成时的最终发布，以及同会话重绑清空就绪状态后重新发布已验证目录，避免节流丢失最后更新或永久空列表。
+
+| 检查 | 结果与证据 |
+| --- | --- |
+| Debug / Release 构建与回归 | PBZ 两配置构建成功；Gameplay、Hotkey、Localization、NativeHookLifecycle、ItemScan、ItemCache、ItemRichText、ItemImages 共 8 套测试、16 次运行全部通过。最后两项边界修复后再次构建 PBZ 并复跑 Gameplay / NativeHookLifecycle 两配置，已更新[测试汇总](../../output/pbz-item-loading-20261030/tests.json) |
+| 加载预览与禁止获取 | DX12 fixture 的中文暗色、英文亮色均显示 4 个合法名称缓存/增量卡片，过滤 2 个无名称条目；目录未就绪时逐卡点击未打开数量框、未入队，Backend 提交被拒绝。[验证摘要](../../output/pbz-item-loading-20261030/ui/validation-summary.json)、[暗色截图](../../output/pbz-item-loading-20261030/ui/final-dark-cn/open.png)、[亮色截图](../../output/pbz-item-loading-20261030/ui/final-light-en/open.png)。此项仅为图形宿主验证 |
+| 实机缓存加载 | 保留既有 en-us 文本缓存，790 行定义、417 次缓存命中；布局构建 1.570 ms，名称及目录就绪 463.049 ms，全部说明完成 698.606 ms。[原始日志](../../output/pbz-item-loading-20261030/trainer-current.log)、[结果与用户确认](../../output/pbz-item-loading-20261030/runtime-results.json) |
+| 实机状态 | CE 回读 ready=true、itemsReady=true、faulted=false；发布项 791 包括隐藏定义和意识尘埃，不等于可见卡片数。用户确认“列表明显更快出现”。[运行时回读](../../output/pbz-item-loading-20261030/runtime-after.json) |
+| 安装与配置 | 按既有授权正常退出后于 19:12 安装并重启，四份配置复制前后哈希一致；[安装回执](../../output/pbz-item-loading-20261030/final-1.1.0/install-receipt.json)、[构建与安装哈希复核](../../output/pbz-item-loading-20261030/final-hashes.json) |
+
+本次计时从首次活动物品页的目录构建开始，不是进程启动或菜单打开时间；这是保留缓存的一次实测，不是冷缓存或受控 FPS 基准。批次预算无法抢占单次同步引擎调用，就绪过渡阶段 items 采样最大 17.857 ms，不能宣称所有 Tick 均小于 2 ms。
+
+最终安装的 [GlossTrainer.asi](../../output/pbz-item-loading-20261030/final-1.1.0/GlossTrainer.asi) SHA-256 为 `A894C36C23CA4A6D6603368BB461FDEB5298104787A80594F5BC00F599A6BFFF`。版本保持 1.1.0，本轮未提交、推送、打标签或发布 GitHub Release。
+
+## 2026-10-30 v1.1.0 发布验证
+
+按用户要求发布 1.1.0，更新日志完整列出新增战斗、生存、资源、移动、视角、飞行及进度功能，并包含物品列表加载优化和获取意识尘埃数量限制调整。游戏速度由既有单次操作改为可记忆参数的开关；实机失败的“无视装备升级需求”不进入发布功能清单。
+
+意识尘埃取消单次 999 的人为限制，界面、Backend 和原生发放统一接受正整数，并检查获取后库存不超过游戏的 int32 上限 2,147,483,647。普通道具单次 999、唯一物品单次 1 的规则保留。自动回归覆盖 1,000、1,000,000、int32 边界、非法输入与已有库存相加溢出；本轮没有在真实存档进行大额发放、保存和重载。
+
+发布审查还修复飞行组件晚于会话绑定就绪时，升降动作能力未同步刷新的问题：复用已核对的飞行状态更新上升/下降能力，契约失效时撤销能力并取消尚未执行的请求，执行时原有身份与飞行状态检查保留。新增回归覆盖同一会话从未就绪到可派发，再到失效取消的过程。见[源码审查](../../output/pbz-release-v1.1.0-20261030/source-review.json)。
+
+本地 Debug / Release 的 PBZ 构建及全部 20 套验证目标共 40 次测试通过；上述边界修复后追加两配置 PBZ / NativeHookLifecycle 构建与测试，每配置 402 checks、0 failures。见[测试清单](../../output/pbz-release-v1.1.0-20261030/tests.json)。既有游戏内物品加载及飞行验证见前文，本轮追加修复尚无新增实机复测。
+
+发行使用 `PhantomBladeZero/v1.1.0` 独立通道，先对推送提交执行云端候选包构建、审查，再在同一提交创建标签发布。最终 CI、正式附件和哈希核验以下文记录为准。

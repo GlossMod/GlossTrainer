@@ -1,4 +1,5 @@
 #include "../src/gameplay/backend.hpp"
+#include "../src/gameplay/item_quantity.hpp"
 #include "../src/gameplay/toggle_settings.hpp"
 #include <atomic>
 #include <chrono>
@@ -68,13 +69,14 @@ namespace
             if (grantItem->params.size() == 2) {
                 CHECK(grantItem->params[0].type == ParamType::String);
                 CHECK(grantItem->params[1].type == ParamType::Int);
-                CHECK(grantItem->params[1].minimum == 1 && grantItem->params[1].maximum == 999);
+                CHECK(grantItem->params[1].minimum == 1 && grantItem->params[1].maximum == MaxItemQuantity);
             }
         }
         std::map<std::string, std::size_t> seen;
         for (const auto& feature : Catalog()) {
             if (feature.functionName.empty() || feature.functionName == "SetGlobalTimeDilation" ||
-                feature.functionName == "Native_GrantItem")
+                feature.functionName == "Native_GrantItem" || feature.functionName == "Native_ExtendedFeature" ||
+                feature.functionName == "Native_ExtendedAction")
                 continue;
             const auto contract = expected.find(feature.functionName);
             CHECK(contract != expected.end());
@@ -101,7 +103,7 @@ namespace
         CHECK(gameSpeed != nullptr);
         if (gameSpeed) {
             CHECK(gameSpeed->functionName == "SetGlobalTimeDilation");
-            CHECK(gameSpeed->page == 1 && gameSpeed->category == 4);
+            CHECK(gameSpeed->page == 0 && gameSpeed->category == 4);
             CHECK(gameSpeed->params.size() == 1);
             CHECK(gameSpeed->params[0].type == ParamType::Float);
             CHECK(gameSpeed->params[0].minimum == 0.1 && gameSpeed->params[0].maximum == 3.0);
@@ -152,7 +154,7 @@ namespace
     void TestToggleCatalogHasUniqueReversibleStatePairs()
     {
         const auto& toggles = ToggleCatalog();
-        CHECK(toggles.size() == 5);
+        CHECK(toggles.size() == 27);
         std::map<std::string, bool> ids;
         std::map<std::string, bool> featureIds;
         for (const auto& toggle : toggles) {
@@ -170,8 +172,15 @@ namespace
             if (!on || !off)
                 continue;
             CHECK(on->functionName == off->functionName);
-            CHECK(on->params.empty() && off->params.empty());
+            CHECK(off->params.empty());
             CHECK(!on->persistent && !off->persistent);
+            if (on->functionName == "Native_ExtendedFeature") {
+                CHECK(on->fixedArguments == std::vector<std::string>({toggle.id, "on"}));
+                CHECK(off->fixedArguments == std::vector<std::string>({toggle.id, "off"}));
+                CHECK(EquivalentParameters(*on, DefaultParameters(*on), DefaultParameters(*on)));
+                continue;
+            }
+            CHECK(on->params.empty());
             if (on->functionName.starts_with("Native_")) {
                 CHECK(on->fixedArguments == std::vector<std::string>{"on"});
                 CHECK(off->fixedArguments == std::vector<std::string>{"off"});
@@ -370,6 +379,64 @@ namespace
         CHECK(record && record->request.arguments == std::vector<std::string>({"available", "3"}));
     }
 
+    void TestItemQuantityInputRejectsOverflowAndPartialNumbers()
+    {
+        for (const int expected : {1, 999, 1000, 1000000, MaxItemQuantity}) {
+            int parsed{};
+            CHECK(ParseItemQuantity(std::to_string(expected), parsed));
+            CHECK(parsed == expected);
+        }
+        for (const std::string_view text : {"", "0", "-1", "+1", "1.5", "1e3", "1x", " 1", "1 ",
+                "2147483648", "9999999999999999999999999999999999"}) {
+            int parsed = 42;
+            CHECK(!ParseItemQuantity(text, parsed));
+            CHECK(parsed == 42);
+        }
+        CHECK(ItemQuantityFitsInventory(0, MaxItemQuantity));
+        CHECK(ItemQuantityFitsInventory(MaxItemQuantity - 1, 1));
+        CHECK(!ItemQuantityFitsInventory(MaxItemQuantity, 1));
+        CHECK(!ItemQuantityFitsInventory(1, MaxItemQuantity));
+        CHECK(!ItemQuantityFitsInventory(-1, 1));
+        CHECK(!ItemQuantityFitsInventory(static_cast<std::int64_t>(MaxItemQuantity) + 1, 1));
+        CHECK(!ItemQuantityFitsInventory(0, 0));
+        CHECK(!ItemQuantityFitsInventory(0, -1));
+    }
+
+    void TestDustAcceptsLargeQuantitiesWithoutChangingOrdinaryItemLimits()
+    {
+        constexpr std::string_view dustKey = "resource:consciousness_dust";
+        for (const int quantity : {1000, 1000000, MaxItemQuantity}) {
+            Backend backend;
+            Ready(backend, {"grant_item"});
+            backend.PublishItems({TestItem(std::string(dustKey), MaxItemQuantity)}, true, "资源已加载");
+            const auto result = backend.SubmitItem(dustKey, quantity);
+            CHECK(result.accepted);
+            std::vector<std::string> arguments;
+            CHECK(backend.Pump([&](const Request& request) {
+                arguments = request.arguments;
+                return ExecutionResult{RequestState::Dispatched, "测试执行器已接收"};
+            }, 1) == 1);
+            CHECK(arguments == std::vector<std::string>({std::string(dustKey), std::to_string(quantity)}));
+        }
+
+        Backend backend;
+        Ready(backend, {"grant_item"});
+        auto dust = TestItem(std::string(dustKey), MaxItemQuantity);
+        dust.owned = 25555901;
+        backend.PublishItems({dust, TestItem("ordinary"), TestItem("unique", 1)}, true, "物品已加载");
+        const int remaining = MaxItemQuantity - static_cast<int>(dust.owned);
+        CHECK(backend.SubmitItem(dustKey, remaining).accepted);
+        const auto overflow = backend.SubmitItem(dustKey, remaining + 1);
+        CHECK(!overflow.accepted && overflow.message == "当前数量加请求数量会溢出，未执行");
+        CHECK(!backend.SubmitItem(dustKey, MaxItemQuantity).accepted);
+        CHECK(!backend.Submit("grant_item", {std::string(dustKey), "2147483648"}).accepted);
+        CHECK(!backend.Submit("grant_item", {std::string(dustKey), "1000x"}).accepted);
+        CHECK(backend.SubmitItem("ordinary", 999).accepted);
+        const auto ordinaryTooLarge = backend.SubmitItem("ordinary", 1000);
+        CHECK(!ordinaryTooLarge.accepted && ordinaryTooLarge.message == "数量超过该物品单次获取上限");
+        CHECK(!backend.SubmitItem("unique", 2).accepted);
+    }
+
     void TestItemRequestsAndCatalogAreInvalidatedOnSessionChange()
     {
         Backend backend;
@@ -386,6 +453,26 @@ namespace
         const auto* cancelled = FindRecord(snapshot, queued.requestId);
         CHECK(cancelled && cancelled->state == RequestState::Cancelled);
         CHECK(!backend.SubmitItem("session-item", 1).accepted);
+    }
+
+    void TestSameSessionRebindRequiresFreshItemPublication()
+    {
+        Backend backend;
+        backend.SetRuntimeState(true, "ready", "same-session");
+        backend.SetCapability("grant_item", true, "verified");
+        backend.PublishItems({TestItem("same-item")}, true, "verified catalog");
+        CHECK(backend.ItemsReady());
+        backend.SetRuntimeState(false, "rebind", "same-session");
+        backend.SetRuntimeState(true, "ready again", "same-session");
+        backend.SetCapability("grant_item", true, "verified again");
+        CHECK(!backend.ItemsReady());
+        CHECK(!backend.SubmitItem("same-item", 1).accepted);
+        backend.PublishItems({TestItem("same-item")}, false, "cached preview");
+        CHECK(!backend.ItemsReady());
+        CHECK(!backend.SubmitItem("same-item", 1).accepted);
+        backend.PublishItems({TestItem("same-item")}, true, "fresh readback");
+        CHECK(backend.ItemsReady());
+        CHECK(backend.SubmitItem("same-item", 1).accepted);
     }
 
     void TestItemDispatchIsNotReportedAsVerifiedWithoutReadback()
@@ -583,11 +670,11 @@ namespace
         CHECK(error.empty());
     }
 
-    TogglePreference Preference(const Backend& backend)
+    TogglePreference Preference(const Backend& backend, std::string_view id = "invulnerable")
     {
         const auto snapshot = backend.GetSnapshot();
         for (const auto& preference : snapshot.togglePreferences)
-            if (preference.id == "invulnerable") return preference;
+            if (preference.id == id) return preference;
         CHECK(false);
         return {};
     }
@@ -661,7 +748,12 @@ namespace
             CHECK(restarted.Pump([&](const Request& request) {
                 CHECK(request.restoration);
                 const auto* feature = FindFeature(request.featureId);
-                CHECK(feature && feature->fixedArguments == request.arguments);
+                auto expected = feature ? feature->fixedArguments : std::vector<std::string>{};
+                if (feature) {
+                    const auto parameters = DefaultParameters(*feature);
+                    expected.insert(expected.end(), parameters.begin(), parameters.end());
+                }
+                CHECK(feature && expected == request.arguments);
                 ++restored[request.featureId];
                 return ExecutionResult{RequestState::Verified, "restored"};
             }, 1) == 1);
@@ -872,6 +964,46 @@ namespace
         CHECK(ReadSettings(file).find("full_heal") == std::string::npos);
     }
 
+    void TestRemovedUpgradeRequirementToggleCannotRestoreOrSubmit()
+    {
+        constexpr auto removed = "ignore_upgrade_requirements";
+        for (const auto id : {removed, "ignore_upgrade_requirements_on", "ignore_upgrade_requirements_off"})
+            CHECK(FindFeature(id) == nullptr);
+        for (const auto& toggle : ToggleCatalog()) CHECK(toggle.id != removed);
+        // Removing the failed bypass must preserve the separate native upgrade actions.
+        for (const auto id : {"upgrade_main_weapon", "max_main_weapon", "max_all_main_weapons",
+            "upgrade_shachi_weapon", "max_shachi_weapon", "max_all_shachi_weapons", "upgrade_medicine",
+            "max_medicine", "max_all_medicines", "upgrade_accessory"}) CHECK(FindFeature(id) != nullptr);
+        const auto file = SettingsFile("removed-upgrade-toggle");
+        for (const auto version : {"1", "2"}) {
+            WriteSettings(file, std::string("[meta]\nversion=") + version + "\n[toggles]\n" + removed +
+                "=1\n[parameters.ignore_upgrade_requirements]\nvalue=invalid-old-value\n");
+            toggle_settings::Data data;
+            std::string error;
+            CHECK(toggle_settings::Load(file, data, error));
+            CHECK(error.empty() && !data.contains(removed));
+            Backend backend;
+            CHECK(backend.InitializeSettings(file));
+            // Old capability announcements must not resurrect a deleted action.
+            Ready(backend, {"ignore_upgrade_requirements_on", "ignore_upgrade_requirements_off"});
+            for (const auto id : {removed, "ignore_upgrade_requirements_on", "ignore_upgrade_requirements_off"}) {
+                const auto submitted = backend.Submit(id);
+                CHECK(!submitted.accepted && submitted.message == "未知功能");
+            }
+            const auto snapshot = backend.GetSnapshot();
+            for (const auto& preference : snapshot.togglePreferences) CHECK(preference.id != removed);
+            for (const auto& capability : snapshot.capabilities)
+                CHECK(capability.featureId != "ignore_upgrade_requirements_on" &&
+                    capability.featureId != "ignore_upgrade_requirements_off");
+            CHECK(snapshot.pendingCount == 0 && snapshot.requests.empty());
+            CHECK(backend.Pump([](const Request&) { CHECK(false); return ExecutionResult{}; }) == 0);
+            // Normal persistence drops obsolete sections, even if supplied in memory.
+            data[removed] = true;
+            CHECK(toggle_settings::Save(file, data, error));
+            CHECK(ReadSettings(file).find(removed) == std::string::npos);
+        }
+    }
+
     void TestSettingsSaveFailurePreservesOriginalAndRetriesDirtyData()
     {
         const auto file = SettingsFile("save-failure");
@@ -892,6 +1024,143 @@ namespace
         CHECK(backend.FlushSettings(&error));
         CHECK(error.empty());
         CHECK(ReadSettings(file).find("invulnerable=0") != std::string::npos);
+    }
+
+    void TestParameterizedToggleRoundTripRestorationAndSessionChanges()
+    {
+        const auto file = SettingsFile("parameterized-round-trip");
+        Backend backend;
+        CHECK(backend.InitializeSettings(file));
+        Ready(backend, {"damage_on", "damage_off"});
+        CHECK(Preference(backend, "damage").parameters == std::vector<std::string>{"1"});
+        CHECK(backend.Submit("damage_on", {"2.5"}).accepted);
+        CHECK(backend.Pump([](const Request& request) {
+            CHECK(request.arguments == std::vector<std::string>({"damage", "on", "2.5"}));
+            return ExecutionResult{RequestState::Verified, "read back 2.5"};
+        }) == 1);
+        CHECK(Preference(backend, "damage").enabled);
+        CHECK(Preference(backend, "damage").parameters == std::vector<std::string>{"2.5"});
+        CHECK(backend.FlushSettings());
+        CHECK(ReadSettings(file).find("version=2") != std::string::npos);
+        CHECK(ReadSettings(file).find("[parameters.damage]\nvalue=2.5") != std::string::npos);
+
+        Backend restarted;
+        CHECK(restarted.InitializeSettings(file));
+        CHECK(Preference(restarted, "damage").parameters == std::vector<std::string>{"2.5"});
+        Ready(restarted, {"damage_on", "damage_off"});
+        restarted.PublishToggleStates({{"damage", true, true, "different multiplier", {"1"}}});
+        CHECK(restarted.Pump([](const Request& request) {
+            CHECK(request.restoration && request.featureId == "damage_on");
+            CHECK(request.arguments == std::vector<std::string>({"damage", "on", "2.5"}));
+            return ExecutionResult{RequestState::Verified, "restored parameter"};
+        }) == 1);
+        CHECK(!Preference(restarted, "damage").restorePending);
+
+        restarted.SetRuntimeState(true, "next session", "damage-b");
+        restarted.SetCapability("damage_on", true);
+        restarted.PublishToggleStates({{"damage", true, true, "same multiplier", {"2.500000"}}});
+        CHECK(restarted.Pump([](const Request&) { CHECK(false); return ExecutionResult{}; }) == 0);
+        CHECK(!Preference(restarted, "damage").restorePending);
+
+        restarted.SetRuntimeState(true, "another session", "damage-c");
+        restarted.SetCapability("damage_on", true);
+        restarted.PublishToggleStates({{"damage", false, false, "unknown"}});
+        CHECK(restarted.Pump([](const Request&) { CHECK(false); return ExecutionResult{}; }) == 0);
+        restarted.PublishToggleStates({{"damage", true, false, "off"}});
+        CHECK(restarted.Pump([](const Request& request) {
+            CHECK(request.arguments.back() == "2.5");
+            return ExecutionResult{RequestState::Failed, "failed restore"};
+        }) == 1);
+        CHECK(restarted.Pump([](const Request&) { CHECK(false); return ExecutionResult{}; }) == 0);
+    }
+
+    void TestFailedParameterEditsPreserveVerifiedIntentAndCloseIgnoresDraft()
+    {
+        const auto file = SettingsFile("failed-parameter-edit");
+        Backend backend;
+        CHECK(backend.InitializeSettings(file));
+        Ready(backend, {"damage_on", "damage_off"});
+        CHECK(backend.Submit("damage_on", {"2"}).accepted);
+        CHECK(backend.Pump([](const Request&) { return ExecutionResult{RequestState::Verified, "ok"}; }) == 1);
+        CHECK(backend.FlushSettings());
+        const auto original = ReadSettings(file);
+        for (const auto state : {RequestState::Failed, RequestState::Dispatched, RequestState::Indeterminate}) {
+            CHECK(backend.Submit("damage_on", {"3"}).accepted);
+            CHECK(backend.Pump([&](const Request&) { return ExecutionResult{state, "not verified"}; }) == 1);
+            CHECK(Preference(backend, "damage").parameters == std::vector<std::string>{"2"});
+            CHECK(backend.FlushSettings());
+            CHECK(ReadSettings(file) == original);
+        }
+        CHECK(!backend.Submit("damage_on", {"nan"}).accepted);
+        CHECK(!backend.Submit("damage_on", {"-1"}).accepted);
+        CHECK(!backend.Submit("damage_on", {"2garbage"}).accepted);
+        const auto closed = backend.Submit("damage_off", {"invalid-draft"});
+        CHECK(closed.accepted);
+        CHECK(!Preference(backend, "damage").enabled);
+        CHECK(backend.Pump([](const Request& request) {
+            CHECK(request.arguments == std::vector<std::string>({"damage", "off"}));
+            return ExecutionResult{RequestState::Verified, "off"};
+        }) == 1);
+        CHECK(Preference(backend, "damage").parameters == std::vector<std::string>{"2"});
+        CHECK(backend.FlushSettings());
+        Backend restarted;
+        CHECK(restarted.InitializeSettings(file));
+        CHECK(!Preference(restarted, "damage").enabled);
+        CHECK(Preference(restarted, "damage").parameters == std::vector<std::string>{"2"});
+    }
+
+    void TestParameterSettingsLegacyVersionMalformedValuesAndUnknownIds()
+    {
+        const auto file = SettingsFile("parameter-config-validation");
+        WriteSettings(file, "[meta]\nversion=1\n[toggles]\ninvulnerable=1\ndamage=1\n"
+            "[parameters.damage]\nvalue=99\n");
+        Backend legacy;
+        CHECK(legacy.InitializeSettings(file));
+        CHECK(Preference(legacy).enabled);
+        CHECK(Preference(legacy, "damage").parameters == std::vector<std::string>{"1"});
+        CHECK(legacy.FlushSettings());
+        CHECK(ReadSettings(file).find("version=1") != std::string::npos);
+
+        WriteSettings(file, "[meta]\nversion=2\n[toggles]\ndamage=1\nfull_heal=1\n"
+            "[parameters.damage]\nvalue=4\nunknown=100\n[parameters.unknown]\nvalue=1\n");
+        toggle_settings::Data data;
+        std::string error;
+        CHECK(toggle_settings::Load(file, data, error));
+        CHECK(data.at("damage").enabled);
+        CHECK(data.at("damage").parameters == std::vector<std::string>{"4"});
+        CHECK(!data.contains("full_heal") && !data.contains("unknown"));
+        for (const auto value : {"nan", "inf", "0", "101", "2junk"}) {
+            WriteSettings(file, std::string("[meta]\nversion=2\n[toggles]\ninvulnerable=1\ndamage=1\n") +
+                "[parameters.damage]\nvalue=" + value + "\n");
+            const auto original = ReadSettings(file);
+            Backend invalid;
+            CHECK(!invalid.InitializeSettings(file, &error));
+            CHECK(!error.empty());
+            CHECK(!Preference(invalid).enabled && !Preference(invalid, "damage").enabled);
+            CHECK(Preference(invalid, "damage").parameters == std::vector<std::string>{"1"});
+            CHECK(invalid.FlushSettings());
+            CHECK(ReadSettings(file) == original);
+        }
+    }
+
+    void TestExtendedActionsNeverBecomeRestorationRequests()
+    {
+        const auto file = SettingsFile("extended-actions");
+        Backend backend;
+        CHECK(backend.InitializeSettings(file));
+        Ready(backend, {"remaining_days", "unlock_66_days", "flight_up", "flight_down"});
+        CHECK(!backend.Submit("remaining_days", {"67"}).accepted);
+        for (const auto id : {"remaining_days", "unlock_66_days", "flight_up", "flight_down"}) {
+            CHECK(backend.Submit(id).accepted);
+            CHECK(backend.Pump([](const Request& request) {
+                CHECK(!request.restoration);
+                return ExecutionResult{RequestState::Verified, "ok"};
+            }) == 1);
+        }
+        CHECK(backend.FlushSettings());
+        CHECK(!std::filesystem::exists(file));
+        backend.SetRuntimeState(true, "new session", "actions-b");
+        CHECK(backend.Pump([](const Request&) { CHECK(false); return ExecutionResult{}; }) == 0);
     }
 }
 
@@ -934,7 +1203,10 @@ int main(int argc, char** argv)
     TestSubmissionValidationQueueCapacityAndFixedPayload();
     TestItemSubmissionRequiresPreparedAvailableCatalogAndValidQuantity();
     TestDirectSubmitCannotBypassItemCatalogValidation();
+    TestItemQuantityInputRejectsOverflowAndPartialNumbers();
+    TestDustAcceptsLargeQuantitiesWithoutChangingOrdinaryItemLimits();
     TestItemRequestsAndCatalogAreInvalidatedOnSessionChange();
+      TestSameSessionRebindRequiresFreshItemPublication();
     TestItemDispatchIsNotReportedAsVerifiedWithoutReadback();
     TestExpirationFailureAndExceptionsNeverRetry();
     TestSessionChangeCancelsQueuedAndMarksRunningIndeterminate();
@@ -950,7 +1222,12 @@ int main(int argc, char** argv)
     TestSettingsQueuedDisableCancelledBySessionChangeIsReissued();
     TestSettingsFailedAndUnverifiedUserEnablesAreNotSaved();
     TestSettingsMalformedVersionsAndUnknownActions();
+    TestRemovedUpgradeRequirementToggleCannotRestoreOrSubmit();
     TestSettingsSaveFailurePreservesOriginalAndRetriesDirtyData();
+    TestParameterizedToggleRoundTripRestorationAndSessionChanges();
+    TestFailedParameterEditsPreserveVerifiedIntentAndCloseIgnoresDraft();
+    TestParameterSettingsLegacyVersionMalformedValuesAndUnknownIds();
+    TestExtendedActionsNeverBecomeRestorationRequests();
     if (failures)
         return 1;
     std::cout << "GlossTrainer PBZ gameplay tests passed (0 failures)\n";
