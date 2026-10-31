@@ -493,3 +493,12 @@ Debug、Release 的 PBZ 生产构建及各 21 套测试均通过，共 42 套，
 ## 2026-11-01 v1.1.1 发布准备
 
 按用户授权提交并推送 1.1.1，更新日志采用用户指定的两条修复与性能说明，性能贡献署名链接为 `https://github.com/domiz918`。沿用上述本地构建及测试证据，先对推送提交执行云端 Debug / Release 候选构建并核验来源与包内文件，再在同一提交创建 `PhantomBladeZero/v1.1.1` 标签；正式发布结果与附件核验将在完成后补记。
+
+源码提交 `9d6f0e3be30c7d1443637cdfb0577aaf8969714d` 已推送；[手动候选构建](https://github.com/GlossMod/GlossTrainer/actions/runs/41221223357) 的 Debug / Release 构建、回归和打包检查全部通过。下载核对候选 artifact digest、来源提交、ZIP 校验值和五文件清单，并经[独立 15 项复核](../../output/pbz-release-v1.1.1-20261101/independent-review/candidate-verification.json)后，在同一提交创建并推送 `PhantomBladeZero/v1.1.1` 标签。见[候选核验](../../output/pbz-release-v1.1.1-20261101/preflight/preflight-candidate-verification.json)。
+
+[v1.1.1 正式版本](https://github.com/GlossMod/GlossTrainer/releases/tag/PhantomBladeZero/v1.1.1) 已发布，非草稿、非预发布；[正式 CI](https://github.com/GlossMod/GlossTrainer/actions/runs/41221704152) 的 Debug、Release 和发布作业全部成功。回读确认发布说明恰为用户指定的两条内容与署名链接，标签指向上述发布源码；下载正式 ZIP 和 SHA256SUMS，核对附件 API digest、正式 CI artifact digest、来源提交、ZIP 字节一致性及五个包内文件的大小和 SHA-256。见[正式核验](../../output/pbz-release-v1.1.1-20261101/publication/published-verification.json)、[Release API](../../output/pbz-release-v1.1.1-20261101/publication/published-release.json)及[CI API](../../output/pbz-release-v1.1.1-20261101/publication/ci-result.json)。
+
+- 正式 ZIP SHA-256：`5a92cea005dcb5f0abe6e92178c4f6d34d8058a30de0420066661c3b5ea96054`。
+- 正式 `GlossTrainer.asi` SHA-256：`c8951632e1828f99f3d29378e5ff19176f146cef3068e0fdd2cc6d04f52301bb`。
+
+正式包由云端构建，与前文的本地包及手动候选包哈希不同；以上逐字节一致性指正式发布附件与正式 CI 上传的候选产物。本轮未安装到游戏目录，未新增游戏内验证。
