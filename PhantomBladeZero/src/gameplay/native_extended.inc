@@ -259,20 +259,29 @@
             }
             return {RequestState::Failed, "此功能的游戏结算入口尚未完成核对"};
         }
-        std::vector<ToggleState> ExtendedToggleStates(const Context& context) {
-            auto states = MovementToggleStates(context);
-            for (auto& state : DamageToggleStates(context)) states.push_back(std::move(state));
-            for (auto& state : ResourcesToggleStates(context)) states.push_back(std::move(state));
-            for (auto& state : CooldownToggleStates(context)) states.push_back(std::move(state));
-            for (auto& state : StealthToggleStates(context)) states.push_back(std::move(state));
-            for (std::size_t i = 0; i < economySwitches.size(); ++i) {
-                const auto& state = economySwitches[i];
-                const bool known = EconomyContract(context, i) &&
-                    (!state.enabled || EconomyBindingCurrent(i, economyBindings[i].object));
-                states.push_back({std::string(state.id), known, known && state.enabled,
-                    std::format("已保护 {} 次扣减；开关关闭后正常消耗", state.prevented)});
+        void AppendExtendedToggleSlice(const Context& context, std::size_t slice, std::vector<ToggleState>& states) {
+            if (slice < MovementToggleIds.size()) {
+                states.push_back(MovementToggleState(context, std::string(MovementToggleIds[slice])));
+                return;
             }
-            return states;
+            slice -= MovementToggleIds.size();
+            const auto append = [&](std::vector<ToggleState> group) {
+                for (auto& state : group) states.push_back(std::move(state));
+            };
+            switch (slice) {
+            case 0: append(DamageToggleStates(context)); return;
+            case 1: append(ResourcesToggleStates(context)); return;
+            case 2: append(CooldownToggleStates(context)); return;
+            case 3: append(StealthToggleStates(context)); return;
+            default: break;
+            }
+            const auto index = slice - 4;
+            if (index >= economySwitches.size()) return;
+            const auto& state = economySwitches[index];
+            const bool known = EconomyContract(context, index) &&
+                (!state.enabled || EconomyBindingCurrent(index, economyBindings[index].object));
+            states.push_back({std::string(state.id), known, known && state.enabled,
+                std::format("已保护 {} 次扣减；开关关闭后正常消耗", state.prevented)});
         }
         bool ExtendedSessionChanged(const Context& context) {
             DamageSessionChanged();

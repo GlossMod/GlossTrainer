@@ -1,4 +1,5 @@
 #include "../src/gameplay/extended_rules.hpp"
+#include "../src/gameplay/medicine_rules.hpp"
 #include <iostream>
 #include <limits>
 
@@ -6,6 +7,12 @@ namespace {
     using namespace gloss::gameplay;
     int checks{}, failures{};
 #define CHECK(...) do { ++checks; if (!(__VA_ARGS__)) { ++failures; std::cerr << "FAIL " << __LINE__ << ": " #__VA_ARGS__ "\n"; } } while (false)
+    void TestMedicineRefillRules() {
+        CHECK(MedicineMaximumInflated(2147083647));
+        CHECK(!MedicineMaximumInflated(2)); CHECK(!MedicineMaximumInflated(3));
+        CHECK(ValidMedicineDefault(2)); CHECK(!ValidMedicineDefault(0)); CHECK(!ValidMedicineDefault(100));
+        CHECK(ValidMedicineTotal(3)); CHECK(!ValidMedicineTotal(0)); CHECK(!ValidMedicineTotal(InflatedMedicineMaximum));
+    }
     void TestPlayerDirection() {
         CHECK(PlayerDamageDirection(false, false) == DamageDirection::Unrelated);
         CHECK(PlayerDamageDirection(true, true) == DamageDirection::Unrelated);
@@ -52,6 +59,7 @@ namespace {
 }
 int main() {
     TestPlayerDirection(); TestDamageAndDefense(); TestLethalAndBreak(); TestInvalidAndBoundaryInputs();
+    TestMedicineRefillRules();
     std::cout << checks << " checks, " << failures << " failures\n";
     return failures ? 1 : 0;
 }

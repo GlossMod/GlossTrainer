@@ -101,13 +101,13 @@
             if (!LocalGameThread() || stopping.load() || faulted.load()) return false;
             const auto current = CurrentContext();
             if (!current) return false;
-            if (movementCleanupScope && movementCleanupScope->context.Key() == context.Key()) {
+            if (movementCleanupScope && movementCleanupScope->context.SameKey(context)) {
                 const auto& identity = movementCleanupScope->identity;
                 return ObjectValid(context.world) && Read<std::uint32_t>(context.world + 0xc) == context.worldIndex &&
                     ObjectValid(context.pawn) && Read<std::uint32_t>(context.pawn + 0xc) == movementCleanupScope->pawnIndex &&
                     ObjectValid(identity.component) && Read<std::uint32_t>(identity.component + 0xc) == identity.componentIndex;
             }
-            return current && current->Key() == context.Key() &&
+            return current && current->SameKey(context) &&
                 Read<std::uint32_t>(current->pawn + 0xc) == Read<std::uint32_t>(context.pawn + 0xc);
         }
         constexpr std::array<std::pair<std::string_view, std::int32_t>, 5> WalkAttributes{{
@@ -366,58 +366,56 @@
             if (id == "ai_speed") return SetAiMovement(context, enabled, value);
             return SetMovementScalar(context, id, enabled, value);
         }
-        std::vector<ToggleState> MovementToggleStates(const Context& context) {
-            std::vector<ToggleState> states;
-            for (const std::string id : {"move_speed", "player_speed", "jump_height", "gravity", "game_speed", "ai_speed", "fov", "flight"}) {
-                std::string reason;
-                bool known = MovementCapability(context, id, reason);
-                const auto* state = MovementOverrideFor(id);
-                bool enabled = known && state && state->enabled;
-                if (enabled) {
-                    if (id == "game_speed") {
-                        const auto actual = ReadMovementGlobalTime(context);
-                        known = actual && state->baseline.CanRestore(MovementWorldIdentity(context)) &&
-                            MovementValueClose(*actual, state->target[0]);
-                    } else if (id == "move_speed") {
-                        const auto attributes = Read<Address>(context.pawn + 0x758);
-                        known = state->baseline.CanRestore(MovementIdentityFor(context, attributes));
-                        for (std::size_t i = 0; known && i < WalkAttributes.size(); ++i)
-                            known &= MovementValueClose(Read<float>(attributes + WalkAttributes[i].second + 12), state->target[i]);
-                    } else if (id == "fov") {
-                        const auto actual = ReadMovementFov(context);
-                        known = actual && state->baseline.CanRestore(MovementObjectIdentity(context, MovementCamera(context))) &&
-                            MovementValueClose(*actual, state->target[0]);
-                    } else {
-                        Address object{};
-                        std::int32_t offset{};
-                        known = MovementScalar(context, id, object, offset) &&
-                            state->baseline.CanRestore(MovementIdentityFor(context, object)) &&
-                            MovementValueClose(Read<float>(object + offset), state->target[0]);
-                    }
-                    if (!known) reason = "已启用的移动参数被游戏覆盖或对象变化，当前结果未匹配";
+        constexpr std::array<std::string_view, 8> MovementToggleIds{
+            "move_speed", "player_speed", "jump_height", "gravity", "game_speed", "ai_speed", "fov", "flight"};
+        ToggleState MovementToggleState(const Context& context, const std::string id) {
+            std::string reason;
+            bool known = MovementCapability(context, id, reason);
+            const auto* state = MovementOverrideFor(id);
+            bool enabled = known && state && state->enabled;
+            if (enabled) {
+                if (id == "game_speed") {
+                    const auto actual = ReadMovementGlobalTime(context);
+                    known = actual && state->baseline.CanRestore(MovementWorldIdentity(context)) &&
+                        MovementValueClose(*actual, state->target[0]);
+                } else if (id == "move_speed") {
+                    const auto attributes = Read<Address>(context.pawn + 0x758);
+                    known = state->baseline.CanRestore(MovementIdentityFor(context, attributes));
+                    for (std::size_t i = 0; known && i < WalkAttributes.size(); ++i)
+                        known &= MovementValueClose(Read<float>(attributes + WalkAttributes[i].second + 12), state->target[i]);
+                } else if (id == "fov") {
+                    const auto actual = ReadMovementFov(context);
+                    known = actual && state->baseline.CanRestore(MovementObjectIdentity(context, MovementCamera(context))) &&
+                        MovementValueClose(*actual, state->target[0]);
+                } else {
+                    Address object{};
+                    std::int32_t offset{};
+                    known = MovementScalar(context, id, object, offset) &&
+                        state->baseline.CanRestore(MovementIdentityFor(context, object)) &&
+                        MovementValueClose(Read<float>(object + offset), state->target[0]);
                 }
-                if (state && state->uncertain) { known = false; reason = "上次移动写入或恢复未通过回读，状态不确定"; }
-                if (id == "flight" && known) {
-                    const auto movement = MovementComponent(context);
-                    enabled = flightOverride.enabled;
-                    known = !flightOverride.uncertain && (!enabled ||
-                        (flightOverride.baseline.CanRestore(MovementIdentityFor(context, movement)) &&
-                        Read<std::uint8_t>(movement + 0x241) == 5 &&
-                        !(Read<std::uint8_t>(context.pawn + 0x5d) & 4) &&
-                        MovementValueClose(Read<float>(movement + 0x294), flightOverride.speed)));
-                    if (!known) reason = "飞行状态或恢复结果未通过实际回读";
-                }
-                if (id == "ai_speed" && known) {
-                    enabled = aiMovementOverride.enabled;
-                    known = !aiMovementOverride.uncertain && (!enabled || AiMovementReadback(context));
-                    if (!known) reason = aiMovementOverride.error.empty() ? "AI 倍率尚未通过实际对象回读" : aiMovementOverride.error;
-                }
-                if (reason.empty()) reason = state && !state->error.empty() ? state->error : "本地玩家参数实时回读";
-                states.push_back({id, known, known && enabled, std::move(reason),
-                    enabled && known ? std::vector<std::string>{std::format("{:.9g}",
-                        id == "flight" ? flightOverride.speed : id == "ai_speed" ? aiMovementOverride.parameter : state->parameter)} : std::vector<std::string>{}});
+                if (!known) reason = "已启用的移动参数被游戏覆盖或对象变化，当前结果未匹配";
             }
-            return states;
+            if (state && state->uncertain) { known = false; reason = "上次移动写入或恢复未通过回读，状态不确定"; }
+            if (id == "flight" && known) {
+                const auto movement = MovementComponent(context);
+                enabled = flightOverride.enabled;
+                known = !flightOverride.uncertain && (!enabled ||
+                    (flightOverride.baseline.CanRestore(MovementIdentityFor(context, movement)) &&
+                    Read<std::uint8_t>(movement + 0x241) == 5 &&
+                    !(Read<std::uint8_t>(context.pawn + 0x5d) & 4) &&
+                    MovementValueClose(Read<float>(movement + 0x294), flightOverride.speed)));
+                if (!known) reason = "飞行状态或恢复结果未通过实际回读";
+            }
+            if (id == "ai_speed" && known) {
+                enabled = aiMovementOverride.enabled;
+                known = !aiMovementOverride.uncertain && (!enabled || AiMovementReadback(context));
+                if (!known) reason = aiMovementOverride.error.empty() ? "AI 倍率尚未通过实际对象回读" : aiMovementOverride.error;
+            }
+            if (reason.empty()) reason = state && !state->error.empty() ? state->error : "本地玩家参数实时回读";
+            return {id, known, known && enabled, std::move(reason),
+                enabled && known ? std::vector<std::string>{std::format("{:.9g}",
+                    id == "flight" ? flightOverride.speed : id == "ai_speed" ? aiMovementOverride.parameter : state->parameter)} : std::vector<std::string>{}};
         }
         bool MovementCleanup(const Context& context) {
             if (!MovementContextCurrent(context)) return false;
@@ -484,7 +482,7 @@
             // unexpected game-side change. AI refresh only admits newly spawned
             // pawns and validates the ownership of each object before writing.
             AiMovementTick(context);
-            if (!MovementContextCurrent(context)) return;
+            if (!playerTimeOverride.enabled || !MovementContextCurrent(context)) return;
             for (const std::string_view id : {"player_speed"}) {
                 auto& state = *MovementOverrideFor(id);
                 if (!state.enabled || state.uncertain || !state.baseline.captured) continue;

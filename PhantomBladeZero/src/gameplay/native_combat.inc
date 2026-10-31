@@ -194,7 +194,7 @@
                 Read<std::uint8_t>(function + 0x104) != expected.size()) return false;
             auto field = Read<Address>(function + 0x50);
             for (const auto& parameter : expected) {
-                if (Name(Read<std::uint32_t>(field + 0x20)) != parameter.name ||
+                if (!NameIs(Read<std::uint32_t>(field + 0x20), parameter.name) ||
                     !PropertyLayout(field, parameter.type, parameter.size, parameter.offset) ||
                     Read<std::uint64_t>(field + 0x38) != parameter.flags ||
                     (!parameter.subtype.empty() && ObjectName(Read<Address>(field + 0x70)) != parameter.subtype) ||
@@ -328,6 +328,23 @@
             }
             return false;
         }
+        // The signatures describe classes, which do not change while the components
+        // live. Each frame rechecks the objects and the full contract runs periodically.
+        bool DodgeContractCurrent(const Context& context, Clock::time_point now) {
+            static Address checkedDeflect{}, checkedInput{};
+            static std::uint32_t checkedDeflectIndex{}, checkedInputIndex{};
+            static Clock::time_point nextCheck{};
+            const auto deflect = Read<Address>(context.pawn + 0xed0), input = Read<Address>(context.pawn + 0xeb8);
+            if (now < nextCheck && deflect == checkedDeflect && input == checkedInput && ObjectValid(deflect) && ObjectValid(input) &&
+                Read<std::uint32_t>(deflect + 0xc) == checkedDeflectIndex && Read<std::uint32_t>(input + 0xc) == checkedInputIndex &&
+                Read<Address>(deflect + 0x20) == context.pawn && Read<Address>(input + 0x20) == context.pawn) return true;
+            if (!DodgeContract(context)) { nextCheck = {}; return false; }
+            checkedDeflect = deflect; checkedInput = input;
+            checkedDeflectIndex = Read<std::uint32_t>(deflect + 0xc);
+            checkedInputIndex = Read<std::uint32_t>(input + 0xc);
+            nextCheck = now + std::chrono::seconds(1);
+            return true;
+        }
         void CombatTick(const Context& context) {
             if (combatCleanupRequested.load()) { CombatCleanup(); return; }
             if (!perfectDodgeEnabled && !perfectDeflectEnabled) return;
@@ -336,7 +353,7 @@
                 perfectDeflectEnabled = false; combatError = "完美格挡状态未通过回读，自动操作已停止";
             }
             if (!perfectDodgeEnabled) return;
-            if (!DodgeContract(context)) { perfectDodgeEnabled = false; combatError = "闪避入口已变化，自动操作已停止"; return; }
+            if (!DodgeContractCurrent(context, Clock::now())) { perfectDodgeEnabled = false; combatError = "闪避入口已变化，自动操作已停止"; return; }
             const auto deflect = Read<Address>(context.pawn + 0xed0), input = Read<Address>(context.pawn + 0xeb8);
             const auto system = Read<Address>(Read<Address>(base + 0xdf4d1c0) + 0x20);
             const auto cdo = Read<Address>(system + 0x160);

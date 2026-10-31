@@ -165,5 +165,7 @@ namespace gloss::localization {
         if (inserted) entry->second = selected == Language::Chinese ? std::string(source) : TranslateEnglish(source);
         return entry->second.c_str();
     }
-    void BeginFrame() { frameStrings.clear(); }
+    // Translating a string is a dictionary walk, so results outlive the frame. The
+    // limit bounds formatted strings; clearing here cannot strand an ImGui pointer.
+    void BeginFrame() { if (frameStrings.size() >= 4096) frameStrings.clear(); }
 }
