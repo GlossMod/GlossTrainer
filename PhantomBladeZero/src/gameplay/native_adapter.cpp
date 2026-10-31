@@ -17,6 +17,10 @@
 #include "resource_rules.hpp"
 #include "cooldown_rules.hpp"
 #include "tag_rules.hpp"
+#include "medicine_rules.hpp"
+#include "image_ranges.hpp"
+#include "reflection_cache.hpp"
+#include "status_schedule.hpp"
 #include <MinHook.h>
 #include "../runtime.hpp"
 #include <bcrypt.h>
@@ -32,7 +36,10 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 extern "C" { __declspec(dllexport) char PBZ_DebugBuffer[65536]{}; }
@@ -72,6 +79,11 @@ namespace gloss::gameplay::native {
                 return std::format("{:x}:{}:{:x}:{:x}:{}:{:x}", world, worldIndex,
                     instance, controller, controllerIndex, pawn);
             }
+            // Key() equality without formatting either side.
+            bool SameKey(const Context& other) const {
+                return world == other.world && worldIndex == other.worldIndex && instance == other.instance &&
+                    controller == other.controller && controllerIndex == other.controllerIndex && pawn == other.pawn;
+            }
         };
 
         Address base{};
@@ -87,6 +99,8 @@ namespace gloss::gameplay::native {
         std::atomic<DWORD> observedThread{}, expectedThread{};
         std::atomic<std::uint64_t> observedTicks{}, dispatchedCalls{};
         std::string activeSession;
+        Context activeContext; // Same identity as activeSession, compared without formatting.
+        bool activeBound{};
         std::string creationContext;
         bool creationAttempted{};
         Address activeCheat{};
@@ -135,13 +149,17 @@ namespace gloss::gameplay::native {
         }
         thread_local bool cacheExecutableQueries{};
         thread_local std::unordered_map<Address, bool> executablePages;
+        ExecutableImageRanges executableImage; // Written once in Initialize before any other thread reads it.
+        std::atomic<std::uint64_t> slowExecutableQueries{};
         bool Executable(Address address) {
+            if (executableImage.Contains(address)) return true;
             const auto page = address & ~Address{0xfff};
             if (cacheExecutableQueries) {
                 const auto found = executablePages.find(page);
                 if (found != executablePages.end()) return found->second;
             }
             MEMORY_BASIC_INFORMATION info{};
+            ++slowExecutableQueries;
             if (!VirtualQuery(reinterpret_cast<void*>(address), &info, sizeof(info)) || info.State != MEM_COMMIT)
                 return false;
             const bool executable = !(info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
@@ -149,50 +167,61 @@ namespace gloss::gameplay::native {
             if (cacheExecutableQueries) executablePages.insert_or_assign(page, executable);
             return executable;
         }
-        std::optional<std::string> Name(std::uint32_t id) {
+        // The result stays valid until this thread next resolves an uncached name.
+        const std::string* NameText(std::uint32_t id) {
             const auto blockIndex = id >> 16;
             const auto offset = (id & 0xffffu) * 2u;
             const auto blocks = base + 0xdd11ad0;
             const auto currentBlock = Read<std::uint32_t>(blocks - 8);
             const auto currentCursor = Read<std::uint32_t>(blocks - 4);
-            if (blockIndex > currentBlock || blockIndex >= 8192) return {};
+            if (blockIndex > currentBlock || blockIndex >= 8192) return nullptr;
             const auto block = Read<Address>(blocks + blockIndex * sizeof(Address));
-            if (!block || (blockIndex == currentBlock && offset + 2 > currentCursor)) return {};
+            if (!block || (blockIndex == currentBlock && offset + 2 > currentCursor)) return nullptr;
             std::uint16_t header{};
-            if (!ReadBytes(block + offset, &header, sizeof(header))) return {};
+            if (!ReadBytes(block + offset, &header, sizeof(header))) return nullptr;
             struct CachedName { Address block; std::uint16_t header; std::string text; };
             // FName entries are immutable; keep per-thread caches because the monitor
             // and game callback both resolve names. Validate pool identity on reuse.
             static thread_local std::unordered_map<std::uint32_t, CachedName> names;
             if (const auto found = names.find(id); found != names.end() &&
-                found->second.block == block && found->second.header == header) return found->second.text;
+                found->second.block == block && found->second.header == header) return &found->second.text;
             const auto remember = [&](std::string text) {
                 if (names.size() >= 32768) names.clear();
-                names.insert_or_assign(id, CachedName{block, header, text});
-                return text;
+                return &names.insert_or_assign(id, CachedName{block, header, std::move(text)}).first->second.text;
             };
             const auto count = header >> 6;
-            if (!count || count > 1023) return {};
+            if (!count || count > 1023) return nullptr;
             const bool wide = (header & 1) != 0;
             const auto length = count * (wide ? sizeof(wchar_t) : 1);
             if (offset + 2 + length > 0x20000 ||
-                (blockIndex == currentBlock && offset + 2 + length > currentCursor)) return {};
+                (blockIndex == currentBlock && offset + 2 + length > currentCursor)) return nullptr;
             if (!wide) {
                 std::string result(count, '\0');
                 if (!ReadBytes(block + offset + 2, result.data(), count) || result.find('\0') != std::string::npos)
-                    return {};
+                    return nullptr;
                 return remember(std::move(result));
             }
             std::wstring text(count, L'\0');
-            if (!ReadBytes(block + offset + 2, text.data(), length)) return {};
+            if (!ReadBytes(block + offset + 2, text.data(), length)) return nullptr;
             const auto bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), count, nullptr, 0, nullptr, nullptr);
-            if (bytes <= 0) return {};
+            if (bytes <= 0) return nullptr;
             std::string result(bytes, '\0');
             WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), count, result.data(), bytes, nullptr, nullptr);
             return remember(std::move(result));
         }
-        std::string ObjectName(Address object) {
-            return object ? Name(Read<std::uint32_t>(object + 0x18)).value_or("") : "";
+        std::optional<std::string> Name(std::uint32_t id) {
+            const auto* text = NameText(id);
+            return text ? std::optional<std::string>(*text) : std::nullopt;
+        }
+        bool NameIs(std::uint32_t id, std::string_view expected) {
+            const auto* text = NameText(id);
+            return text ? *text == expected : expected.empty();
+        }
+        // Compare or test the result immediately; it is not an owning copy.
+        std::string_view ObjectName(Address object) {
+            if (!object) return {};
+            const auto* text = NameText(Read<std::uint32_t>(object + 0x18));
+            return text ? std::string_view(*text) : std::string_view{};
         }
         bool ObjectValid(Address object) {
             constexpr std::uint32_t UnusableFlags = 0x40018000; // ProcessEvent rejection plus Begin/FinishDestroyed.
@@ -219,11 +248,14 @@ namespace gloss::gameplay::native {
             }
             return false;
         }
-        Address FindProperty(Address type, std::string_view name) {
+        // Per-thread like the name cache. A hit re-reads the owner's index and the
+        // member's name, so a reused address cannot return a stale member.
+        thread_local ReflectionCache propertyLookups, functionLookups;
+        Address WalkProperties(Address type, std::string_view name) {
             for (unsigned depth = 0; type && depth < 64; ++depth) {
                 auto property = Read<Address>(type + 0x50);
                 for (unsigned index = 0; property && index < 2048; ++index) {
-                    if (Name(Read<std::uint32_t>(property + 0x20)).value_or("") == name) return property;
+                    if (NameIs(Read<std::uint32_t>(property + 0x20), name)) return property;
                     const auto next = Read<Address>(property + 0x10);
                     if (next == property) return 0;
                     property = next;
@@ -232,10 +264,21 @@ namespace gloss::gameplay::native {
             }
             return 0;
         }
+        Address FindProperty(Address type, std::string_view name) {
+            if (type < 0x10000) return 0;
+            const auto typeIndex = Read<std::uint32_t>(type + 0xc);
+            const auto now = GetTickCount64();
+            ReflectionCache::Hit hit;
+            if (propertyLookups.Find(type, typeIndex, name, now, hit) &&
+                (!hit.member || NameIs(Read<std::uint32_t>(hit.member + 0x20), name))) return hit.member;
+            const auto property = WalkProperties(type, name);
+            propertyLookups.Remember(type, typeIndex, name, property, now);
+            return property;
+        }
         bool PropertyLayout(Address property, std::string_view type, std::int32_t size, std::int32_t offset) {
             return property && Read<std::int32_t>(property + 0x34) == size &&
                 Read<std::int32_t>(property + 0x44) == offset &&
-                Name(Read<std::uint32_t>(Read<Address>(property + 8) + 0x30)).value_or("") == type;
+                NameIs(Read<std::uint32_t>(Read<Address>(property + 8) + 0x30), type);
         }
         struct HealthReadback { float current{}, maximum{}; };
         Address Backpack(const Context& context) {
@@ -346,7 +389,7 @@ namespace gloss::gameplay::native {
         }
         bool LocalGameThread() {
             const auto tid = Read<DWORD>(base + GameThreadIdRva);
-            expectedThread.store(tid);
+            if (expectedThread.load(std::memory_order_relaxed) != tid) expectedThread.store(tid);
             return tid && tid == GetCurrentThreadId();
         }
         const ExpectedFunction* Contract(std::string_view name) {
@@ -372,7 +415,7 @@ namespace gloss::gameplay::native {
             }
             return {};
         }
-        Address FindFunction(Address owner, std::string_view name) {
+        Address WalkFunctions(Address owner, std::string_view name) {
             for (unsigned depth = 0; owner && depth < 64; ++depth) {
                 auto function = Read<Address>(owner + 0x48);
                 for (unsigned index = 0; function && index < 2048; ++index) {
@@ -384,6 +427,17 @@ namespace gloss::gameplay::native {
                 owner = Read<Address>(owner + 0x40);
             }
             return 0;
+        }
+        Address FindFunction(Address owner, std::string_view name) {
+            if (owner < 0x10000) return 0;
+            const auto ownerIndex = Read<std::uint32_t>(owner + 0xc);
+            const auto now = GetTickCount64();
+            ReflectionCache::Hit hit;
+            if (functionLookups.Find(owner, ownerIndex, name, now, hit) &&
+                (!hit.member || ObjectName(hit.member) == name)) return hit.member;
+            const auto function = WalkFunctions(owner, name);
+            functionLookups.Remember(owner, ownerIndex, name, function, now);
+            return function;
         }
         // These engine helpers have different flags and return parameters from GM execs.
         bool TimeDilationSignature(Address function, bool getter) {
@@ -453,16 +507,23 @@ namespace gloss::gameplay::native {
             static thread_local MissingNameCache missing;
             const auto poolRevision = (static_cast<std::uint64_t>(last) << 32) | cursor;
             if (missing.Contains(text, poolRevision)) return {};
+            // The game appends names constantly. Search only what was added since the
+            // last complete search, or a name it never registers rescans the whole pool.
+            auto scanned = missing.Scanned(text);
+            if (scanned > poolRevision) scanned = 0;
+            const auto scannedBlock = static_cast<std::uint32_t>(scanned >> 32);
+            const auto scannedCursor = static_cast<std::uint32_t>(scanned);
             bool completeScan = true;
-            std::vector<unsigned char> bytes(0x20000);
-            for (std::uint32_t block = 0; block <= last; ++block) {
+            static thread_local std::vector<unsigned char> bytes(0x20000);
+            for (std::uint32_t block = scannedBlock; block <= last; ++block) {
                 const auto size = block == last ? cursor : 0x20000;
-                if (size < text.size() + 2) continue;
-                if (!ReadBytes(Read<Address>(base + 0xdd11ad0 + block * 8), bytes.data(), size)) {
+                const std::uint32_t first = block == scannedBlock ? scannedCursor : 0;
+                if (size < first + text.size() + 2) continue;
+                if (!ReadBytes(Read<Address>(base + 0xdd11ad0 + block * 8) + first, bytes.data() + first, size - first)) {
                     completeScan = false;
                     continue;
                 }
-                auto begin = bytes.begin() + 2;
+                auto begin = bytes.begin() + first + 2;
                 const auto end = bytes.begin() + size;
                 while (begin != end) {
                     const auto found = std::search(begin, end, text.begin(), text.end());
@@ -562,7 +623,7 @@ namespace gloss::gameplay::native {
             return parameters.result;
         }
         void ExtendedResourcePreChange(void* object, const void* attribute, float* proposed, bool baseValue) noexcept;
-        std::vector<ToggleState> ExtendedToggleStates(const Context& context);
+        void AppendExtendedToggleSlice(const Context& context, std::size_t slice, std::vector<ToggleState>& states);
         #include "native_attributes.inc"
         #include "native_combat.inc"
         #include "native_movement.inc"
@@ -580,20 +641,46 @@ namespace gloss::gameplay::native {
                     GetBackend().SetCapability(id, state.known, state.known ? "飞行契约已核对；执行时另行检查启用状态" : state.reason);
             }
         }
-        void PublishToggles(const Context& context) {
+        // Slice 0 is the combat group, then each movement toggle, the four extended
+        // groups and each economy switch, ending with the statistics read-back.
+        constexpr std::size_t ToggleSliceCount = 1 + MovementToggleIds.size() + 4 + 3;
+        constexpr std::size_t StatusSliceCount = ToggleSliceCount + 1;
+        StatusSchedule statusSchedule;
+        std::vector<ToggleState> statusStates;
+        void AppendToggleSlice(const Context& context, std::size_t slice, std::vector<ToggleState>& states) {
+            if (slice) { AppendExtendedToggleSlice(context, slice - 1, states); return; }
             const auto invulnerable = ReadGameplayTagCount(context, "CharacterState.Stand.Invulnerable.Debug");
-            std::vector<ToggleState> states{
-                ShachiToggleState(),
-                DarkSourceToggleState(),
-                PerfectDeflectState(context),
-                PerfectDodgeState(context),
-                {"invulnerable", invulnerable.has_value(), invulnerable.value_or(0) > 0, invulnerable ? "能力系统无敌标签实时回读" : "无敌状态未读回"}
-            };
-            for (auto& state : ExtendedToggleStates(context)) {
-                RefreshExtendedCapabilities(state);
-                states.push_back(std::move(state));
-            }
+            states.push_back(ShachiToggleState());
+            states.push_back(DarkSourceToggleState());
+            states.push_back(PerfectDeflectState(context));
+            states.push_back(PerfectDodgeState(context));
+            states.push_back({"invulnerable", invulnerable.has_value(), invulnerable.value_or(0) > 0, invulnerable ? "能力系统无敌标签实时回读" : "无敌状态未读回"});
+        }
+        void PublishToggleStatesFrom(std::vector<ToggleState> states) {
+            for (const auto& state : states) RefreshExtendedCapabilities(state);
             GetBackend().PublishToggleStates(std::move(states));
+        }
+        // Immediate pass for a just-executed request. Results gathered by a pass in
+        // progress may predate that request, so they are dropped.
+        void PublishToggles(const Context& context) {
+            std::vector<ToggleState> states;
+            for (std::size_t slice = 0; slice < ToggleSliceCount; ++slice) AppendToggleSlice(context, slice, states);
+            statusStates.clear();
+            statusSchedule.Restart();
+            PublishToggleStatesFrom(std::move(states));
+        }
+        void StatusTick(const Context& context, Clock::time_point now) {
+            const auto& backend = GetBackend();
+            const bool immediate = backend.StatusWanted() || backend.RestorationPending();
+            const auto slice = statusSchedule.Next(now, immediate, StatusSliceCount);
+            if (slice == StatusSliceCount) return;
+            PerformanceScope performance(7);
+            if (slice < ToggleSliceCount) AppendToggleSlice(context, slice, statusStates);
+            else {
+                PublishReadback(ReadHealth(context), &context);
+                PublishToggleStatesFrom(std::exchange(statusStates, {}));
+            }
+            if (statusSchedule.Finished(StatusSliceCount)) statusSchedule.Complete(now);
         }
         bool Signature(Address function, const ExpectedFunction& expected, std::string& reason) {
             if (!ObjectValid(function) || ObjectName(function) != expected.name ||
@@ -800,6 +887,7 @@ namespace gloss::gameplay::native {
         #include "native_stealth.inc"
         #include "native_progress.inc"
         #include "native_extended.inc"
+        #include "native_medicine.inc"
 
         ExecutionResult Execute(const Request& request) {
             if (stopping.load() || faulted.load() || !LocalGameThread()) return {RequestState::Failed, "游戏线程条件失效"};
@@ -811,6 +899,7 @@ namespace gloss::gameplay::native {
             const auto* feature = FindFeature(request.featureId);
             if (request.featureId == "grant_item") return GrantItem(*context, request);
             if (request.featureId == "set_max_health") return SetMaxHealth(*context, request);
+            if (request.featureId == "refill_medicine") return RefillMedicine(*context);
             if (feature && (feature->functionName == "Native_ExtendedFeature" || feature->functionName == "Native_ExtendedAction")) {
                 const auto result = ExecuteExtended(*context, request);
                 PublishToggles(*context);
@@ -903,9 +992,11 @@ namespace gloss::gameplay::native {
                 ~ExecutableQueryScope() { cacheExecutableQueries = false; executablePages.clear(); }
             } executableQueryScope;
             static auto nextFaultReport = Clock::now() + std::chrono::seconds(10);
-            if (Clock::now() >= nextFaultReport) {
-                gloss::Log(std::format("PBZ perf read faults: {}", readFaults.exchange(0)));
-                nextFaultReport = Clock::now() + std::chrono::seconds(10);
+            const auto now = Clock::now();
+            if (now >= nextFaultReport) {
+                gloss::Log(std::format("PBZ perf read faults: {} slow executable queries: {}",
+                    readFaults.exchange(0), slowExecutableQueries.exchange(0)));
+                nextFaultReport = now + std::chrono::seconds(10);
             }
             lastControllerTick.store(GetTickCount64());
             observedThread.store(GetCurrentThreadId());
@@ -917,14 +1008,19 @@ namespace gloss::gameplay::native {
             if (tick == 1) gloss::Log(std::format("PBZ local ReceiveTick observed on thread {}; GGameThreadId={}",
                 GetCurrentThreadId(), expectedThread.load()));
             if (faulted.load()) return;
-            const auto key = context.Key();
             std::string reason;
-            if (!EnsureCheat(context, reason)) { GetBackend().SetRuntimeState(false, std::move(reason), key); return; }
+            if (!EnsureCheat(context, reason)) { GetBackend().SetRuntimeState(false, std::move(reason), context.Key()); return; }
             const auto attributes = Read<Address>(context.pawn + 0x758);
             const bool attributesChanged = combatBinding.attributes && (attributes != combatBinding.attributes ||
                 Read<std::uint32_t>(attributes + 0xc) != combatBinding.attributeIndex ||
                 Read<std::uint32_t>(context.pawn + 0xc) != combatBinding.pawnIndex);
-            if (activeSession != key || activeCheat != context.cheat || attributesChanged || !GetBackend().IsReady()) {
+            if (!activeBound || !context.SameKey(activeContext) || activeCheat != context.cheat || attributesChanged || !GetBackend().IsReady()) {
+                const auto key = context.Key();
+                // A new session may have reused addresses; nothing it finds can be stale.
+                propertyLookups.Clear();
+                functionLookups.Clear();
+                statusStates.clear();
+                statusSchedule.Restart();
                 // Object storage can be reused without changing Context::Key().
                 // Invalidate queued work/read-back and re-arm saved toggles before rebinding.
                 GetBackend().SetRuntimeState(false, "玩家对象已变化，等待重新绑定", key);
@@ -939,6 +1035,8 @@ namespace gloss::gameplay::native {
                 if (darkSourceEnabled && (!combatReady || !FillDarkSource())) darkSourceEnabled = false;
                 if (faulted.load()) return;
                 activeSession = key;
+                activeContext = context;
+                activeBound = true;
                 activeCheat = context.cheat;
                 GetBackend().SetRuntimeState(true, "运行时契约已核对；调用结果仍需游戏内验证", key);
                 ResetItemImages(GetBackend().GetSnapshot().generation);
@@ -958,6 +1056,8 @@ namespace gloss::gameplay::native {
                     if (feature.functionName == "Native_InfiniteShachi") ready = combatReady;
                     if (feature.functionName == "Native_InfiniteDarkSource") ready = DarkSourceReady();
                     if (feature.functionName == "Native_SetMaxHealth") ready = MaxHealthReady(context);
+                    // The backpack can load after this bind; every refill checks its contract again.
+                    if (feature.functionName == "Native_RefillMedicine") ready = true;
                     if (feature.functionName == "Native_PerfectDeflect") ready = PerfectTagFunction(true) && PerfectTagFunction(false);
                     if (feature.functionName == "Native_PerfectDodge") ready = DodgeContract(context) && DodgeInputAction(context);
                     if ((feature.functionName == "Native_ExtendedFeature" || feature.functionName == "Native_ExtendedAction") && !feature.fixedArguments.empty())
@@ -967,14 +1067,8 @@ namespace gloss::gameplay::native {
                 }
                 PublishReadback(ReadHealth(context), &context);
             }
-            static auto nextReadback = Clock::time_point{};
-            const auto now = Clock::now();
             MovementTick(context);
-            if (now >= nextReadback) {
-                PublishReadback(ReadHealth(context), &context);
-                PublishToggles(context);
-                nextReadback = now + std::chrono::milliseconds(250);
-            }
+            StatusTick(context, now);
             RefreshItems(context);
             GetBackend().Pump(Execute, 1);
             { PerformanceScope combatPerformance(4); CombatTick(context); }
@@ -998,6 +1092,7 @@ namespace gloss::gameplay::native {
             struct Guard { ~Guard() { insideAdapter = false; } } guard;
             try {
                 if (ObjectName(reinterpret_cast<Address>(function)) != "ReceiveTick") return;
+                PerformanceScope performance(6);
                 const auto context = CurrentContext();
                 if (!context) { GetBackend().SetRuntimeState(false, "等待有效世界和本地玩家"); return; }
                 if (reinterpret_cast<Address>(object) == context->controller) Tick(*context);
@@ -1084,6 +1179,7 @@ namespace gloss::gameplay::native {
         ItemPublish(false, "正在等待游戏物品目录验证");
         if (initialized.exchange(true)) return installed.load();
         base = reinterpret_cast<Address>(GetModuleHandleW(nullptr));
+        executableImage.Capture(base);
         std::wstring path(32768, L'\0');
         const auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
         if (!length || length >= path.size()) { GetBackend().SetRuntimeState(false, "无法读取主程序路径"); return false; }

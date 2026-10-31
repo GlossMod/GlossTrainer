@@ -108,7 +108,7 @@ namespace gloss::gameplay {
                         "GM_State", {}, false, {"preset", state.first, enabled ? "on" : "off"});
                 }
             }
-            add("refill_medicine", "药品大量补给", "将已拥有药品的使用次数和上限提高至 2147083647；可能保存至进度。", 1, 1, "GM_InfiniteMedicine", {}, true);
+            add("refill_medicine", "补满药品", "将已装备药品补满至当前上限（含能力加成）；并修复旧版写入的异常上限。", 1, 1, "Native_RefillMedicine", {}, true);
             add("refill_ultimate", "终结技大量补给", "提高背包终结技次数和上限至 2147083648 并充满；可能写入进度，不能按普通补满撤销。", 2, 1, "GM_InfiniteUltimateShachi", {}, true);
             add("grant_item", "获取物品", "从物品目录选择并获取指定数量。", 3, 2, "Native_GrantItem",
                 {{"item_key", "物品", ParamType::String, "", 0, 0, 256},

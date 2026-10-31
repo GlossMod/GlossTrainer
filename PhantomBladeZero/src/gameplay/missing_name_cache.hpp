@@ -11,6 +11,11 @@ namespace gloss::gameplay {
             const auto found = entries.find(std::string(name));
             return found != entries.end() && found->second == revision;
         }
+        // The pool is append-only, so a later search resumes from this revision.
+        std::uint64_t Scanned(std::string_view name) const {
+            const auto found = entries.find(std::string(name));
+            return found == entries.end() ? 0 : found->second;
+        }
         void Remember(std::string_view name, std::uint64_t revision) {
             if (entries.size() >= 1024) entries.clear();
             entries.insert_or_assign(std::string(name), revision);

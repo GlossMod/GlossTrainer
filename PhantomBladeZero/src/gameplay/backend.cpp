@@ -59,6 +59,7 @@ namespace gloss::gameplay {
                 intent.parameters = saved.parameters;
                 intent.restorePending = intent.enabled;
             }
+            ModelChanged();
         }
         if (error) *error = std::move(message);
         return loaded;
@@ -92,8 +93,16 @@ namespace gloss::gameplay {
     }
 
     bool Backend::IsReady() const {
-        std::lock_guard lock(mutex_);
-        return ready_;
+        return readyHint_.load(std::memory_order_acquire);
+    }
+
+    void Backend::ModelChanged() {
+        const bool restoring = std::any_of(toggleIntents_.begin(), toggleIntents_.end(),
+            [](const auto& intent) { return intent.restorePending; });
+        readyHint_.store(ready_, std::memory_order_release);
+        restorationHint_.store(restoring, std::memory_order_relaxed);
+        workHint_.store(restoring || !queue_.empty(), std::memory_order_release);
+        revision_.fetch_add(1, std::memory_order_release);
     }
 
     bool Backend::ItemsReady() const {
@@ -208,6 +217,9 @@ namespace gloss::gameplay {
 
     void Backend::SetRuntimeState(bool ready, std::string status, std::string sessionKey) {
         std::lock_guard lock(mutex_);
+        // Waiting states repeat every frame. An unchanged one has nothing to publish.
+        if (ready_ == ready && sessionKey_ == sessionKey && status_ == status) return;
+        struct Changed { Backend& backend; ~Changed() { backend.ModelChanged(); } } changed{*this};
         if (ready_ != ready || sessionKey_ != sessionKey) {
             ++generation_;
             for (auto& record : records_) {
@@ -250,27 +262,38 @@ namespace gloss::gameplay {
         const auto found = std::find_if(capabilities_.begin(), capabilities_.end(), [&](const auto& item) {
             return item.featureId == featureId;
         });
-        found->ready = ready && !feature->functionName.empty();
-        found->reason = feature->functionName.empty() ? feature->unavailableReason :
-            (reason.empty() && !found->ready ? feature->unavailableReason : std::move(reason));
+        const bool nowReady = ready && !feature->functionName.empty();
+        auto nowReason = feature->functionName.empty() ? feature->unavailableReason :
+            (reason.empty() && !nowReady ? feature->unavailableReason : std::move(reason));
+        if (found->ready == nowReady && found->reason == nowReason) return;
+        found->ready = nowReady;
+        found->reason = std::move(nowReason);
+        ModelChanged();
     }
 
     void Backend::PublishStatistics(std::vector<Statistic> statistics) {
         std::lock_guard lock(mutex_);
+        if (statistics_ == statistics) return;
         statistics_ = std::move(statistics);
+        ModelChanged();
     }
 
     void Backend::PublishToggleStates(std::vector<ToggleState> states) {
         std::lock_guard lock(mutex_);
+        if (toggleStates_ == states) return;
         toggleStates_ = std::move(states);
+        ModelChanged();
     }
 
     void Backend::PublishItems(std::vector<ItemEntry> items, bool ready, std::string status) {
+        // Build the immutable publication outside the lock the menu's render thread takes.
+        ItemList published(std::move(items));
         std::lock_guard lock(mutex_);
         if (!ready_) return;
-        items_ = std::move(items);
+        items_ = std::move(published);
         itemsReady_ = ready;
         itemCatalogStatus_ = std::move(status);
+        ModelChanged();
     }
 
     SubmitResult Backend::SubmitItem(std::string_view key, int quantity) {
@@ -292,6 +315,7 @@ namespace gloss::gameplay {
             return {false, 0, "请求有效期必须大于 0 且不超过 60 秒"};
 
         std::lock_guard lock(mutex_);
+        struct Changed { Backend& backend; ~Changed() { backend.ModelChanged(); } } changed{*this};
         ExpirePending(now);
         const bool rememberToggle = settingsInitialized_ && toggleIndex < toggleIntents_.size();
         if (rememberToggle && !toggleEnabled) {
@@ -362,12 +386,22 @@ namespace gloss::gameplay {
     std::size_t Backend::Pump(const std::function<ExecutionResult(const Request&)>& execute,
         std::size_t budget, Clock::time_point now) {
         if (!execute || budget == 0) return 0;
+        // Every Tick lands here. With nothing queued or restoring, do not contend
+        // with the render thread for the lock.
+        if (!workHint_.load(std::memory_order_acquire)) return 0;
         std::uint64_t lastEligibleId{};
         {
             std::lock_guard lock(mutex_);
             if (pumping_) return 0;
+            const auto restoring = [&] { return std::count_if(toggleIntents_.begin(), toggleIntents_.end(),
+                [](const auto& intent) { return intent.restorePending; }); };
+            const auto queued = queue_.size();
+            const auto nextId = nextRequestId_;
+            const auto restoringBefore = restoring();
             ExpirePending(now);
             QueueRestoration(now);
+            // A restore still waiting on its feature repeats this every frame.
+            if (queue_.size() != queued || nextRequestId_ != nextId || restoring() != restoringBefore) ModelChanged();
             if (!ready_ || queue_.empty()) return 0;
             pumping_ = true;
             lastEligibleId = queue_.back().requestId;
@@ -386,6 +420,7 @@ namespace gloss::gameplay {
             Request request;
             {
                 std::lock_guard lock(mutex_);
+                struct Changed { Backend& backend; ~Changed() { backend.ModelChanged(); } } changed{*this};
                 ExpirePending(now + (Clock::now() - started));
                 if (!ready_ || queue_.empty() || queue_.front().requestId > lastEligibleId) break;
                 request = std::move(queue_.front());
@@ -427,6 +462,7 @@ namespace gloss::gameplay {
                     FinishToggleRequest(request, result.state, true);
                 }
                 TrimHistory();
+                ModelChanged();
             }
         }
         return dispatched;
