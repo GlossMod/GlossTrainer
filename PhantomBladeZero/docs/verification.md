@@ -479,3 +479,17 @@ Debug/Release 下 PBZ 构建与 21 套测试全部通过（含新增 PBZPerforma
 将 `origin/master` 的 `fc4ea5b` 合入本地 `bf6a564`，保留本地更新失败隔离、顶部新版本徽标及其回归测试，同时纳入上游性能优化与药品补满修复。唯一冲突为本文末尾的追加记录，已完整保留两边内容；代码自动合并后检查了徽标与菜单缓存的共存情况。
 
 指定 `--game=PhantomBladeZero` 后，Debug、Release 的 PBZ 生产构建及各 21 套测试全部通过，共 42 套，包含更新失败、性能与药品规则回归。见[汇总与产物哈希](../../output/merge-upstream-20261101/results.json)、[Debug 构建](../../output/merge-upstream-20261101/build-debug.log)、[Release 构建](../../output/merge-upstream-20261101/build-release.log)及[复验脚本与逐项日志](../../output/merge-upstream-20261101/)。本轮未运行图形宿主或游戏内验证。
+
+## 2026-11-01 v1.1.1 本地打包
+
+将唯一版本常量 `src/runtime.hpp` 更新为 `1.1.1`，同步模块说明与本版更新日志，包含合并后的性能优化、补满药品修复、更新检查失败隔离及新版本徽标。
+
+Debug、Release 的 PBZ 生产构建及各 21 套测试均通过，共 42 套，见[构建、测试与产物哈希](../../output/pbz-package-v1.1.1-20261101/results.json)。PowerShell 5 / 7 各通过打包 29 项、复制安装与配置保留 45 项、发行通道隔离 45 项，共 238 项，见[工具验证汇总](../../output/pbz-package-v1.1.1-20261101/validation/tooling-results.json)。安装检查使用模拟目录。
+
+本地 [Windows x64 ZIP](../../output/pbz-package-v1.1.1-20261101/package/GlossTrainer-PhantomBladeZero-v1.1.1-win64.zip) SHA-256：`83a8f8ead76981894a428786d92015e1e28e6bef3977a0ed93de4d03f6709baa`；[独立 GlossTrainer.asi](../../output/pbz-package-v1.1.1-20261101/artifact/GlossTrainer.asi) SHA-256：`99eaef76c16e02b20cc87fc069408a5835ea21e4e21de2b180c123b2fb2de160`。见[校验文件](../../output/pbz-package-v1.1.1-20261101/package/GlossTrainer-PhantomBladeZero-v1.1.1-win64.SHA256SUMS.txt)和[最终包逐文件核验](../../output/pbz-package-v1.1.1-20261101/package-verification.json)：ZIP 恰含五个允许文件，包内 ASI 与本次 Release 构建一致，ASI 版本字符串与双语说明均为 1.1.1，Loader 归档匹配固定官方哈希。
+
+产物来自尚未提交的本地 1.1.1 工作源码，因此清单 `sourceRevision` 保持 `null`；[源码状态及文件哈希](../../output/pbz-package-v1.1.1-20261101/source-state.json)与[差异快照](../../output/pbz-package-v1.1.1-20261101/source-changes.patch)用于追溯。本轮仅本地构建与打包，未安装到游戏或发布 GitHub Release，未新增游戏内验证。
+
+## 2026-11-01 v1.1.1 发布准备
+
+按用户授权提交并推送 1.1.1，更新日志采用用户指定的两条修复与性能说明，性能贡献署名链接为 `https://github.com/domiz918`。沿用上述本地构建及测试证据，先对推送提交执行云端 Debug / Release 候选构建并核验来源与包内文件，再在同一提交创建 `PhantomBladeZero/v1.1.1` 标签；正式发布结果与附件核验将在完成后补记。
