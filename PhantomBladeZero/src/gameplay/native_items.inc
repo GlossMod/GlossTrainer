@@ -80,8 +80,8 @@
             std::uint32_t backpackIndex{};
             std::vector<NativeItem> rows;
             std::array<ItemSparseMap, 5> tables{};
-            std::size_t parsed{}, described{}, descriptionField{}, cacheHits{};
-            bool built{}, complete{};
+            std::size_t parsed{}, described{}, descriptionField{}, cacheHits{}, reformatted{};
+            bool built{}, complete{}, reformatting{};
             Clock::time_point nextRefresh{}, nextProgress{}, started{};
         };
         NativeItemCatalog itemCatalog;
@@ -137,16 +137,33 @@
             }
             if (!dirty) return;
             if (itemCacheCulture.empty()) return;
-            const auto path = ItemCachePath();
-            auto temporary = path; temporary += ".tmp";
-            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-            if (!stream) return;
-            stream << SupportedHash << '\n';
+            // Serialize and write off the game thread: a write-through replace can
+            // block for far longer than a frame. The module is pinned until exit.
+            static std::mutex saveMutex;
+            static std::atomic<std::uint64_t> latestSave{};
+            const auto save = ++latestSave;
+            struct Row { std::string key, name, category, raw; };
+            std::vector<Row> rows;
+            rows.reserve(cachedItemText.size());
             for (const auto& [key, value] : cachedItemText)
-                stream << std::quoted(key) << ' ' << std::quoted(value.entry.name) << ' '
-                    << std::quoted(value.entry.category) << ' ' << std::quoted(value.raw) << '\n';
-            stream.close();
-            if (stream) MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+                rows.push_back({key, value.entry.name, value.entry.category, value.raw});
+            try {
+                std::thread([path = ItemCachePath(), rows = std::move(rows), save] {
+                    try {
+                        std::lock_guard lock(saveMutex);
+                        if (save != latestSave.load()) return; // A newer save has every row of this one.
+                        auto temporary = path; temporary += ".tmp";
+                        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+                        if (!stream) return;
+                        stream << SupportedHash << '\n';
+                        for (const auto& row : rows)
+                            stream << std::quoted(row.key) << ' ' << std::quoted(row.name) << ' '
+                                << std::quoted(row.category) << ' ' << std::quoted(row.raw) << '\n';
+                        stream.close();
+                        if (stream) MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+                    } catch (...) { /* The cache is optional; the next session rebuilds it. */ }
+                }).detach();
+            } catch (const std::system_error&) { /* Same: no thread means no cache this time. */ }
         }
 
         std::uint64_t ItemNameIdentity(const NameValue& id) {
@@ -454,7 +471,7 @@
         bool ItemBackpackMatches(const Context& context, Address backpack) {
             const auto current = CurrentContext();
             return !stopping.load() && !faulted.load() && LocalGameThread() && current &&
-                current->Key() == context.Key() && current->Key() == activeSession &&
+                current->SameKey(context) && activeBound && current->SameKey(activeContext) &&
                 Backpack(*current) == backpack && ObjectValid(backpack) &&
                 Read<std::uint32_t>(backpack + 0xc) == itemCatalog.backpackIndex;
         }
@@ -734,9 +751,19 @@
             }
             const auto now = Clock::now();
             const bool inputChanged = ItemRefreshInput(context);
-            if (inputChanged && itemCatalog.complete) {
-                for (auto& item : itemCatalog.rows) item.entry.description = ItemFormattedDescription(item.rawDescription);
-                ItemPublish(true, std::format("已从游戏加载物品；连招按键：{}", itemInput.device));
+            if (inputChanged && itemCatalog.complete) { itemCatalog.reformatting = true; itemCatalog.reformatted = 0; }
+            if (itemCatalog.reformatting) {
+                // Rich text for every row can take far longer than a frame.
+                ItemLoadingBudget budget(Clock::now(), std::chrono::milliseconds(1), 64);
+                while (itemCatalog.reformatted < itemCatalog.rows.size() && budget.Continue(Clock::now())) {
+                    auto& item = itemCatalog.rows[itemCatalog.reformatted++];
+                    item.entry.description = ItemFormattedDescription(item.rawDescription);
+                    budget.Consume();
+                }
+                if (itemCatalog.reformatted == itemCatalog.rows.size()) {
+                    itemCatalog.reformatting = false;
+                    ItemPublish(true, std::format("已从游戏加载物品；连招按键：{}", itemInput.device));
+                }
             }
             if (!itemCatalog.built) {
                 if (!force && now < itemCatalog.nextRefresh) return;

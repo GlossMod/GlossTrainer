@@ -39,7 +39,7 @@ namespace
             {"Native_PerfectDeflect", {{}, 1}}, {"Native_PerfectDodge", {{}, 1}},
             {"GM_GetHealth", {{}, 0}}, {"Native_SetMaxHealth", {{ParamType::Float}, 0}},
             {"GM_FullHeal", {{}, 0}}, {"GM_State", {{}, 3}},
-            {"GM_InfiniteMedicine", {{}, 0}}, {"GM_InfiniteUltimateShachi", {{}, 0}},
+            {"Native_RefillMedicine", {{}, 0}}, {"GM_InfiniteUltimateShachi", {{}, 0}},
             {"GM_FillAllMaterilas", {{}, 0}}, {"GM_GiveMedicine", {{ParamType::Name}, 0}},
             {"GM_GiveAccessory", {{ParamType::Name}, 0}},
             {"UpgradeMainWeapon", {{ParamType::Name, ParamType::Int}, 0}},

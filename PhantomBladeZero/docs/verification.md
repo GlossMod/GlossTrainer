@@ -453,3 +453,29 @@ CE MCP 核对 CL-301524_JKS-17219 的反射布局、函数入口、本地对象�
 UI 实现前已使用 `custom-imagegen` 生成并查看[双主题原型](../../output/update-badge-20261031/imagegen/header-prototype.png)。Provider：`model_providers.custom`，模型：`gpt-image-2.5`；[完整最终提示词](../../output/update-badge-20261031/imagegen/prompt.txt)要求保持现有顶部布局，仅在版本右上方加入小红色 `new` 徽标，并为作者文字预留间距。
 
 验证汇总：[results.json](../../output/update-badge-20261031/results.json)。本地 Release [GlossTrainer.asi](../../output/update-badge-20261031/artifact/GlossTrainer.asi) SHA-256：`94D7172CDA4FAA4787FFCBD81E028C9009B8595CE11C1D652179FB736DB4B3AB`；两配置及交付副本哈希见 [hashes.json](../../output/update-badge-20261031/hashes.json)。版本保持 1.1.0，本轮未安装到游戏目录、提交、推送或发布。
+
+## 2026-10-31 Tick 核心循环性能修复
+
+用户日志显示全部功能关闭时 Tick 仍平均 7–9ms、每次超过 2ms、峰值 48–91ms。源码定位到两个主要来源，并有一项本机基准支持第一点；尚未在游戏内复测，以下不宣称已达到目标帧耗时。
+
+- 每帧：`ObjectValid` 经 `Executable` 调用 `VirtualQuery`，而页缓存每次 Tick 清空，且钩子里 Tick 之前的 `CurrentContext` 完全不走缓存（此部分原统计未覆盖）。[基准](../../output/pbz-performance-20261031/virtualquery-benchmark.json)显示查询耗时随查询地址之后的区域大小线性增长：256MiB 约 1.2ms，512MiB 约 3ms。基准为本机合成内存，未测量 PBZ.exe 本身。现改为按主模块节表判断，模块内地址不再进入内核；其余地址仍走原查询，并在日志 `slow executable queries` 中计数。
+- 每 250ms：全部开关的反射核对集中在一帧内完成。现按帧分片（每帧一片，共 18 片）；菜单打开或有待恢复开关时连续运行，否则每 2 秒一轮。因此菜单隐藏时游戏改写的状态最多约 2 秒后才反映；执行请求后仍立即完整回读。
+- 其他：`FindProperty`/`FindFunction` 缓存（命中时复核所有者索引与成员名称，未命中 1 秒过期，换会话清空）；名称比较不再复制字符串；缺失名称只搜索名称池新增部分；会话比较不再格式化字符串；`IsReady` 与空闲 `Pump` 不再取锁；完美闪避完整契约改为每秒核对、每帧仍核对对象身份；物品缓存写盘移出游戏线程；物品描述重排按帧分摊。
+- 菜单：快照仅在模型修订号变化时复制；物品页扫描与筛选仅在目录、搜索词或分类变化时重算；功能页未搜索时不再拼接文本；翻译结果跨帧保留。
+- 未改动：图标加载仍使用引擎 `LoadAsset_Blocking`；菜单打开时窗口消息仍等待覆盖层锁；隐藏菜单仍提交空的 ImGui 帧。
+
+Debug/Release 下 PBZ 构建与 21 套测试全部通过（含新增 PBZPerformanceTests），证据见 [验证目录](../../output/pbz-performance-20261031/)。这些测试不运行游戏，图形宿主也未运行；新增日志分区 `frame`（含钩子内上下文读取）和 `status` 用于游戏内对比。
+
+用户部署后的游戏内日志（11:51–11:55，主要为菜单关闭）：`tick` 平均约 0.02ms、max 约 1.5–2.7ms，`frame` 平均约 0.05ms，`slow executable queries` 为 0，用户反馈卡顿消失。`frame` 每 10 秒约一次 10ms 峰值，推测来自游戏线程写入性能日志（未单独测量）。物品页打开时的数据未覆盖。
+
+## 2026-10-31 补满药品逻辑修正
+
+旧按钮调用 `GM_InfiniteMedicine`。对 PBZ.exe（SHA-256 与版本契约一致）的静态反汇编显示，该 GM 把已装备药品的 `MaxTime`（+0x58）写为 2147083647，再把当前与显示次数设为总上限，因此造成异常数值。游戏总上限 `GetMedicineTotalMaxUsage` = `MaxTime` + `MedicineExtraUsage`（背包 +0x670），能力加成已单独计入；游戏自身的恢复路径把当前、显示次数设为该总上限，不改 `MaxTime`。
+
+现改为 `Native_RefillMedicine`：沿用该恢复逻辑，写入已装备药品的当前与显示次数，并与恢复路径一样通过 `RestoreMedicineDelegate`（背包 +0x2B8）通知 HUD；已满时也会通知，以便修正卡住的显示。用户实测次数补充与回读正常，改用此委托前的 `AddMedicineDelegate` 不刷新葫芦 HUD。若某药品 `MaxTime` 恰为旧 GM 写入值，先按 `PushMedicineToInventory` 使用的药品表行 +0x150 还原（仅接受 1–99），再用 `UseMedicine(id, 0)` 钳制。行 +0x150 的含义来自反汇编，字段名未核对。证据见 [验证目录](../../output/pbz-medicine-20261031/)。用户实测补满、葫芦 HUD 与数量刷新、检查点后的表现均正常。修复路径（异常上限还原）未单独取得实测记录。终结技大量补给仍为旧 GM 行为。
+
+## 2026-11-01 合并上游性能与药品修复
+
+将 `origin/master` 的 `fc4ea5b` 合入本地 `bf6a564`，保留本地更新失败隔离、顶部新版本徽标及其回归测试，同时纳入上游性能优化与药品补满修复。唯一冲突为本文末尾的追加记录，已完整保留两边内容；代码自动合并后检查了徽标与菜单缓存的共存情况。
+
+指定 `--game=PhantomBladeZero` 后，Debug、Release 的 PBZ 生产构建及各 21 套测试全部通过，共 42 套，包含更新失败、性能与药品规则回归。见[汇总与产物哈希](../../output/merge-upstream-20261101/results.json)、[Debug 构建](../../output/merge-upstream-20261101/build-debug.log)、[Release 构建](../../output/merge-upstream-20261101/build-release.log)及[复验脚本与逐项日志](../../output/merge-upstream-20261101/)。本轮未运行图形宿主或游戏内验证。

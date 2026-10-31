@@ -9,7 +9,7 @@ namespace gloss::gameplay {
     class PerformanceScope {
         using Clock = std::chrono::steady_clock;
         struct Sample { double total{}, maximum{}; unsigned count{}, slow{}; };
-        static inline std::array<Sample, 6> samples{};
+        static inline std::array<Sample, 8> samples{};
         static inline Clock::time_point nextReport{};
         unsigned index;
         Clock::time_point started{Clock::now()};
@@ -26,7 +26,7 @@ namespace gloss::gameplay {
             if (index != 0) return;
             if (nextReport == Clock::time_point{}) nextReport = now + std::chrono::seconds(10);
             if (now < nextReport) return;
-            constexpr std::array names{"tick", "labels", "inventory", "images", "combat", "items"};
+            constexpr std::array names{"tick", "labels", "inventory", "images", "combat", "items", "frame", "status"};
             for (unsigned i = 0; i < samples.size(); ++i) {
                 const auto& value = samples[i];
                 if (value.count) gloss::Log(std::format("PBZ perf {}: calls={} avg={:.3f}ms max={:.3f}ms over2ms={}",

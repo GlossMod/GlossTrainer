@@ -25,6 +25,7 @@ namespace gloss::gameplay {
         std::string id;
         std::string label;
         std::string value;
+        bool operator==(const Statistic&) const = default;
     };
     struct ToggleState {
         std::string id;
@@ -32,6 +33,7 @@ namespace gloss::gameplay {
         bool enabled{};
         std::string reason;
         std::vector<std::string> parameters; // Observed on-parameters, not editor drafts.
+        bool operator==(const ToggleState&) const = default;
     };
     struct TogglePreference {
         std::string id;
@@ -84,6 +86,8 @@ namespace gloss::gameplay {
         std::size_t size() const { return entries_->size(); }
         const ItemEntry& operator[](std::size_t index) const { return (*entries_)[index]; }
         const ItemEntry* data() const { return entries_->data(); }
+        // Publications are immutable, so equal identity means equal contents.
+        const void* Identity() const { return entries_.get(); }
     private:
         std::shared_ptr<const std::vector<ItemEntry>> entries_;
     };
@@ -103,7 +107,8 @@ namespace gloss::gameplay {
     };
 
     class Backend {
-        std::atomic<bool> itemPageActive_{};
+        std::atomic<bool> itemPageActive_{}, statusWanted_{}, readyHint_{}, workHint_{}, restorationHint_{};
+        std::atomic<std::uint64_t> revision_{1};
     public:
         explicit Backend(std::size_t queueCapacity = 32, std::size_t historyCapacity = 96);
         // Initialize before starting the native adapter. Missing files use defaults.
@@ -116,6 +121,13 @@ namespace gloss::gameplay {
         bool ItemsReady() const;
         void SetItemPageActive(bool active) { itemPageActive_.store(active, std::memory_order_relaxed); }
         bool ItemPageActive() const { return itemPageActive_.load(std::memory_order_relaxed); }
+        // While the menu is open it displays status, so read-backs keep running.
+        void SetStatusWanted(bool wanted) { statusWanted_.store(wanted, std::memory_order_relaxed); }
+        bool StatusWanted() const { return statusWanted_.load(std::memory_order_relaxed); }
+        // A saved toggle cannot restore until its status has been read back.
+        bool RestorationPending() const { return restorationHint_.load(std::memory_order_relaxed); }
+        // Changes whenever a snapshot would differ, so readers can keep their copy.
+        std::uint64_t Revision() const { return revision_.load(std::memory_order_acquire); }
         // Session key identifies the player/world context. Any key/readiness change
         // invalidates queued work; dispatch must occur only on the game thread.
         void SetRuntimeState(bool ready, std::string status, std::string sessionKey = {});
@@ -137,6 +149,7 @@ namespace gloss::gameplay {
         void TrimHistory();
         void QueueRestoration(Clock::time_point now);
         void FinishToggleRequest(const Request& request, RequestState state, bool executed);
+        void ModelChanged(); // Call holding mutex_, after any change a snapshot can see.
 
         struct ToggleIntent {
             bool enabled{};

@@ -979,10 +979,19 @@ namespace gloss::overlay
                 return std::any_of(gameplay::ToggleCatalog().begin(), gameplay::ToggleCatalog().end(),
                     [&](const auto &toggle) { return toggle.onFeatureId == id || toggle.offFeatureId == id; });
             };
-            const auto count = std::count_if(gameplay::Catalog().begin(), gameplay::Catalog().end(),
+            // The catalogs are fixed at startup.
+            static const auto count = std::count_if(gameplay::Catalog().begin(), gameplay::Catalog().end(),
                 [&](const auto &feature) { return feature.page == 1 && !feature.functionName.empty() && !paired(feature.id); }) +
                 std::count_if(gameplay::ToggleCatalog().begin(), gameplay::ToggleCatalog().end(),
                     [](const auto &toggle) { return toggle.page == 1 && toggle.id != "godmode"; });
+            const auto matchesSearch = [&](const auto &entry)
+            {
+                if (!search.IsActive())
+                    return true;
+                const auto searchable = entry.title + " " + entry.id + " " + entry.description + " " +
+                    localization::Translate(entry.title) + " " + localization::Translate(entry.description);
+                return search.PassFilter(searchable.c_str());
+            };
             const auto headingY = ImGui::GetCursorPosY();
             const auto right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
             ImGui::AlignTextToFramePadding();
@@ -1065,19 +1074,15 @@ namespace gloss::overlay
                 unsigned matches{};
                 for (const auto &toggle : gameplay::ToggleCatalog())
                 {
-                    const auto searchable = toggle.title + " " + toggle.id + " " + toggle.description + " " +
-                        localization::Translate(toggle.title) + " " + localization::Translate(toggle.description);
-                    if (toggle.page != 1 || toggle.id == "godmode" || (category && toggle.category != category) || !search.PassFilter(searchable.c_str()))
+                    if (toggle.page != 1 || toggle.id == "godmode" || (category && toggle.category != category) || !matchesSearch(toggle))
                         continue;
                     ++matches;
                     ToggleRow(toggle, snapshot, scale);
                 }
                 for (const auto &feature : gameplay::Catalog())
                 {
-                    const auto searchable = feature.title + " " + feature.id + " " + feature.description + " " +
-                        localization::Translate(feature.title) + " " + localization::Translate(feature.description);
-                    if (feature.page != 1 || feature.functionName.empty() || paired(feature.id) || (category && feature.category != category) ||
-                        !search.PassFilter(searchable.c_str()))
+                    if (feature.page != 1 || feature.functionName.empty() || (category && feature.category != category) ||
+                        paired(feature.id) || !matchesSearch(feature))
                         continue;
                     ++matches;
                     ActionRow(feature, snapshot, scale);
@@ -1450,32 +1455,55 @@ namespace gloss::overlay
             static std::size_t page{}, lastFingerprint{};
             static std::uint64_t lastGeneration{};
             static bool resetScroll{};
-            std::size_t fingerprint = std::hash<std::string>{}(snapshot.itemCatalogStatus);
-            const auto combine = [&](std::size_t value)
-                { fingerprint ^= value + 0x9e3779b9 + (fingerprint << 6) + (fingerprint >> 2); };
-            combine(snapshot.itemsReady);
-            for (const auto &item : snapshot.items)
+            // Scanning every row belongs to a new publication, not to every frame.
+            static gameplay::ItemList derivedItems;
+            static std::string derivedStatus;
+            static bool derivedReady{}, derivedDebug{}, derivedValid{};
+            static std::vector<std::string> itemCategories;
+            static std::size_t browsableCount{};
+            const bool publicationChanged = !derivedValid || derivedItems.Identity() != snapshot.items.Identity() ||
+                derivedReady != snapshot.itemsReady || derivedDebug != settings.debug || derivedStatus != snapshot.itemCatalogStatus;
+            if (publicationChanged)
             {
-                combine(std::hash<std::string>{}(item.key));
-                combine(std::hash<std::string>{}(item.name));
-                combine(std::hash<std::string>{}(item.category));
-                combine(std::hash<std::string>{}(item.iconKey));
-                combine(std::hash<std::string>{}(item.reason));
-                combine(static_cast<std::size_t>(item.maxQuantity));
-                combine(item.available);
+                std::size_t fingerprint = std::hash<std::string>{}(snapshot.itemCatalogStatus);
+                const auto combine = [&](std::size_t value)
+                    { fingerprint ^= value + 0x9e3779b9 + (fingerprint << 6) + (fingerprint >> 2); };
+                combine(snapshot.itemsReady);
+                itemCategories.clear();
+                browsableCount = 0;
+                for (const auto &item : snapshot.items)
+                {
+                    combine(std::hash<std::string>{}(item.key));
+                    combine(std::hash<std::string>{}(item.name));
+                    combine(std::hash<std::string>{}(item.category));
+                    combine(std::hash<std::string>{}(item.iconKey));
+                    combine(std::hash<std::string>{}(item.reason));
+                    combine(static_cast<std::size_t>(item.maxQuantity));
+                    combine(item.available);
+                    if (!browsable(item))
+                        continue;
+                    ++browsableCount;
+                    if (!item.category.empty() && std::find(itemCategories.begin(), itemCategories.end(), item.category) == itemCategories.end())
+                        itemCategories.push_back(item.category);
+                }
+                derivedItems = snapshot.items;
+                derivedStatus = snapshot.itemCatalogStatus;
+                derivedReady = snapshot.itemsReady;
+                derivedDebug = settings.debug;
+                derivedValid = true;
+                if (lastFingerprint != fingerprint)
+                {
+                    itemSelection = {};
+                    lastFingerprint = fingerprint;
+                    resetScroll = true;
+                }
             }
-            if (lastGeneration != snapshot.generation || lastFingerprint != fingerprint)
+            if (lastGeneration != snapshot.generation)
             {
                 itemSelection = {};
                 lastGeneration = snapshot.generation;
-                lastFingerprint = fingerprint;
                 resetScroll = true;
             }
-            std::vector<std::string> itemCategories;
-            for (const auto &item : snapshot.items)
-                if (browsable(item) && !item.category.empty() &&
-                    std::find(itemCategories.begin(), itemCategories.end(), item.category) == itemCategories.end())
-                    itemCategories.push_back(item.category);
             if (!category.empty() && std::find(itemCategories.begin(), itemCategories.end(), category) == itemCategories.end())
             {
                 category.clear();
@@ -1486,8 +1514,7 @@ namespace gloss::overlay
             const auto right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
             Label("物品", 24, ImGui::GetStyleColorVec4(ImGuiCol_Text));
             ImGui::SameLine(0, 16 * scale);
-            const auto browsableCount = std::count_if(snapshot.items.begin(), snapshot.items.end(), browsable);
-            ImGui::TextDisabled(Text("共 %zu 项"), static_cast<std::size_t>(browsableCount));
+            ImGui::TextDisabled(Text("共 %zu 项"), browsableCount);
             ImGui::SetCursorPos(ImVec2(right - 268 * scale, headingY));
             ImGui::SetNextItemWidth(268 * scale);
             if (ImGui::InputTextWithHint("##item-search", Text("搜索物品名称…"), search.data(), search.size()))
@@ -1548,13 +1575,21 @@ namespace gloss::overlay
                     ImGui::TextWrapped("%s", Text(snapshot.itemCatalogStatus));
             }
             const auto query = SearchText(search.data());
-            std::vector<const gameplay::ItemEntry *> filtered;
-            for (const auto &item : snapshot.items)
-                if (browsable(item) && (category.empty() || item.category == category) &&
-                    (SearchText(item.name).find(query) != std::string::npos ||
-                        (item.key == "resource:consciousness_dust" && std::string_view("意识粉尘").find(query) != std::string_view::npos) ||
-                        (settings.debug && SearchText(item.key).find(query) != std::string::npos)))
-                    filtered.push_back(&item);
+            // The pointers stay valid because derivedItems shares ownership of the rows.
+            static std::vector<const gameplay::ItemEntry *> filtered;
+            static std::string filteredQuery, filteredCategory;
+            if (publicationChanged || filteredQuery != query || filteredCategory != category)
+            {
+                filtered.clear();
+                for (const auto &item : derivedItems)
+                    if (browsable(item) && (category.empty() || item.category == category) &&
+                        (SearchText(item.name).find(query) != std::string::npos ||
+                            (item.key == "resource:consciousness_dust" && std::string_view("意识粉尘").find(query) != std::string_view::npos) ||
+                            (settings.debug && SearchText(item.key).find(query) != std::string::npos)))
+                        filtered.push_back(&item);
+                filteredQuery = query;
+                filteredCategory = category;
+            }
             constexpr std::size_t pageSize = 20;
             const auto pageCount = std::max<std::size_t>(1, (filtered.size() + pageSize - 1) / pageSize);
             page = std::min(page, pageCount - 1);
@@ -1975,6 +2010,7 @@ namespace gloss::overlay
         if (visible.exchange(show) == show)
             return;
         gameplay::GetBackend().SetItemPageActive(show && settings.page == 2);
+        gameplay::GetBackend().SetStatusWanted(show);
         input::SetMenuVisible(show);
         if (ImGui::GetCurrentContext())
         {
@@ -2106,7 +2142,15 @@ namespace gloss::overlay
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         ui::BeginItemIconFrame();
-        const auto snapshot = gameplay::GetBackend().GetSnapshot();
+        // Copying the model takes the lock the game thread needs. Revision is read
+        // first, so a change during the copy is simply fetched again next frame.
+        static gameplay::Snapshot snapshot;
+        static std::uint64_t snapshotRevision{};
+        if (const auto revision = gameplay::GetBackend().Revision(); revision != snapshotRevision)
+        {
+            snapshot = gameplay::GetBackend().GetSnapshot();
+            snapshotRevision = revision;
+        }
         ProcessHotkeys(snapshot);
         UpdateItemReceipts(snapshot);
         if (Visible())
