@@ -7,6 +7,7 @@ param(
     [ValidateSet('zh-CN', 'en')][string]$Language = 'zh-CN',
     [ValidateRange(8, 254)][int]$MenuKey = 45,
     [switch]$GridFixture,
+    [ValidateSet('network', 'available', 'current', 'error', 'checking')][string]$UpdateState = 'network',
     [string]$IconSamplePath,
     [ValidateSet('grid', 'hover', 'quantity', 'features', 'settings', 'menu-key', 'menu-capture')][string]$FixtureView = 'grid',
     [ValidateRange(0.8, 1.5)][double]$Scale = 1,
@@ -49,14 +50,17 @@ if ($MenuKey -ne 45) {
 # allowing a background terminal launch to acquire foreground focus. The PBZ
 # production ASI does not inspect it and retains all normal focus-loss handling.
 $previousBootstrap = $env:GLOSS_SKILL_UI_THEME
+$previousUpdateFixture = $env:GLOSS_PBZ_UPDATE_FIXTURE
 try {
     $env:GLOSS_SKILL_UI_THEME = 'pbz-host-focus-bootstrap'
+    if ($GridFixture) { $env:GLOSS_PBZ_UPDATE_FIXTURE = $UpdateState }
     $automationFlag = if ($GridFixture) { '--visual-only' } else { '--automated' }
     & $hostExe "--$Renderer" $automationFlag "--menu-key=$MenuKey" "--asi=$testAsi" "--output=$output" *> (Join-Path $output 'console.log')
     $hostCode = $LASTEXITCODE
     [ordered]@{
         mode = $Mode; renderer = $Renderer; page = $Page; light = $Light.IsPresent; scale = $Scale; language = $Language; menuKey = $MenuKey
         fixtureView = if ($GridFixture) { $FixtureView } else { $null }
+        updateFixture = if ($GridFixture) { $UpdateState } else { $null }
         fixtureMenuChord = if ($GridFixture -and $FixtureView -in @('menu-key', 'menu-capture')) { 'Ctrl+Shift+Alt+F10' } else { $null }
         exitCode = $hostCode; sha256 = (Get-FileHash -LiteralPath $testAsi -Algorithm SHA256).Hash
         scope = if ($GridFixture) { 'Visual fixture; no game connection, grants or input validation' } else { 'Local graphics host; not PBZ in-game validation' }
@@ -66,4 +70,5 @@ try {
 }
 finally {
     $env:GLOSS_SKILL_UI_THEME = $previousBootstrap
+    $env:GLOSS_PBZ_UPDATE_FIXTURE = $previousUpdateFixture
 }

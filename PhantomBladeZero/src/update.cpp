@@ -86,6 +86,30 @@ namespace gloss::update
             return {Status::Error, {}, "检查更新失败", {}};
         }
 
+        detail::ReleaseResult Failed(std::string diagnostic)
+        {
+            return {Failure(), std::move(diagnostic)};
+        }
+
+        detail::ReleaseResult HttpFailure(const char *operation, DWORD error = GetLastError())
+        {
+            // Offline/proxy/TLS failures are expected results. Do not raise a C++
+            // exception inside the game just because GitHub is unreachable.
+            return Failed(std::format("{} failed ({})", operation, error));
+        }
+
+        void LogDiagnostic(std::string_view prefix, std::string_view message) noexcept
+        {
+            try
+            {
+                Log(std::string(prefix) + std::string(message));
+            }
+            catch (...)
+            {
+                // Logging must never turn an advisory update into a process failure.
+            }
+        }
+
         struct State
         {
             std::mutex mutex;
@@ -109,26 +133,42 @@ namespace gloss::update
             state.checking = false;
         }
 
+        void PublishFailure() noexcept
+        {
+            try
+            {
+                auto &state = SharedState();
+                std::lock_guard lock(state.mutex);
+                // Clear the duplicate guard and stale release before any potentially
+                // allocating work. Even a second allocation failure must not terminate.
+                state.checking = false;
+                state.snapshot.status = Status::Error;
+                state.snapshot.latestVersion.clear();
+                state.snapshot.releaseUrl.clear();
+                state.snapshot.message.clear();
+                state.snapshot.message = "检查更新失败";
+            }
+            catch (...)
+            {
+            }
+        }
+
         bool BeginCheck()
         {
             auto &state = SharedState();
             std::lock_guard lock(state.mutex);
             if (state.checking)
                 return false;
-            state.checking = true;
             state.snapshot = {Status::Checking, {}, "正在检查更新…", {}};
+            state.checking = true;
             return true;
         }
 
         class HttpHandle
         {
         public:
-            explicit HttpHandle(HINTERNET value) : value(value)
-            {
-                if (!value)
-                    throw std::runtime_error(std::format("WinHTTP open failed ({})", GetLastError()));
-            }
-            ~HttpHandle() { WinHttpCloseHandle(value); }
+            explicit HttpHandle(HINTERNET value) noexcept : value(value) {}
+            ~HttpHandle() { if (value) WinHttpCloseHandle(value); }
             HttpHandle(const HttpHandle &) = delete;
             HttpHandle &operator=(const HttpHandle &) = delete;
             operator HINTERNET() const { return value; }
@@ -137,96 +177,117 @@ namespace gloss::update
             HINTERNET value;
         };
 
-        void Require(BOOL succeeded, const char *operation)
-        {
-            if (!succeeded)
-                throw std::runtime_error(std::format("{} failed ({})", operation, GetLastError()));
-        }
-
         detail::ReleaseResult FetchRelease()
         {
             const auto started = GetTickCount64();
             HttpHandle session(WinHttpOpen(L"GlossTrainer-PhantomBladeZero-UpdateChecker/2.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-            Require(WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000), "WinHttpSetTimeouts");
+            if (!session)
+                return HttpFailure("WinHttpOpen");
+            if (!WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000))
+                return HttpFailure("WinHttpSetTimeouts");
             HttpHandle connection(WinHttpConnect(session, ApiHost, INTERNET_DEFAULT_HTTPS_PORT, 0));
+            if (!connection)
+                return HttpFailure("WinHttpConnect");
             detail::ReleaseScan scan;
             for (std::size_t page = 1; page <= MaxReleasePages; ++page)
             {
                 const auto path = std::format(L"/repos/GlossMod/GlossTrainer/releases?per_page={}&page={}", ReleasesPerPage, page);
                 HttpHandle request(WinHttpOpenRequest(connection, L"GET", path.c_str(), nullptr,
                                                       WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
+                if (!request)
+                    return HttpFailure("WinHttpOpenRequest");
+                std::string budgetError;
                 auto applyBudget = [&]
                 {
                     const auto elapsed = GetTickCount64() - started;
                     if (elapsed >= MaxRequestMilliseconds)
-                        throw std::runtime_error("GitHub release scan exceeded its 20 second time limit");
+                    {
+                        budgetError = "GitHub release scan exceeded its 20 second time limit";
+                        return false;
+                    }
                     const auto timeout = static_cast<int>(std::min<ULONGLONG>(5000, MaxRequestMilliseconds - elapsed));
-                    Require(WinHttpSetTimeouts(request, timeout, timeout, timeout, timeout), "Set request budget");
+                    if (!WinHttpSetTimeouts(request, timeout, timeout, timeout, timeout))
+                    {
+                        budgetError = std::format("Set request budget failed ({})", GetLastError());
+                        return false;
+                    }
+                    return true;
                 };
                 DWORD disabled = WINHTTP_DISABLE_COOKIES | WINHTTP_DISABLE_REDIRECTS | WINHTTP_DISABLE_AUTHENTICATION;
-                Require(WinHttpSetOption(request, WINHTTP_OPTION_DISABLE_FEATURE, &disabled, sizeof(disabled)), "Disable redirects/authentication");
+                if (!WinHttpSetOption(request, WINHTTP_OPTION_DISABLE_FEATURE, &disabled, sizeof(disabled)))
+                    return HttpFailure("Disable redirects/authentication");
                 DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
-                Require(WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy)), "Set redirect policy");
+                if (!WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy)))
+                    return HttpFailure("Set redirect policy");
                 constexpr wchar_t headers[] = L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n";
-                applyBudget();
-                Require(WinHttpSendRequest(request, headers, static_cast<DWORD>(-1L),
-                                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0), "WinHttpSendRequest");
-                applyBudget();
-                Require(WinHttpReceiveResponse(request, nullptr), "WinHttpReceiveResponse");
-                applyBudget();
+                if (!applyBudget())
+                    return Failed(std::move(budgetError));
+                if (!WinHttpSendRequest(request, headers, static_cast<DWORD>(-1L),
+                                        WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
+                    return HttpFailure("WinHttpSendRequest");
+                if (!applyBudget())
+                    return Failed(std::move(budgetError));
+                if (!WinHttpReceiveResponse(request, nullptr))
+                    return HttpFailure("WinHttpReceiveResponse");
+                if (!applyBudget())
+                    return Failed(std::move(budgetError));
                 DWORD status{}, size = sizeof(status);
-                Require(WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                                            WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX), "Read HTTP status");
+                if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                         WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX))
+                    return HttpFailure("Read HTTP status");
                 if (status != 200)
-                    throw std::runtime_error(std::format("GitHub release list returned HTTP {}", status));
+                    return Failed(std::format("GitHub release list returned HTTP {}", status));
                 DWORD contentLength{};
                 size = sizeof(contentLength);
                 if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
                                         WINHTTP_HEADER_NAME_BY_INDEX, &contentLength, &size, WINHTTP_NO_HEADER_INDEX) &&
                     (contentLength > MaxResponseBytes || contentLength > MaxScanBytes - scan.responseBytes))
-                    throw std::runtime_error("GitHub release scan exceeded its response byte limit");
+                    return Failed("GitHub release scan exceeded its response byte limit");
                 std::string body;
                 std::array<char, 8192> buffer{};
                 for (;;)
                 {
-                    applyBudget();
+                    if (!applyBudget())
+                        return Failed(std::move(budgetError));
                     DWORD read{};
-                    Require(WinHttpReadData(request, buffer.data(), static_cast<DWORD>(buffer.size()), &read), "WinHttpReadData");
-                    applyBudget();
+                    if (!WinHttpReadData(request, buffer.data(), static_cast<DWORD>(buffer.size()), &read))
+                        return HttpFailure("WinHttpReadData");
+                    if (!applyBudget())
+                        return Failed(std::move(budgetError));
                     if (!read)
                         break;
                     if (body.size() + read > MaxResponseBytes || body.size() + read > MaxScanBytes - scan.responseBytes)
-                        throw std::runtime_error("GitHub release scan exceeded its response byte limit");
+                        return Failed("GitHub release scan exceeded its response byte limit");
                     body.append(buffer.data(), read);
                 }
                 auto result = detail::EvaluateReleasePage(scan, body, Version);
                 if (scan.complete || scan.failed)
                     return result;
             }
-            throw std::runtime_error("GitHub release scan reached its page limit before completion");
+            return Failed("GitHub release scan reached its page limit before completion");
         }
 
-        void RunCheck() noexcept
+        void RunCheck(detail::ReleaseResult (*fetch)() = FetchRelease) noexcept
         {
             try
             {
-                auto result = FetchRelease();
+                auto result = fetch();
                 if (!result.diagnostic.empty())
-                    Log("Update check: " + result.diagnostic);
+                    LogDiagnostic("Update check failed: ", result.diagnostic);
                 else
-                    Log("Update check: " + result.snapshot.message);
+                    LogDiagnostic("Update check: ", result.snapshot.message);
                 Publish(std::move(result.snapshot));
             }
             catch (const std::exception &error)
             {
-                Log(std::string("Update check failed: ") + error.what());
-                Publish(Failure());
+                PublishFailure();
+                LogDiagnostic("Update check failed: ", error.what());
             }
             catch (...)
             {
-                Log("Update check failed: unknown error");
-                Publish(Failure());
+                PublishFailure();
+                LogDiagnostic("Update check failed: ", "unknown error");
             }
         }
 
@@ -377,28 +438,56 @@ namespace gloss::update
         }
     }
 
-    void CheckAsync()
+    void CheckAsync() noexcept
     {
-        if (!BeginCheck())
-            return;
-        HMODULE module{};
-        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                                reinterpret_cast<LPCWSTR>(&Worker), &module))
+        try
         {
-            Log(std::format("Update check: could not retain module ({})", GetLastError()));
-            Publish(Failure());
-            return;
+            if (!BeginCheck())
+                return;
+            HMODULE module{};
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                                    reinterpret_cast<LPCWSTR>(&Worker), &module))
+            {
+                const auto error = GetLastError();
+                PublishFailure();
+                LogDiagnostic("Update check: ", HttpFailure("could not retain module", error).diagnostic);
+                return;
+            }
+            const auto thread = CreateThread(nullptr, 0, Worker, module, 0, nullptr);
+            if (!thread)
+            {
+                const auto error = GetLastError();
+                FreeLibrary(module);
+                PublishFailure();
+                LogDiagnostic("Update check: ", HttpFailure("could not create worker", error).diagnostic);
+                return;
+            }
+            CloseHandle(thread);
         }
-        const auto thread = CreateThread(nullptr, 0, Worker, module, 0, nullptr);
-        if (!thread)
+        catch (const std::exception &error)
         {
-            const auto error = GetLastError();
-            FreeLibrary(module);
-            Log(std::format("Update check: could not create worker ({})", error));
-            Publish(Failure());
-            return;
+            PublishFailure();
+            LogDiagnostic("Update check could not start: ", error.what());
         }
-        CloseHandle(thread);
+        catch (...)
+        {
+            PublishFailure();
+            LogDiagnostic("Update check could not start: ", "unknown error");
+        }
+    }
+
+    bool HasUpdate() noexcept
+    {
+        try
+        {
+            auto &state = SharedState();
+            std::lock_guard lock(state.mutex);
+            return state.snapshot.status == Status::UpdateAvailable;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     Snapshot GetSnapshot()

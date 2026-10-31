@@ -2148,7 +2148,26 @@ namespace gloss::overlay
             ImGui::SameLine(0, 20 * scale);
             ImGui::TextUnformatted(Text("影之刃零"));
             ImGui::SameLine(0, 24 * scale);
+            ImGui::BeginGroup();
             ImGui::TextDisabled("v%s", Version);
+            if (update::HasUpdate())
+            {
+                const auto versionMin = ImGui::GetItemRectMin();
+                const auto versionMax = ImGui::GetItemRectMax();
+                ImGui::PushFont(nullptr, 10);
+                const auto textSize = ImGui::CalcTextSize("new");
+                const ImVec2 badgeMin(versionMax.x + 3 * scale, versionMin.y - 5 * scale);
+                const ImVec2 badgeSize(textSize.x + 8 * scale, textSize.y + 2 * scale);
+                draw->AddRectFilled(badgeMin, ImVec2(badgeMin.x + badgeSize.x, badgeMin.y + badgeSize.y),
+                                    IM_COL32(215, 44, 60, 255), 5 * scale);
+                draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+                              ImVec2(badgeMin.x + 4 * scale, badgeMin.y + scale), IM_COL32(255, 255, 255, 255), "new");
+                ImGui::PopFont();
+                // Reserve horizontal space so the superscript never overlaps the author.
+                ImGui::SameLine(0, 3 * scale);
+                ImGui::Dummy(ImVec2(badgeSize.x, versionMax.y - versionMin.y));
+            }
+            ImGui::EndGroup();
             ImGui::SameLine(0, 24 * scale);
             ImGui::TextDisabled(Text("By: 小莫"));
             ImGui::SetCursorPos(ImVec2(size.x - 48 * scale, 16 * scale));

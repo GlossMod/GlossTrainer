@@ -25,7 +25,8 @@ namespace gloss::update
 
     // Advisory only: a newer release never restricts gameplay functionality.
     // At most one request is active. This never waits for network I/O on the caller.
-    void CheckAsync();
+    void CheckAsync() noexcept;
+    bool HasUpdate() noexcept;
     Snapshot GetSnapshot();
     bool OpenReleasePage();
 

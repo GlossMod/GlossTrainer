@@ -2,14 +2,134 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <atomic>
+#include <algorithm>
+#include <cstring>
+#include <winhttp.h>
+
+namespace transport
+{
+    enum class Failure { None, Session, Connect, Request, Send, Receive, Headers, Read, Module, Thread };
+    Failure failure{};
+    DWORD error = ERROR_WINHTTP_CANNOT_CONNECT;
+    DWORD httpStatus = 200;
+    int handles{}, moduleReferences{}, sendCalls{};
+    HANDLE finished{};
+    bool bodyRead{};
+    std::string body = "[]";
+    std::string lastLog;
+    bool throwLog{};
+    std::atomic_uint cppExceptions{};
+
+    bool Succeed(Failure stage)
+    {
+        if (failure != stage) return true;
+        SetLastError(error);
+        return false;
+    }
+    HINTERNET Open(LPCWSTR, DWORD, LPCWSTR, LPCWSTR, DWORD)
+    {
+        if (!Succeed(Failure::Session)) return nullptr;
+        ++handles;
+        return reinterpret_cast<HINTERNET>(1);
+    }
+    HINTERNET Connect(HINTERNET, LPCWSTR, INTERNET_PORT, DWORD)
+    {
+        if (!Succeed(Failure::Connect)) return nullptr;
+        ++handles;
+        return reinterpret_cast<HINTERNET>(2);
+    }
+    HINTERNET Request(HINTERNET, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR *, DWORD)
+    {
+        if (!Succeed(Failure::Request)) return nullptr;
+        ++handles;
+        return reinterpret_cast<HINTERNET>(3);
+    }
+    BOOL Close(HINTERNET) { --handles; return TRUE; }
+    BOOL Timeouts(HINTERNET, int, int, int, int) { return TRUE; }
+    BOOL Option(HINTERNET, DWORD, LPVOID, DWORD) { return TRUE; }
+    BOOL Send(HINTERNET, LPCWSTR, DWORD, LPVOID, DWORD, DWORD, DWORD_PTR)
+    {
+        ++sendCalls;
+        return Succeed(Failure::Send);
+    }
+    BOOL Receive(HINTERNET, LPVOID) { return Succeed(Failure::Receive); }
+    BOOL Headers(HINTERNET, DWORD query, LPCWSTR, LPVOID buffer, LPDWORD, LPDWORD)
+    {
+        if (!Succeed(Failure::Headers)) return FALSE;
+        *static_cast<DWORD *>(buffer) = (query & ~WINHTTP_QUERY_FLAG_NUMBER) == WINHTTP_QUERY_STATUS_CODE
+            ? httpStatus : static_cast<DWORD>(body.size());
+        return TRUE;
+    }
+    BOOL Read(HINTERNET, LPVOID buffer, DWORD size, LPDWORD count)
+    {
+        if (!Succeed(Failure::Read)) return FALSE;
+        *count = bodyRead ? 0 : static_cast<DWORD>(std::min<std::size_t>(body.size(), size));
+        std::memcpy(buffer, body.data(), *count);
+        bodyRead = true;
+        return TRUE;
+    }
+    BOOL RetainModule(DWORD, LPCWSTR, HMODULE *module)
+    {
+        if (!Succeed(Failure::Module)) return FALSE;
+        ++moduleReferences;
+        *module = reinterpret_cast<HMODULE>(4);
+        return TRUE;
+    }
+    BOOL ReleaseModule(HMODULE) { --moduleReferences; return TRUE; }
+    [[noreturn]] void ReleaseAndExit(HMODULE module, DWORD code)
+    {
+        ReleaseModule(module);
+        SetEvent(finished);
+        ExitThread(code);
+    }
+    HANDLE Thread(LPSECURITY_ATTRIBUTES attributes, SIZE_T stack, LPTHREAD_START_ROUTINE start,
+                  LPVOID argument, DWORD flags, LPDWORD id)
+    {
+        if (!Succeed(Failure::Thread)) return nullptr;
+        return CreateThread(attributes, stack, start, argument, flags, id);
+    }
+}
 
 // Compile the production implementation once so state transitions can be
 // exercised without making a network request or opening the user's browser.
+#define WinHttpOpen transport::Open
+#define WinHttpConnect transport::Connect
+#define WinHttpOpenRequest transport::Request
+#define WinHttpCloseHandle transport::Close
+#define WinHttpSetTimeouts transport::Timeouts
+#define WinHttpSetOption transport::Option
+#define WinHttpSendRequest transport::Send
+#define WinHttpReceiveResponse transport::Receive
+#define WinHttpQueryHeaders transport::Headers
+#define WinHttpReadData transport::Read
+#define GetModuleHandleExW transport::RetainModule
+#define FreeLibrary transport::ReleaseModule
+#define FreeLibraryAndExitThread transport::ReleaseAndExit
+#define CreateThread transport::Thread
 #include "../src/update.cpp"
+#undef WinHttpOpen
+#undef WinHttpConnect
+#undef WinHttpOpenRequest
+#undef WinHttpCloseHandle
+#undef WinHttpSetTimeouts
+#undef WinHttpSetOption
+#undef WinHttpSendRequest
+#undef WinHttpReceiveResponse
+#undef WinHttpQueryHeaders
+#undef WinHttpReadData
+#undef GetModuleHandleExW
+#undef FreeLibrary
+#undef FreeLibraryAndExitThread
+#undef CreateThread
 
 namespace gloss
 {
-    void Log(std::string_view) {}
+    void Log(std::string_view message)
+    {
+        if (transport::throwLog) throw std::bad_alloc();
+        transport::lastLog = message;
+    }
 }
 
 namespace
@@ -299,8 +419,10 @@ namespace
     {
         update::Publish({Status::UpdateAvailable, "PhantomBladeZero/v0.3.5", "发现新版本", "https://github.com/GlossMod/GlossTrainer/releases/tag/PhantomBladeZero/v0.3.5"});
         CHECK(update::GetSnapshot().status == Status::UpdateAvailable);
+        CHECK(update::HasUpdate());
         CHECK(update::BeginCheck());
         CHECK(update::GetSnapshot().status == Status::Checking);
+        CHECK(!update::HasUpdate());
         CHECK(update::GetSnapshot().latestVersion.empty());
         CHECK(update::GetSnapshot().releaseUrl.empty());
         CHECK(!update::BeginCheck());
@@ -309,6 +431,7 @@ namespace
         CHECK(update::GetSnapshot().status == Status::Checking);
         update::Publish(update::detail::EvaluateRelease("malformed response", "0.3.4").snapshot);
         CHECK(update::GetSnapshot().status == Status::Error);
+        CHECK(!update::HasUpdate());
         CHECK(update::GetSnapshot().message == "检查更新失败");
         CHECK(update::GetSnapshot().releaseUrl.empty());
         CHECK(!update::OpenReleasePage());
@@ -316,14 +439,113 @@ namespace
         CHECK(!update::BeginCheck());
         update::Publish({Status::NoRelease, {}, "暂无正式发布版本", {}});
         CHECK(update::GetSnapshot().status == Status::NoRelease);
+        CHECK(!update::HasUpdate());
         CHECK(!update::OpenReleasePage());
         update::Publish({Status::Checking, {}, "正在检查更新…", {}});
         update::Publish(update::detail::EvaluateRelease(Release("PhantomBladeZero/v0.3.4"), "0.3.4").snapshot);
         CHECK(update::GetSnapshot().status == Status::Current);
+        CHECK(!update::HasUpdate());
         update::Publish({Status::UpdateAvailable, "BlackMythWukong/v999.0.0", {},
             "https://github.com/GlossMod/GlossTrainer/releases/tag/BlackMythWukong/v999.0.0"});
         CHECK(!update::OpenReleasePage());
         update::Publish({});
+    }
+
+    void TestTransportFailuresAndRetry()
+    {
+        // Observe first-chance C++ exceptions: ordinary connectivity failures
+        // must return a result without raising one inside the host process.
+        auto *observer = AddVectoredExceptionHandler(0, [](EXCEPTION_POINTERS *exception) -> LONG
+        {
+            if (exception->ExceptionRecord->ExceptionCode == 0xE06D7363)
+                ++transport::cppExceptions;
+            return EXCEPTION_CONTINUE_SEARCH;
+        });
+        CHECK(observer != nullptr);
+        for (auto stage : {transport::Failure::Session, transport::Failure::Connect, transport::Failure::Request,
+                           transport::Failure::Send, transport::Failure::Receive, transport::Failure::Headers,
+                           transport::Failure::Read})
+        {
+            transport::failure = stage;
+            transport::bodyRead = false;
+            transport::cppExceptions = 0;
+            CHECK(update::BeginCheck());
+            update::RunCheck();
+            CHECK(update::GetSnapshot().status == Status::Error);
+            CHECK(!update::HasUpdate());
+            CHECK(update::GetSnapshot().releaseUrl.empty());
+            CHECK(update::GetSnapshot().message == "检查更新失败");
+            CHECK(transport::lastLog.find("12029") != std::string::npos);
+            CHECK(transport::handles == 0);
+            CHECK(transport::cppExceptions == 0);
+        }
+        transport::failure = transport::Failure::None;
+        transport::httpStatus = 403;
+        CHECK(update::BeginCheck());
+        update::RunCheck();
+        CHECK(update::GetSnapshot().status == Status::Error);
+        CHECK(transport::lastLog.find("HTTP 403") != std::string::npos);
+        CHECK(transport::cppExceptions == 0);
+        transport::httpStatus = 200;
+        if (observer) RemoveVectoredExceptionHandler(observer);
+
+        transport::finished = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        CHECK(transport::finished != nullptr);
+        for (const auto error : {ERROR_WINHTTP_CANNOT_CONNECT, ERROR_WINHTTP_TIMEOUT, ERROR_WINHTTP_SECURE_FAILURE})
+        {
+            transport::failure = transport::Failure::Send;
+            transport::error = error;
+            ResetEvent(transport::finished);
+            update::CheckAsync();
+            CHECK(WaitForSingleObject(transport::finished, 5000) == WAIT_OBJECT_0);
+            CHECK(update::GetSnapshot().status == Status::Error);
+            CHECK(transport::handles == 0);
+            CHECK(transport::moduleReferences == 0);
+        }
+        // A later successful worker must still be able to publish a new version.
+        transport::failure = transport::Failure::None;
+        transport::body = Json::array({ReleaseObject("PhantomBladeZero/v99.0.0")}).dump();
+        transport::bodyRead = false;
+        ResetEvent(transport::finished);
+        update::CheckAsync();
+        CHECK(WaitForSingleObject(transport::finished, 5000) == WAIT_OBJECT_0);
+        CHECK(update::GetSnapshot().status == Status::UpdateAvailable);
+        CHECK(update::HasUpdate());
+        CHECK(transport::handles == 0);
+        CHECK(transport::moduleReferences == 0);
+        CloseHandle(transport::finished);
+
+        for (auto stage : {transport::Failure::Module, transport::Failure::Thread})
+        {
+            transport::failure = stage;
+            update::CheckAsync();
+            CHECK(update::GetSnapshot().status == Status::Error);
+            CHECK(transport::moduleReferences == 0);
+        }
+        transport::failure = transport::Failure::None;
+        update::Publish({});
+    }
+
+    void TestUnexpectedExceptionAndLoggingIsolation()
+    {
+        // A secondary logging allocation failure must not escape a noexcept worker.
+        transport::throwLog = true;
+        for (auto fetch : {
+            +[]() -> update::detail::ReleaseResult { throw std::runtime_error("transport exception"); },
+            +[]() -> update::detail::ReleaseResult { throw std::bad_alloc(); },
+            +[]() -> update::detail::ReleaseResult { throw 17; }})
+        {
+            CHECK(update::BeginCheck());
+            update::RunCheck(fetch);
+            CHECK(update::GetSnapshot().status == Status::Error);
+            CHECK(update::GetSnapshot().releaseUrl.empty());
+        }
+        CHECK(update::BeginCheck());
+        update::RunCheck([] { return update::detail::EvaluateRelease(Release("PhantomBladeZero/v99.0.0"), gloss::Version); });
+        CHECK(update::GetSnapshot().status == Status::UpdateAvailable);
+        transport::throwLog = false;
+        update::Publish({});
+        CHECK(!update::HasUpdate());
     }
 }
 
@@ -337,11 +559,13 @@ int main()
     TestPhantomBladeZeroChannelIsolation();
     TestBoundedCompletePagination();
     TestFailedRetryClearsRelease();
+    TestTransportFailuresAndRetry();
+    TestUnexpectedExceptionAndLoggingIsolation();
     if (failures)
     {
         std::cerr << failures << " update assertions failed\n";
         return 1;
     }
-    std::cout << "PASS: PBZ channel isolation, version ordering, package provenance, trusted URLs, bounded pagination, duplicate check suppression, failed retry recovery\n";
+    std::cout << "PASS: PBZ channel isolation, version ordering, package provenance, trusted URLs, bounded pagination, duplicate check suppression, failed retry recovery, offline WinHTTP 12029/timeout/TLS failures, no expected C++ exceptions, async retry, handle cleanup, module/thread startup failures, secondary exception isolation\n";
     return 0;
 }

@@ -432,3 +432,24 @@ CE MCP 核对 CL-301524_JKS-17219 的反射布局、函数入口、本地对象�
 - 正式 `GlossTrainer.asi` SHA-256：`63b234083d256bfc809d57b5c209c9e4e4441f577538b240a2e51b7c721cf8f5`。
 
 本节是源码推送、正式发行与附件验证记录；未替换正在使用的游戏 ASI，也不新增游戏内效果验证。前文已安装的本地 1.1.0 构建与本次云端正式产物哈希不同。
+
+## 2026-10-31 顶部新版本徽标与更新失败隔离
+
+顶部版本号右上角增加红底白字小 `new` 徽标，仅在已确认本游戏存在较新正式版本时显示，支持亮暗主题和界面缩放；检查中、失败、无正式版本与当前已是最新版时隐藏。徽标单独预留宽度，避免覆盖作者信息；顶部只读取状态，不在每帧复制更新详情。
+
+常规 WinHTTP 失败（包括用户日志中的 `WinHttpSendRequest failed (12029)`）、HTTP 非 200、扫描超时与响应超限改为返回失败结果，不再主动抛出 C++ 异常。补齐检查启动、线程异常兜底、诊断字符串构造与日志调用的异常隔离，失败状态发布先清除检查占用、旧版本与旧下载链接，再更新消息；允许后续重试。网络仍在后台线程执行，保留模块引用和句柄释放流程。
+
+原实现已捕获并记录网络异常，因此该日志本身不能证明用户崩溃的根因。审查确认原 `noexcept` 线程的 catch 分支内再次分配字符串或发布失败状态若抛异常，会触发进程终止；本次加固此路径。没有安装或更改游戏进程的异常处理器。测试中的异常观察器仅在独立测试进程内使用。
+
+| 验证 | 结果与证据 |
+| --- | --- |
+| Debug / Release 生产构建 | 均通过：[Debug](../../output/update-badge-20261031/build-debug-final.log)、[Release](../../output/update-badge-20261031/build-release-final.log) |
+| Debug / Release 更新回归 | 均通过：[Debug](../../output/update-badge-20261031/tests-debug-final.log)、[Release](../../output/update-badge-20261031/tests-release-final.log)。直接编译生产实现，以替代 WinHTTP API 确定性注入 open/connect/request/send/receive/headers/read 错误，观察普通失败不产生 first-chance C++ 异常；真实工作线程覆盖 12029、12002、12175、成功重试与引用/句柄回收；另覆盖 HTTP 403、模块保留/线程创建失败、标准/未知/内存异常及日志再抛异常 |
+| 徽标亮暗主题 | DX11 暗色和 DX12 亮色均通过，已查看实际 GPU 截图：[暗色](../../output/update-badge-20261031/final-dx11-dark-new/GlossTrainer.Host-open.bmp)、[亮色](../../output/update-badge-20261031/final-dx12-light-new/GlossTrainer.Host-open.bmp)、[顶部预览](../../output/update-badge-20261031/header-preview.png) |
+| 失败与非新版本状态 | 离线夹具记录相同 12029 日志后仍正常显示菜单并完成宿主运行：[失败](../../output/update-badge-20261031/release-dx12-error/result.json)、[最终功能页](../../output/update-badge-20261031/final-dx12-error-features/result.json)；已是最新版与检查中均通过且无徽标：[Current](../../output/update-badge-20261031/release-dx11-current/result.json)、[Checking，0.8 倍](../../output/update-badge-20261031/release-dx12-checking/result.json) |
+
+图形夹具仅用于 `PBZGridFixture`，正式 PBZ 目标不编译该夹具。截图中的 `v99.0.0` 是确定性的离线新版本样本。宿主验证只证明本地错误路径和 UI 渲染，不代表已复现或排除用户环境中的游戏崩溃。
+
+UI 实现前已使用 `custom-imagegen` 生成并查看[双主题原型](../../output/update-badge-20261031/imagegen/header-prototype.png)。Provider：`model_providers.custom`，模型：`gpt-image-2.5`；[完整最终提示词](../../output/update-badge-20261031/imagegen/prompt.txt)要求保持现有顶部布局，仅在版本右上方加入小红色 `new` 徽标，并为作者文字预留间距。
+
+验证汇总：[results.json](../../output/update-badge-20261031/results.json)。本地 Release [GlossTrainer.asi](../../output/update-badge-20261031/artifact/GlossTrainer.asi) SHA-256：`94D7172CDA4FAA4787FFCBD81E028C9009B8595CE11C1D652179FB736DB4B3AB`；两配置及交付副本哈希见 [hashes.json](../../output/update-badge-20261031/hashes.json)。版本保持 1.1.0，本轮未安装到游戏目录、提交、推送或发布。
