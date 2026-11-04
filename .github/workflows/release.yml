@@ -100,6 +100,16 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "$testName failed with exit code $LASTEXITCODE." }
             }
           } finally { Pop-Location }
+      - name: Run Phantom Blade Zero script contracts
+        if: env.RELEASE_GAME == 'PhantomBladeZero'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Node.js is required for PBZ script validation.' }
+          foreach ($suite in @('script_dispatch_tests', 'script_distance_tests', 'script_loot_tests', 'script_native_highlight_tests', 'script_notes_tests', 'script_performance_tests')) {
+            & node "PhantomBladeZero/validation/$suite.js"
+            if ($LASTEXITCODE -ne 0) { throw "$suite failed." }
+          }
       - name: Validate selected game installer
         if: matrix.mode == 'release'
         run: |

@@ -18,12 +18,13 @@ function harness(){
         PBZPickupActor:{StaticClass:()=>'pickup'},EMovementMode:{MOVE_Walking:1},
         AbilitySystemBlueprintLibrary:{GetAbilitySystemComponent:()=>asc},Vector2D:function(){},
         GameplayStatics:{GetPlayerController:()=>({}),ProjectWorldToScreen:()=>true}};
-    contracts.install(UE,component,asc);
+    const native=contracts.install(UE,component,asc);
     const puerts={$ref:value=>({value}),$unref:ref=>ref.value,argv:{getByName:()=>gi}};
     const sandbox={console:{log:message=>replies.push(message)},Date:{now:()=>10000},require:name=>{
         loads[name]=(loads[name]||0)+1;
         return name==='ue'?UE:name==='puerts'?puerts:name==='Library/TsHelper'?{default:{constructGameplayTag:name=>name}}:null;
     }};
+    contracts.installSandbox(sandbox,native);
     const context=vm.createContext(sandbox,{codeGeneration:{strings:false,wasm:false}});
     const run=(source,command,id='',enabled=false,range=0)=>{
         replies.length=0;sandbox.args={command,id,enabled,range};

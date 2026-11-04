@@ -5,10 +5,20 @@ try {
     if (state && state.version !== 3) throw Error('private script state contract changed');
     if (!state) {
         const UE = require('ue'), puerts = require('puerts');
-        const valid = object => !!object && UE.KismetSystemLibrary.IsValid(object);
+        // Puerts rejects a released proxy before UFUNCTION IsValid can return
+        // false. Match the game's isNativeObjectAlive guard for this exact error.
+        // Other binding/engine errors must still reach the diagnostic receipt.
+        const valid = function(object) {
+            if (!object) return false;
+            try { return UE.KismetSystemLibrary.IsValid(object); }
+            catch (error) {
+                if (error && error.message==='passing a invalid object') return false;
+                throw error;
+            }
+        };
         state = {version:3,free_teleport:false,unrestricted_teleport:false,auto_collect:false,highlight_loot:false,
             leaseUntil:0,map:null,autoDistanceM:10,highlightDistanceM:50,lootPawn:'',lootComponent:null,targetingAt:0,targetingPool:null,targetingCount:0,targetingCursor:0,targetingRevision:0,mapVisited:0,targetVisited:0,mapSweep:false,targetSweep:false,lootDiagnostics:new Set(),attempted:new Set(),retryAfter:new Map(),
-            scanCursor:0,scanMaximum:0,scanSeen:new Set(),lootEntries:new Map()};
+            scanCursor:0,scanMaximum:0,scanSeen:new Set(),lootEntries:new Map(),nativeHighlights:new Map(),nativeHighlightAssets:null,nativeHighlightTimer:0};
         const active = id => state[id] && Date.now() <= state.leaseUntil;
         state.ensureMap = function() {
             if (state.map) return;
@@ -361,7 +371,242 @@ R"GLOSSJS(                }
             if (!valid(component) || component.GetOwner()!==pawn) return null;
             return {gi,pawn,component};
         };
-        state.syncLoot = function() {
+)GLOSSJS"
+R"GLOSSJS(        // The game's V-key collection entry and its original art. Each entry is
+        // hosted by an owned screen-space component: Unreal updates projection
+        // every frame without trainer overlay geometry or per-frame JS calls.
+        // Same-build runtime evidence: output/pbz-native-highlight-20261105/native-art.json.
+        state.releaseNativeHighlight = function(effect) {
+            const component=effect.component;
+            if (!valid(component)) return true;
+            // Never destroy a replacement component or another widget's host.
+            const boundWidget=component.GetWidget();
+            if (component.GetOwner()!==effect.actor ||
+                (effect.componentName!==null && UE.KismetSystemLibrary.GetPathName(component)!==effect.componentName) ||
+                (boundWidget!==effect.widget && (effect.bound || boundWidget!=null))) return true;
+            // Hide first, including on a refused destruction. Failed owned
+            // hosts remain in the ledger and are retried by the lease guard.
+            effect.retiring=true;
+            try { if (valid(effect.widget)) effect.widget.SetVisibility(UE.ESlateVisibility.Collapsed); } catch (_) {}
+            try { component.SetVisibility(false,false); } catch (_) {}
+            try { component.K2_DestroyComponent(effect.actor); } catch (_) {}
+            return !valid(component);
+        };
+        state.clearNativeHighlights = function() {
+            if (state.nativeHighlightTimer) {
+                clearTimeout(state.nativeHighlightTimer); state.nativeHighlightTimer=0;
+            }
+            for (const [name,effect] of state.nativeHighlights) {
+                try { if (state.releaseNativeHighlight(effect)) state.nativeHighlights.delete(name); }
+                catch (_) { /* Other owned entries still need cleanup. Retry below. */ }
+            }
+            if (state.nativeHighlights.size) state.armNativeHighlightGuard();
+        };
+        state.armNativeHighlightGuard = function() {
+            if (state.nativeHighlightTimer || !state.nativeHighlights.size) return;
+            // Puerts timers run on the game thread, including when the C++
+            // maintenance lease stops renewing. No worker calls Unreal here.
+            state.nativeHighlightTimer=setTimeout(function() {
+                state.nativeHighlightTimer=0;
+                if (!active('highlight_loot')) state.clearNativeHighlights();
+                else state.armNativeHighlightGuard();
+            },500);
+        };
+        state.ensureNativeHighlight = function(context) {
+            if (typeof setTimeout!=='function' || typeof clearTimeout!=='function' ||
+                !UE.WidgetComponent || typeof UE.WidgetComponent.StaticClass!=='function' ||
+                !UE.WidgetBlueprintLibrary || typeof UE.WidgetBlueprintLibrary.Create!=='function' ||
+                !UE.Class || typeof UE.Class.Load!=='function' ||
+                !UE.Texture2D || typeof UE.Texture2D.Load!=='function' ||
+                !UE.MaterialInstanceConstant || typeof UE.MaterialInstanceConstant.Load!=='function' ||
+                !UE.EWidgetSpace || !Number.isInteger(UE.EWidgetSpace.Screen) ||
+                !UE.ECollisionEnabled || !Number.isInteger(UE.ECollisionEnabled.NoCollision) ||
+                typeof context.pawn.AddComponentByClass!=='function' || typeof context.pawn.FinishAddComponent!=='function')
+                throw Error('native sense widget contract unavailable');
+            const cached=state.nativeHighlightAssets;
+            if (cached && valid(cached.widgetClass) && valid(cached.icon) && valid(cached.glow)) return cached;
+            const widgetClass=UE.Class.Load('/Game/PBZContent/UI/FrontEnd/Sense/W_Sense_Quest.W_Sense_Quest_C');
+            const icon=UE.Texture2D.Load('/Game/PBZContent/UI/InGame/Quest/T_Track_Collection.T_Track_Collection');
+            const glow=UE.MaterialInstanceConstant.Load('/Game/PBZContent/VFX/SceneFX/UI/WorldMap/Assets/MI_UI_ChengXinDongZhao_001_BG_Green.MI_UI_ChengXinDongZhao_001_BG_Green');
+            if (!valid(widgetClass) || !valid(icon) || !valid(glow)) throw Error('native sense collection art unavailable');
+            state.nativeHighlightAssets={widgetClass,icon,glow};
+            return state.nativeHighlightAssets;
+        };
+)GLOSSJS"
+R"GLOSSJS(        // PickupInfo is the same-build user-defined struct. Its full reflected
+        // names and authored aliases are accepted; scene Loot Item ID is not an inventory ID.
+        // Read existing rewards only: never generate/roll loot to choose an icon.
+        // Evidence: output/pbz-native-icons-20261105/loot-state-opened-chest.json.
+        state.nativeHighlightItemId = function(entry) {
+            const asId=function(value) {
+                if (value==null || typeof value.toString!=='function') return '';
+                const id=value.toString();
+                return typeof id==='string' && id && id!=='None' && id.length<=256 && !/[\s\x00]/.test(id) ? id : '';
+            };
+            const actor=entry.actor;
+            if (actor.IsA(UE.PBZPickupActor.StaticClass())) return asId(actor.ItemId);
+            const pickups=actor.Pickups;
+            if (!pickups || typeof pickups.Num!=='function' || typeof pickups.Get!=='function') return '';
+            const count=pickups.Num();
+            if (!Number.isInteger(count) || count<1 || count>16) return '';
+            let itemId='';
+            for (let i=0;i<count;++i) {
+                const reward=pickups.Get(i);
+                if (!reward) return '';
+                const id=asId(reward.ItemID_3_AA0CF7F84C2C8B7CDA8E3D8BF2772009 ?? reward.ItemID);
+                const amount=reward.Amount_5_93BDB8B545F957E43232B49EA76A6DFE ?? reward.Amount;
+                if (!id || !Number.isInteger(amount) || amount<=0 || (itemId && id!==itemId)) return '';
+                itemId=id;
+            }
+            return itemId;
+        };
+        state.resolveNativeHighlightArt = function(entry,context) {
+            // Icon selection is optional and isolated from loot maintenance.
+            // Hold the returned row with its soft-reference child for Puerts.
+            // Resolving once per owned effect bounds both reads and retained rows.
+            try {
+                const itemId=state.nativeHighlightItemId(entry);
+                if (!itemId || !UE.PBZBackPackSubsystem ||
+                    typeof UE.KismetSystemLibrary.IsValidSoftObjectReference!=='function') return null;
+                const read=function(owner,getter,fields) {
+                    try {
+                        if (!owner || typeof owner[getter]!=='function') return undefined;
+                        const row=owner[getter](itemId);
+                        // All five native item rows inherit ItemId (Name at 8).
+                        // The game's pickup UI also uses the ItemID spelling.
+                        // Never accept a valid default texture from another row.
+                        const id=row && (row.ItemId ?? row.ItemID);
+                        if (id==null || id.toString()!==itemId) return undefined;
+                        for (const field of fields) {
+                            const texture=row[field];
+                            if (texture && UE.KismetSystemLibrary.IsValidSoftObjectReference(texture)) return {row,texture};
+                        }
+                        return null;
+                    } catch (_) { return undefined; }
+                };
+                const subsystem=UE.PBZBackPackSubsystem;
+                // Exact row identity, rather than guessed ID prefixes or a
+                // different ItemType enum, selects the original small HUD art.
+                // Evidence: native_items.inc ItemRowLayout and icon-contract-findings.json.
+                for (const [getter,fields] of [['GetPropData',['WhiteIcon','ItemIcon']],
+                    ['GetAccessoryData',['Icon','WhiteIcon']],['GetMedicineData',['HighPrecisionTexture']]]) {
+                    const result=read(subsystem,getter,fields);
+                    if (result!==undefined) return result;
+                }
+                if (typeof subsystem.GetBackPackSubsytemByContextObject!=='function') return null;
+                const backpack=subsystem.GetBackPackSubsytemByContextObject(context.gi);
+                if (!valid(backpack)) return null;
+                for (const getter of ['GetMainWeaponTableData','GetShaqiWeaponTableData']) {
+                    const result=read(backpack,getter,['RenderIcon']);
+                    if (result!==undefined) return result;
+                }
+                return null;
+            } catch (_) { return null; }
+        };
+        state.createNativeHighlight = function(entry,context) {
+            state.nativeHighlightStage='assets';
+            const assets=state.ensureNativeHighlight(context), actor=entry.actor;
+            const pc=UE.GameplayStatics.GetPlayerController(context.gi,0);
+            if (!valid(pc) || typeof actor.AddComponentByClass!=='function' || typeof actor.FinishAddComponent!=='function')
+                throw Error('native sense widget owner unavailable');
+            state.nativeHighlightStage='create-widget';
+            const widget=UE.WidgetBlueprintLibrary.Create(context.gi,assets.widgetClass,pc);
+            if (!valid(widget)) throw Error('native sense widget creation failed');
+            let component=null, effect=null;
+            try {
+                state.nativeHighlightStage='widget-layout';
+                const icon=widget.icon || widget.Icon;
+                if (!valid(icon) || !valid(widget.Glow) || !valid(widget.DistanceText) ||
+                    !valid(widget.DIstanceBox) || !valid(widget.Arrow)) throw Error('native sense entry layout changed');
+                widget.StopAnimationsAndLatentActions();
+                widget.SetVisibility(UE.ESlateVisibility.SelfHitTestInvisible);
+                widget.SetRenderOpacity(1);
+                state.nativeHighlightStage='native-art';
+                icon.SetBrushFromTexture(assets.icon,false);
+                let itemArt=state.resolveNativeHighlightArt(entry,context);
+                if (itemArt && typeof icon.SetBrushFromSoftTexture==='function') {
+                    try { icon.SetBrushFromSoftTexture(itemArt.texture,false); }
+                    catch (_) {
+                        itemArt=null;
+                        // Keep a usable original collection icon on a refused
+                        // optional item binding; do not stop automatic collection.
+                        try { icon.SetBrushFromTexture(assets.icon,false); } catch (_) {}
+                    }
+                } else itemArt=null;
+                widget.Glow.SetBrushFromMaterial(assets.glow);
+                icon.SetVisibility(UE.ESlateVisibility.SelfHitTestInvisible);
+                widget.Glow.SetVisibility(UE.ESlateVisibility.SelfHitTestInvisible);
+                widget.Arrow.SetVisibility(UE.ESlateVisibility.Collapsed);
+                widget.DIstanceBox.SetVisibility(UE.ESlateVisibility.SelfHitTestInvisible);
+                const transform=new UE.Transform();
+                // Deferred registration prevents allocating a world-space
+                // render target before switching the component to screen space.
+                state.nativeHighlightStage='create-host';
+                component=actor.AddComponentByClass(UE.WidgetComponent.StaticClass(),false,transform,true);
+                if (!valid(component)) throw Error('native sense host creation failed');
+                effect={actor,name:entry.name,component,componentName:null,widget,itemArt,meters:-1,bound:false,retiring:false};
+                // Record ownership before any fallible configuration call.
+                state.nativeHighlights.set(entry.name,effect);
+                effect.componentName=UE.KismetSystemLibrary.GetPathName(component);
+                state.nativeHighlightStage='configure-host';
+                component.SetWidgetSpace(UE.EWidgetSpace.Screen);
+                component.SetCollisionEnabled(UE.ECollisionEnabled.NoCollision);
+                component.SetDrawAtDesiredSize(false);
+                component.SetDrawSize(new UE.Vector2D(256,256));
+                component.SetPivot(new UE.Vector2D(0.5,0.5));
+                component.SetWindowFocusable(false);
+                component.SetTickWhenOffscreen(false);
+                state.nativeHighlightStage='bind-widget';
+                component.SetWidget(widget);
+                effect.bound=true;
+                state.nativeHighlightStage='finish-host';
+                actor.FinishAddComponent(component,false,transform);
+                component.SetVisibility(true,false);
+                state.nativeHighlightStage='fade-in';
+                const fadeIn=widget.AI_SenseQuestFadeIn || widget.FadeIn;
+                if (valid(fadeIn)) widget.PlayAnimationForward(fadeIn,1,false);
+                state.armNativeHighlightGuard();
+                return effect;
+            } catch(error) {
+                if (effect) {
+                    // Cleanup must never replace the original creation failure.
+                    try { if (state.releaseNativeHighlight(effect)) state.nativeHighlights.delete(entry.name); } catch (_) {}
+                    try { state.armNativeHighlightGuard(); } catch (_) {}
+                }
+                try { if (valid(widget)) widget.SetVisibility(UE.ESlateVisibility.Collapsed); } catch (_) {}
+                throw error;
+            }
+        };
+        state.updateNativeHighlights = function(entries,context) {
+            const wanted=new Map(entries.map(entry=>[entry.name,entry]));
+            for (const [name,effect] of state.nativeHighlights) {
+                const entry=wanted.get(name);
+                if (!entry || effect.retiring || entry.actor!==effect.actor || !valid(effect.component) || !valid(effect.widget) ||
+                    effect.component.GetOwner()!==entry.actor || effect.component.GetWidget()!==effect.widget ||
+                    UE.KismetSystemLibrary.GetPathName(effect.component)!==effect.componentName) {
+                    if (state.releaseNativeHighlight(effect)) state.nativeHighlights.delete(name);
+                }
+            }
+            // At most two new native widget trees per maintenance tick. Actor
+            // hosts project smoothly at engine frame rate after creation.
+            entries.sort((a,b)=>a.cm-b.cm);
+            let created=0;
+            for (const entry of entries) {
+                let effect=state.nativeHighlights.get(entry.name);
+                if (!effect && created<2 && state.nativeHighlights.size<32) {
+                    effect=state.createNativeHighlight(entry,context); ++created;
+                }
+                if (!effect || effect.retiring || effect.actor!==entry.actor || !valid(effect.component) || !valid(effect.widget)) continue;
+                const meters=Math.round(entry.cm/100);
+                if (meters!==effect.meters) {
+                    const text=UE.KismetTextLibrary.Conv_IntToText(meters,false,true,1,324);
+                    effect.widget.DistanceText.SetPBZFormatText(text); effect.meters=meters;
+                }
+            }
+            if (state.nativeHighlights.size) state.armNativeHighlightGuard();
+        };
+)GLOSSJS"
+R"GLOSSJS(        state.syncLoot = function() {
             if (!state.auto_collect && !state.highlight_loot) { state.stopLoot(); return; }
             const context=lootContext();
             if (!context) throw Error('local interaction component unavailable');
@@ -369,8 +614,8 @@ R"GLOSSJS(                }
                 typeof UE.TargetingWorldSubsystem.StaticClass!=='function' || typeof UE.NewArray!=='function')
                 throw Error('targeting range query unavailable');
             if (state.auto_collect && !require('Library/TsHelper').default) throw Error('gameplay tag helper unavailable');
-            if (state.highlight_loot && typeof UE.GameplayStatics.ProjectWorldToScreen!=='function')
-                throw Error('screen projection unavailable');
+            if (state.highlight_loot) state.ensureNativeHighlight(context);
+            else state.clearNativeHighlights();
             if (!state.auto_collect) { state.attempted.clear(); state.retryAfter.clear(); }
         };
         state.resetLootProof = function() {
@@ -378,6 +623,7 @@ R"GLOSSJS(                }
             state.mapSweep=state.targetSweep=false; state.scanSeen.clear();
         };
         state.stopLoot = function() {
+            state.clearNativeHighlights();
             state.attempted.clear(); state.retryAfter.clear(); state.lootPawn=''; state.lootComponent=null;
             state.scanCursor=0; state.scanMaximum=0; state.scanSeen.clear(); state.targetingAt=0; state.targetingPool=null; state.targetingCount=state.targetingCursor=0; state.resetLootProof(); state.lootDiagnostics.clear(); state.lootEntries.clear();
         };
@@ -446,7 +692,8 @@ R"GLOSSJS(                }
             const x=a.X-b.X,y=a.Y-b.Y,z=a.Z-b.Z;
             return Math.sqrt(x*x+y*y+z*z);
         };
-        state.tick = function() {
+        state.lootTick = function() {
+            state.nativeHighlightStage='context';
             const now=Date.now(); state.leaseUntil=now+1000;
             for (const [name,until] of state.retryAfter) if (until<=now) state.retryAfter.delete(name);
             if (!state.auto_collect && !state.highlight_loot) return [];
@@ -476,6 +723,7 @@ R"GLOSSJS(                if (!valid(movement) || movement.MovementMode!==UE.EMo
             const maxRangeM=Math.max(state.auto_collect?state.autoDistanceM:0,state.highlight_loot?state.highlightDistanceM:0);
             // Preserve the engine-owned output wrapper and consume it incrementally.
             // The native tag query itself is O(tag count), limited to once/second.
+            state.nativeHighlightStage='target-query';
             if (now>=state.targetingAt) {
                 const subsystem=UE.SubsystemBlueprintLibrary.GetWorldSubsystem(pawn,UE.TargetingWorldSubsystem.StaticClass());
                 if (!valid(subsystem) || typeof subsystem.GetTargetsByTagInRange!=='function') throw Error('targeting range query unavailable');
@@ -493,6 +741,7 @@ R"GLOSSJS(                if (!valid(movement) || movement.MovementMode!==UE.EMo
                 // was fully visited. Retain the cursor, restart only the proof.
                 state.resetLootProof();
             }
+            state.nativeHighlightStage='candidate-scan';
             const map=component.InteractActors, maximum=map.GetMaxIndex();
             if (!Number.isInteger(maximum) || maximum<0 || maximum>4096) throw Error('interaction map bounds changed');
             if (maximum!==state.scanMaximum || state.scanCursor>maximum) {
@@ -505,7 +754,10 @@ R"GLOSSJS(                if (!valid(movement) || movement.MovementMode!==UE.EMo
                 if (classified.has(actor)) return classified.get(actor);
                 let result=null;
                 const label=kind(actor,scan);
-                if (label && UE.PBZBlueprintFunctionLibrary.GetPBZLocalCharacter(actor)===pawn) {
+                // Same-build BP_Chest.IsValidInteractOutOverlap is exactly
+                // !CurSwitchState. bInteracted is a Bool array, not this state.
+                if (label && (label!=='Chest' || actor.CurSwitchState===false) &&
+                    UE.PBZBlueprintFunctionLibrary.GetPBZLocalCharacter(actor)===pawn) {
                     const name=UE.KismetSystemLibrary.GetPathName(actor);
                     if (name) result={actor,label,name};
                 }
@@ -597,22 +849,17 @@ R"GLOSSJS(                if (!valid(movement) || movement.MovementMode!==UE.EMo
                 const air=asc.HasMatchingGameplayTag(component.InAirTag)===true;
                 return component.IsValidInteract(actor,blocked,sprint,air)===true;
             };
-            const markers=[],pc=state.highlight_loot?UE.GameplayStatics.GetPlayerController(gi,0):null;
-            const collectCandidates=[];
+            const highlightCandidates=[],collectCandidates=[];
             for (const entry of candidates) {
                 const {actor,label,name,cm}=entry;
-                if (!valid(actor) || !pickupValid(actor,scan)) continue;
-                if (state.highlight_loot && cm<=state.highlightDistanceM*100 && valid(pc)) {
-                    const screen=puerts.$ref(new UE.Vector2D());
-                    if (UE.GameplayStatics.ProjectWorldToScreen(pc,actor.K2_GetActorLocation(),screen,false)) {
-                        const p=puerts.$unref(screen);
-                        if (Number.isFinite(p.X) && Number.isFinite(p.Y) && p.X>=0 && p.Y>=0 && p.X<=100000 && p.Y<=100000)
-                            markers.push({x:p.X,y:p.Y,label,distance:cm/100});
-                    }
-                }
+                if (!valid(actor) || !pickupValid(actor,scan) || (label==='Chest' && actor.CurSwitchState!==false)) continue;
+                if (state.highlight_loot && cm<=state.highlightDistanceM*100) highlightCandidates.push(entry);
                 if (mayInteract && cm<=state.autoDistanceM*100 && !state.attempted.has(name) && !state.retryAfter.has(name))
                     collectCandidates.push(entry);
             }
+            state.nativeHighlightStage='native-update';
+            state.updateNativeHighlights(highlightCandidates,context);
+            state.nativeHighlightStage='auto-interact';
             // Sorting at most 32 JS values avoids calling Blueprint predicates
             // for every new distance minimum when engine order is far-to-near.
             collectCandidates.sort((a,b)=>a.cm-b.cm);
@@ -633,10 +880,22 @@ R"GLOSSJS(                const {actor,name,label}=selected;
                     UE.KismetSystemLibrary.GetPathName(actor)===name && member(selected) &&
                     distance(pawn.K2_GetActorLocation(),actor.K2_GetActorLocation())<=state.autoDistanceM*100) {
                     state.retryAfter.set(name,now+1500);
-                    if (component.DoInteract(actor)===true) { state.retryAfter.delete(name); state.attempted.add(name); }
+                    if (component.DoInteract(actor)===true) {
+                        state.retryAfter.delete(name); state.attempted.add(name);
+                    }
                 }
             }
-            return markers;
+            return [];
+        };
+        state.tick = function() {
+            try { return state.lootTick(); }
+            catch (error) {
+                const message=String(error && error.message || error);
+                const stack=String(error && error.stack || '').split('\n').slice(1,4).join(' | ').slice(0,360);
+                const stage=state.nativeHighlightStage || 'unknown';
+                try { state.clearNativeHighlights(); } catch (_) {}
+                throw Error(message+' [loot stage='+stage+']'+(stack?' '+stack:''));
+            }
         };
         const dispatch=function(command,id,enabled,range) {
             if (command==='cleanup') {
@@ -665,7 +924,9 @@ R"GLOSSJS(                const {actor,name,label}=selected;
         Object.defineProperty(state,'dispatch',{value:dispatch,writable:false,configurable:false});
         globalThis[key]=state;
     }
-    const result=state.dispatch(command,id,enabled,range);
+    let result;
+    try { result=state.dispatch(command,id,enabled,range); }
+    catch (error) { state.clearNativeHighlights(); throw error; }
     console.log(ack+'ok'+(command==='tick'?'|'+JSON.stringify(result):''));
 } catch (error) { console.log(ack+'error:'+String(error && error.message || error)); }
 )GLOSSJS"

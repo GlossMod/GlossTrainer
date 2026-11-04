@@ -8,7 +8,6 @@
 #include "gameplay/catalog.hpp"
 #include "gameplay/item_quantity.hpp"
 #include "gameplay/inventory_edit_rules.hpp"
-#include "gameplay/loot_markers.hpp"
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <shellapi.h>
@@ -2205,19 +2204,6 @@ namespace gloss::overlay
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         ui::BeginItemIconFrame();
-        for (const auto& marker : gameplay::GetLootMarkers()) {
-            const ImVec2 point(marker.x, marker.y);
-            if (point.x < 0 || point.y < 0 || point.x > io.DisplaySize.x || point.y > io.DisplaySize.y) continue;
-            const char* name = marker.label == "Chest" ? Text("宝箱") : marker.label == "Note" ? Text("纸条") : Text("战利品");
-            const auto label = std::format("{} · {:.1f} m", name, marker.distance);
-            auto* draw = ImGui::GetBackgroundDrawList();
-            const auto textSize = ImGui::CalcTextSize(label.c_str());
-            const ImVec2 origin(point.x - textSize.x * .5f, point.y - 27 * scale);
-            draw->AddRectFilled(ImVec2(origin.x - 6 * scale, origin.y - 3 * scale),
-                ImVec2(origin.x + textSize.x + 6 * scale, origin.y + textSize.y + 3 * scale), IM_COL32(15, 17, 21, 210), 4 * scale);
-            draw->AddCircle(point, 5 * scale, IM_COL32(250, 198, 95, 255), 12, 2 * scale);
-            draw->AddText(origin, IM_COL32(255, 222, 159, 255), label.c_str());
-        }
         // Copying the model takes the lock the game thread needs. Revision is read
         // first, so a change during the copy is simply fetched again next frame.
         static gameplay::Snapshot snapshot;

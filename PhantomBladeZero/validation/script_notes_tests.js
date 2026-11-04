@@ -31,12 +31,13 @@ function harness() {
         EMovementMode:{MOVE_Walking:1}, AbilitySystemBlueprintLibrary:{GetAbilitySystemComponent:() => asc},
         Vector2D:function() {}, NewArray:()=>[],SubsystemBlueprintLibrary:{GetWorldSubsystem:()=>({GetTargetsByTagInRange:(tag,exact,center,range,out)=>{out.value=contracts.array();}})},TargetingWorldSubsystem:{StaticClass:()=> 'TargetingWorldSubsystem'}, GameplayStatics:{GetPlayerController:() => ({}),
             ProjectWorldToScreen:(pc, location, out) => { out.value = {X:100,Y:200}; return true; }}};
-    contracts.install(UE,component,asc);
+    const native=contracts.install(UE,component,asc);
     const puerts = {$ref:value => ({value}), $unref:reference => reference.value, argv:{getByName:() => gi}};
-    const context = vm.createContext({console:{log:message => replies.push(message)}, Date:{now:() => 10000},
+    const sandbox = {console:{log:message => replies.push(message)}, Date:{now:() => 10000},
         require:name => name === 'ue' ? UE : name === 'puerts' ? puerts :
-            name === 'Library/TsHelper' ? {default:{constructGameplayTag:name => name}} : null},
-        {codeGeneration:{strings:false,wasm:false}});
+            name === 'Library/TsHelper' ? {default:{constructGameplayTag:name => name}} : null};
+    contracts.installSandbox(sandbox,native);
+    const context = vm.createContext(sandbox,{codeGeneration:{strings:false,wasm:false}});
     function run(command, id = '', enabled = false) {
         replies.length = 0;
         vm.runInContext(`(()=>{const command=${JSON.stringify(command)},id=${JSON.stringify(id)},enabled=${enabled},range=${enabled?(id==='auto_collect'?10:id==='highlight_loot'?50:0):0},ack='ACK:';${source}})();`, context);
@@ -46,7 +47,7 @@ function harness() {
         return {path:'paper', 'Not Interact':false, 'Loot Item ID':id, IsA:() => false, GetClass:() => ({path:classPath}),
             K2_GetActorLocation:() => ({X:100,Y:0,Z:0}),IsValidInteractOutOverlap:()=>true};
     }
-    return {run, actor, candidates, component, calls};
+    return {run, actor, candidates, component, calls,native,state:()=>sandbox.__glossPBZ302256};
 }
 
 for (const id of ['Zhengdaodaying.R_03013', 'Map.Page_CS_12', 'Prefix.Area.R_12020']) {
@@ -55,7 +56,7 @@ for (const id of ['Zhengdaodaying.R_03013', 'Map.Page_CS_12', 'Prefix.Area.R_120
     check(h.run('toggle', 'highlight_loot', true) === 'ACK:ok');
     check(h.run('toggle', 'auto_collect', true) === 'ACK:ok');
     const markers = JSON.parse(h.run('tick').slice('ACK:ok|'.length));
-    check(markers.length === 1 && markers[0].label === 'Note', 'exact page classified as Note');
+    check(markers.length === 0 && h.state().lootEntries.get('paper').label === 'Note', 'exact page classified as Note without overlay output');
     check(h.calls.length === 1 && h.calls[0] === 'paper', 'normal interaction invoked');
     h.run('tick'); check(h.calls.length === 1, 'paper is attempted only once while present');
     check(h.run('cleanup') === 'ACK:ok'); check(h.run('tick') === 'ACK:ok|[]');
@@ -98,7 +99,7 @@ for (const id of ['Area.UnknownPage', 'Area.Book_12', 'Area.Page_CS', 'Area.r_03
     const h=harness(), actor=h.actor(id); actor.can=false; h.candidates.set(3,actor);
     h.run('toggle','highlight_loot',true); h.run('toggle','auto_collect',true);
     const markers=JSON.parse(h.run('tick').slice('ACK:ok|'.length));
-    check(markers.length===1 && markers[0].label==='Loot','unknown suffix is not mislabeled Note');
+    check(markers.length===0 && h.state().lootEntries.get('paper').label==='Loot'&&h.state().nativeHighlights.size===1,'unknown suffix is not mislabeled Note and receives native art');
     check(h.calls.length===0,'normal game predicate blocks unavailable scene loot');
 }
 console.log(`${checks} checks, 0 failures`);

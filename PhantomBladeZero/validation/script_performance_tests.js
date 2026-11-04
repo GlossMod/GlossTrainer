@@ -24,10 +24,11 @@ function harness(maximum=4096){
         EMovementMode:{MOVE_Walking:1},AbilitySystemBlueprintLibrary:{GetAbilitySystemComponent:call('asc',()=>asc)},
         GameplayStatics:{GetPlayerController:()=>({}),ProjectWorldToScreen:call('project',(pc,loc,out)=>{out.value={X:loc.X,Y:loc.Y};return true;})},
         Vector2D:function(){},NewArray:()=>[],SubsystemBlueprintLibrary:{GetWorldSubsystem:()=>({GetTargetsByTagInRange:(tag,exact,center,range,out)=>{out.value=contracts.array();}})},TargetingWorldSubsystem:{StaticClass:()=> 'TargetingWorldSubsystem'}};
-    contracts.install(UE,component,asc);
+    const native=contracts.install(UE,component,asc);
     const puerts={$ref:value=>({value}),$unref:ref=>ref.value,argv:{getByName:()=>gi}};
     const sandbox={console:{log:text=>replies.push(text)},Date:{now:()=>10000},require:name=>
         name==='ue'?UE:name==='puerts'?puerts:name==='Library/TsHelper'?{default:{constructGameplayTag:call('makeTag',x=>x)}}:null};
+    contracts.installSandbox(sandbox,native);
     const context=vm.createContext(sandbox,{codeGeneration:{strings:false,wasm:false}});
     const run=(command,id='',enabled=false)=>{
         replies.length=0;vm.runInContext(`(()=>{const command=${JSON.stringify(command)},id=${JSON.stringify(id)},enabled=${enabled},range=${enabled?(id==='auto_collect'?10:id==='highlight_loot'?50:0):0},ack='ACK:';${source}})();`,context);
@@ -40,7 +41,7 @@ function harness(maximum=4096){
     };
     // Arrow wrappers do not preserve this; actor location is an explicit closure.
     const makeActor=(...args)=>{const a=actor(...args);a.K2_GetActorLocation=call('location',()=>a.location);return a;};
-    return {counts,slots,component,pawn,interactions,run,actor:makeActor,state:()=>sandbox.__glossPBZ302256,
+    return {counts,slots,component,pawn,interactions,run,actor:makeActor,native,state:()=>sandbox.__glossPBZ302256,
         reset:()=>{for(const key of Object.keys(counts))delete counts[key];},setMaximum:value=>maximum=value,
         replaceComponent:()=>{liveComponent={...component};return liveComponent;}};
 }
@@ -63,7 +64,7 @@ for(const reason of ['busy','air']){
     const h=harness();h.slots.set(0,h.actor('loot'));h.run('toggle','auto_collect',true);
     if(reason==='busy')h.component.busy={};else h.pawn.CharacterMovement.MovementMode=3;
     h.reset();check(h.run('tick')==='ACK:ok|[]');check(!h.counts.maximum&&!h.counts.slot&&!h.counts.isA,'blocked auto-only avoids scanning '+reason);
-    h.run('toggle','highlight_loot',true);h.reset();h.run('tick');check(h.counts.slot>0&&h.counts.project===1,'highlight still runs while collection blocked');
+    h.run('toggle','highlight_loot',true);h.reset();h.run('tick');check(h.counts.slot>0&&h.state().nativeHighlights.size===1&&!h.counts.project,'native highlight still runs while collection blocked without script projection');
 }
 {
     const h=harness();const current=h.actor('current');h.slots.set(4000,current);h.component.CurrentInteractActor=current;
@@ -76,8 +77,9 @@ for(const reason of ['busy','air']){
     const h=harness();const a=h.actor('remembered');h.slots.set(0,a);
     h.run('toggle','highlight_loot',true);h.run('toggle','auto_collect',true);h.run('tick');
     check(h.interactions.length===1);check(h.state().lootEntries.size===1);
+    const nativeEffect=h.state().nativeHighlights.get(a.path);
     a.location.X=140;const markers=JSON.parse(h.run('tick').slice(7));
-    check(markers.length===1&&markers[0].x===140,'retained entries reproject during sparse batches');
+    check(markers.length===0&&h.state().nativeHighlights.get(a.path)===nativeEffect&&nativeEffect.component.GetOwner()===a,'retained actor keeps its native host during sparse batches');
     check(h.interactions.length===1&&h.state().attempted.has('remembered'),'one attempt survives partial sweeps');
     a.valid=false;check(h.run('tick')==='ACK:ok|[]','cached actor validity is re-read');
     check(h.state().lootEntries.size===0);a.valid=true;

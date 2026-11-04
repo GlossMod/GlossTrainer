@@ -25,10 +25,11 @@ function harness(){
         AbilitySystemBlueprintLibrary:{GetAbilitySystemComponent:()=>({HasMatchingGameplayTag:()=>false,HasAnyMatchingGameplayTags:()=>false})},Vector2D:function(){},
         GameplayStatics:{GetPlayerController:()=>({}),ProjectWorldToScreen:(pc,point,out)=>{out.value={X:10,Y:20};return true;},},
         NewArray:()=>[],SubsystemBlueprintLibrary:{GetWorldSubsystem:()=>targetSubsystem},TargetingWorldSubsystem:{StaticClass:()=> 'TargetingWorldSubsystem'}};
-    contracts.install(UE,component);
+    const native=contracts.install(UE,component);
     const puerts={$ref:value=>({value}),$unref:ref=>ref.value,argv:{getByName:()=>gi}};
     const sandbox={Date:{now:()=>now},console:{log:message=>replies.push(message)},require:name=>name==='ue'?UE:
         name==='puerts'?puerts:name==='Library/TsHelper'?{default:{constructGameplayTag:name=>name}}:null};
+    contracts.installSandbox(sandbox,native);
     const context=vm.createContext(sandbox,{codeGeneration:{strings:false,wasm:false}});
     const run=(command,id='',enabled=false,range=enabled?(id==='auto_collect'?10:id==='highlight_loot'?50:0):0)=>{
         replies.length=0;
@@ -39,25 +40,25 @@ function harness(){
     };
     const actor=(metres,name='loot')=>({path:name,location:{X:metres*100,Y:0,Z:0},IsA:()=>{++classifications;return true;},
         IsValidPickup:()=>true,IsValidInteractOutOverlap:()=>true,K2_GetActorLocation(){return this.location;}});
-    return {run,actor,slots,calls,queries,component,UE,targetSubsystem,state:()=>sandbox.__glossPBZ302256,
+    return {run,actor,slots,calls,queries,component,UE,targetSubsystem,native,state:()=>sandbox.__glossPBZ302256,
         advance:ms=>now+=ms,reads:()=>reads,classifications:()=>classifications,resetCounts:()=>{reads=classifications=0;}};
 }
 {
     const h=harness(),a=h.actor(20);h.targetSubsystem.values=[a];
     h.run('toggle','highlight_loot',true,50);const markers=JSON.parse(h.run('tick').slice(7));
     check(h.queries.length===1&&h.queries[0].range===5000,'targeting query uses configured highlight range');
-    check(markers.length===1,'targeting result extends highlight beyond short local map');
+    check(markers.length===0&&h.state().nativeHighlights.size===1,'targeting result creates native highlight beyond short local map');
     h.run('toggle','highlight_loot',false);h.targetSubsystem.values=[a];h.run('toggle','auto_collect',true,10);h.run('tick');
     check(h.queries.at(-1).range===1000&&h.calls.length===0,'auto query uses its independent 10 metre range');
     h.targetSubsystem.values={Num:()=>1,Get:()=>a};h.run('toggle','highlight_loot',true,50);
-    check(JSON.parse(h.run('tick').slice(7)).length===1,'TArray-like targeting output is consumed safely');
+    check(h.run('tick')==='ACK:ok|[]'&&h.state().nativeHighlights.size===1,'TArray-like targeting output is consumed safely');
 }
 {
     const h=harness();h.run('tick');
     check(h.state().autoDistanceM===10&&h.state().highlightDistanceM===50,'independent defaults in metres');
     const a=h.actor(50),b=h.actor(50.01,'far');h.slots.set(0,a);h.slots.set(1,b);
     check(h.run('toggle','highlight_loot',true)==='ACK:ok');
-    const markers=JSON.parse(h.run('tick').slice(7));check(markers.length===1&&markers[0].distance===50,'default highlight boundary is 50 metres');
+    const markers=JSON.parse(h.run('tick').slice(7));check(markers.length===0&&h.state().nativeHighlights.size===1&&h.state().nativeHighlights.get(a.path).meters===50,'default native highlight boundary is 50 metres');
     check(h.calls.length===0,'highlights do not collect');
 }
 for(const id of ['auto_collect','highlight_loot']){
@@ -89,7 +90,7 @@ for(const id of ['auto_collect','highlight_loot']){
 }
 {
     const h=harness();h.run('toggle','highlight_loot',true,40);
-    h.UE.GameplayStatics.ProjectWorldToScreen=null;
+    h.UE.WidgetBlueprintLibrary.Create=null;
     check(h.run('toggle','highlight_loot',true,80).startsWith('ACK:error:'),'failed reconfiguration reports error');
     check(h.state().highlightDistanceM===40&&h.state().highlight_loot,'failed reconfiguration restores prior distance and state');
 }
@@ -100,9 +101,9 @@ for(const id of ['auto_collect','highlight_loot']){
 }
 {
     const h=harness(),a=h.actor(80);h.slots.set(0,a);h.run('toggle','highlight_loot',true,100);
-    check(JSON.parse(h.run('tick').slice(7)).length===1,'retained candidate initially visible');
+    check(h.run('tick')==='ACK:ok|[]'&&h.state().nativeHighlights.size===1,'retained candidate initially visible');
     h.run('toggle','highlight_loot',true,50);
-    check(JSON.parse(h.run('tick').slice(7)).length===0,'decreasing range removes retained marker on next tick');
+    check(h.run('tick')==='ACK:ok|[]'&&h.state().nativeHighlights.size===0,'decreasing range removes retained native marker on next tick');
 }
 {
     const h=harness();h.targetSubsystem.values=Array.from({length:160},(_,i)=>h.actor(20,'target'+i));

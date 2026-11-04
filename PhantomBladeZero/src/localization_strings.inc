@@ -50,7 +50,7 @@
 {"拾取距离（米）", "Pickup distance (m)"},
 {"高亮距离（米）", "Highlight distance (m)"},
 {"在设定距离内自动收集物品、纸条和宝箱；距离以米为单位。", "Automatically collect items, notes and chests within the configured distance in meters."},
-{"标示设定距离内可收集物品；距离以米为单位，关闭时清理标示。", "Mark collectible items within the configured distance in meters; remove markers when disabled."},
+{"使用原生澄心洞照图标显示附近物品，可隔墙查看；距离以米为单位，关闭时清理提示。", "Show nearby loot through walls with the game's native Sense icons. Distance is in meters; disable to remove the indicators."},
 {"可用", "Available"},
 {"共 %zu 项", "%zu entries"},
 {"功能", "Feature"},

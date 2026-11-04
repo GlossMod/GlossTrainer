@@ -578,3 +578,43 @@ Debug、Release 的 PBZ 生产构建及各 21 套测试均通过，共 42 套，
 Debug、Release 均构建成功；受影响的性能、物品扫描、图片、物品缓存、Gameplay 和原生生命周期目标全部通过，生命周期为 920 项 0 失败；脚本回归 367 项 0 失败，新增固定调度入口为 413 字节。原始日志和测试输出见[优化目录](../../output/pbz-optimize-20261105/)。
 
 优化版 `GlossTrainer.asi` SHA-256 为 `23DED9E6999DDE14990F59B8D7314D46AD5CA4776E2A66BCBF91EFB2B6C87329`，已在游戏退出后安装；上一版 `797C...` 已备份，`features.ini` SHA-256 仍为 `41F89F647B6C3ACBCE5A0A08B009A671E69C534360B71414C1A029EE0611D263`。[安装回执](../../output/pbz-optimize-20261105/install-receipt.json)。本轮未启动游戏，故优化后的实机耗时、FPS、拾取奖励和页面冷加载对比仍待下一次固定场景采样。
+
+## 2026-11-05 原生澄心洞照战利品提示
+
+移除 ImGui 黄色圆点和“战利品 · xx m”文字，复用游戏 `W_Sense_Quest` 叶子控件、`T_Track_Collection` 及绿色光晕。运行时只读回收显示这套资源正由真实 V 技能的收藏追踪实例使用。每个战利品创建独立屏幕空间组件，由引擎逐帧更新位置；不创建会修改全局技能状态的 `W_Player_Sense` 宿主，不干预手动 V 或任务追踪。保留 50 米高亮、10 米拾取默认值、自定义滑块与保存恢复；最多 32 个提示，每次维护最多新建两个。[实现与边界](native-loot-highlight.md)、[素材回读](../../output/pbz-native-highlight-20261105/native-art.json)。
+
+Debug、Release 本体编译和受影响的 Gameplay、Localization、原生 Hook 生命周期测试全部通过，生命周期每配置 920 项。六套源码 JS 测试 440 项、新目录中的完整功能测试副本 74 项，共 514 项全部通过；覆盖配置、创建预算、距离变化、真实收集状态、身份替换、销毁失败重试和无维护时的租约回收。12 段、419 字节桥接入口仍与精确游戏文件匹配，固定维护调度入口保持 413 字节。[C++/JS 结果](../../output/pbz-native-highlight-20261105/validation/)、[完整功能测试副本](../../output/pbz-native-highlight-20261105/scripts/script_features_tests.log)、[契约校验](../../output/pbz-native-highlight-20261105/script-receipt.json)。
+
+用户正常退出后，于 03:48 安装 [GlossTrainer.asi](../../output/pbz-native-highlight-20261105/artifact/GlossTrainer.asi)，SHA-256 `77CA0FDB7E26FB56B6102EC3F2BDF2473F886B5D0FEAB387A0383C4B3604938E`，与安装路径一致。已备份此前 `23DE...`、最新配置和两处存档；部署前后 `features.ini` 均为 `6DE7645FA93323910EAFFF69A575B7744A71DB292773EA689B18394F6126C72E`，未回退用户的最新开关。[部署回执](../../output/pbz-native-highlight-20261105/deploy-receipt.json)。
+
+部署后直接运行启动器出现“加载 SteamAPI 失败”，未进入可操作场景；当时仅观察到修改器初始化日志，不能视为原生提示实际显示成功。仍需从 Steam 正常启动后验证图标、DPI、菜单/加载行为、流式关卡清理及密集场景性能。屏幕空间提示不含 V 原界面的屏外贴边箭头，首次启用类/素材加载也尚无冷启动耗时。未提交、推送或发布。
+
+## 2026-11-05 原生战利品提示的无效代理修复
+
+首版 `77CA0FDB...` 后续进入实际游戏，在 PID 37356 的 04:05:30.328、04:06:44.422、04:06:50.957 维护调用中报 `passing a invalid object`，自动拾取与高亮随后显示状态未知；原生桥接校验与回调恢复成功。首版的 514 项离线通过结果没有覆盖这个真实 PuerTs 行为。[修复前日志](../../output/pbz-native-highlight-fix-20261105/trainer-before-fix.log)。只读对象快照找到两个独立原生叶子控件，未找到当时仍绑定它们的组件，不能由该快照判定首次失败点。[对象快照](../../output/pbz-native-highlight-fix-20261105/widgets-before-fix.json)。
+
+同构建回收源码说明，已销毁的 UObject 代理传给原生 `IsValid` 本身会抛上述错误；旧测试替身却直接返回 `false`。修正版仅将这条精确异常视为对象失效，保留其他错误；销毁后验证不再因已释放代理而中断。创建及普通/固定调度维护的清理均保留原始错误、调用阶段和有界堆栈，避免清理异常覆盖最初故障。入场动画使用原生 `PlayAnimationForward(animation,1,false)`。新增严格回归在旧产品上失败、修复后通过；这些结果不等于已经定位原现场的第一条失败调用。[修复分析](../../output/pbz-native-highlight-fix-20261105/fix-report.md)。
+
+修正版 Debug、Release 本体构建成功，受影响的 Gameplay、Localization、原生 Hook 生命周期目标在两配置均通过，生命周期每配置 920 项、0 失败。六套源码 JS 共 486 项，加历史完整功能测试副本 74 项，合计 560 项、0 失败；原生高亮最终套件为 193 项。12 段、419 字节精确游戏桥接契约仍匹配。[Debug 结果](../../output/pbz-native-highlight-fix-20261105/validation/tests-debug.json)、[Release 结果](../../output/pbz-native-highlight-fix-20261105/validation/tests-release.json)、[JS 汇总](../../output/pbz-native-highlight-fix-20261105/js-validation-summary.json)、[原生高亮最终日志](../../output/pbz-native-highlight-fix-20261105/validation/script_native_highlight_tests.log)、[脚本契约](../../output/pbz-native-highlight-fix-20261105/script-receipt.json)。
+
+游戏退出后，于 04:24:04 将修正版 [GlossTrainer.asi](../../output/pbz-native-highlight-fix-20261105/artifact/GlossTrainer.asi) 部署到 `platform/steam/scripts/GlossTrainer.asi`，SHA-256 `F1344BE76D6EA5806D0487814C3930DC84E467B790F561D7517C70E66F3760B3`。部署时游戏进程数为 0，原版 ASI、最新配置和两处存档已备份；`features.ini` 保持 `6DE7645FA93323910EAFFF69A575B7744A71DB292773EA689B18394F6126C72E`，未覆盖用户配置。[部署回执](../../output/pbz-native-highlight-fix-20261105/deploy-receipt.json)。
+
+随后经 Steam 启动，用户回传画面已确认多个目标的原生绿色图标、光晕与距离实际显示。PID 41424 的只读快照包含 20 个 `W_Sense_Quest` 叶子、154 个 `WidgetComponent`，读取失败数为 0；计数包含游戏已有对象，不能视为修改器新增数量。[修复后对象快照](../../output/pbz-native-highlight-fix-20261105/widgets-after-fix.json)。用户继续反馈所有目标图标相同，要求按真实原生图标区分，当前统一设置 `T_Track_Collection` 的实现尚未满足此项。稳定维护、关闭清理、DPI、菜单/载入及密集场景性能仍待验收，没有新的 FPS 提升结论。未提交、推送或发布。
+
+## 2026-11-05 物品图标与已开宝箱过滤
+
+用户进一步提供了统一图标和已开启木箱仍有标记的实际画面。只读现场与两个 59 字节蓝图谓词确认：宝箱 `IsValidInteractOutOverlap` 返回 `!CurSwitchState`，场景掉落返回 `!['Not Interact']`；前者的 `bInteracted` 是数组，已开、未开箱均可能为 `[false,true]`。旧标量比较无法识别完成。修正为严格布尔 `CurSwitchState === false`，同时用于高亮和自动收集候选，已持有的提示在下一次维护移除。[状态证据及原始快照](../../output/pbz-native-icons-20261105/chest-state-confirmed-receipt.json)。
+
+图标从真实 `ItemId` 或现有 `PickupInfo` 奖励读取，按精确行身份匹配五类原生物品数据，只在创建时选择对应小图并由 UMG 异步加载；保留绿色光晕和距离。未知、结构不符、无有效图案或多种奖励保留通用图标，不生成或提前领取奖励。保持 32 提示、每次最多新建两项及原有范围查询预算。[解析契约](../../output/pbz-native-icons-20261105/resolver-contract-final.json)、[实现边界](native-loot-highlight.md)。
+
+Debug/Release 的 PBZ 本体与 Gameplay、Localization、原生 Hook 生命周期均编译通过，生命周期每配置 920 项。六套源码脚本共 618 项，加新目录中适配真实宝箱数组/状态 fixture 的完整功能测试副本 74 项，共 692 项通过；原生高亮套件 325 项。历史测试原文件没有改动；它缺少新严格状态字段而出现失败，已在新副本补全真实 schema 后重跑。桥接仍为 12 段 419 字节，固定调度入口 413 字节，嵌入脚本 63741 字节。[C++/JS 原始结果](../../output/pbz-native-icons-20261105/validation/)、[脚本契约](../../output/pbz-native-icons-20261105/script-receipt.json)。
+
+Release 产物 [GlossTrainer.asi](../../output/pbz-native-icons-20261105/artifact/GlossTrainer.asi) SHA-256 `F6AE50A8DC5C9A5060B105A066BDF057EBE014C95074E449975657E24862E30B`，游戏退出后于 05:21 部署，配置保持用户最新值。[部署回执](../../output/pbz-native-icons-20261105/deploy-receipt.json)。PID 48424 的定位后只读快照包含五个关联到单奖励场景物件的提示，图案仍均为通用收藏图，其中四个奖励 ID 可在同构建道具表核对。用户按物理 Esc 停止电脑操作，未继续画面验收；此证据不能称为不同物品图标实机通过，也未证明已开箱标记实际消失。[快照审计](../../output/pbz-native-icons-20261105/positioned-icon-audit.json)。
+
+## 2026-11-05 v1.2.0 发布准备
+
+发布前补充 `PickupInfo` 完整反射名与 `ItemID` / `Amount` 编写名兼容，避免只支持一种 PuerTs 包装形式；精确库存 ID、数量与单奖励约束保持不变。这是兼容修复，现有证据尚不能唯一确定前述通用图案的根因，不能由离线通过推定实机图标已修复。最终源码六套 JS 共 630 项，加完整功能历史测试的新副本 74 项，共 704 项通过，原生高亮套件 337 项。Debug、Release 均构建 PBZ 及注册的 26 套验证目标，52 次测试执行全部通过。发布工作流增加 PBZ 六套脚本契约检查。[发布验证目录](../../output/pbz-release-v1.2.0-20261105/validation/)。
+
+最终本地 Release ASI SHA-256 `C79A3AB2915CD9283C33B1294785E2A9C3074F1045CA6FFA82F6AAB105AE3C4B`，未再次覆盖游戏安装。源码版本 `1.2.0`、发布通道 `PhantomBladeZero/v1.2.0`；双语说明已同步 `CL-302256_JKS-17280` 和实际支持的主程序哈希。正式下载以 GitHub Actions 同一提交的候选包验证和标签构建产物为准，不能把本地 ASI 哈希当作 CI 包中 ASI 的哈希。
+
+PowerShell 5.1 和 7 的便携包、通道隔离、PBZ 安装约定测试分别为 29、45、45 项，两种环境均全部通过。安装约定中的旧主程序哈希同步为本版构建，测试仍核对包路径、五文件清单、许可、Loader 架构/哈希、升级保留配置及无旧 ASI 重复加载。Loader 使用重新下载并核对固定官方 SHA-256 的 v10.0.0 归档。[打包与安装日志](../../output/pbz-release-v1.2.0-20261105/validation/)。

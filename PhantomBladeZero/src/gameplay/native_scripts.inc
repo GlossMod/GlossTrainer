@@ -569,13 +569,13 @@ console.log(ack+'ok'+(command==='tick'?'|'+JSON.stringify(value):''));
                 scriptError = scriptReply.empty() ? "脚本会话变化，等待清理" : scriptReply;
                 return;
             }
-            if (scriptEnabled[3]) {
-                if (!scriptReply.starts_with("ok|") || !PublishLootMarkersJson(std::string_view(scriptReply).substr(3))) {
-                    ClearLootMarkers(); scriptUncertain = true;
-                    AbortScriptHooks();
-                    scriptError = "脚本标记返回格式未通过校验";
-                }
-            } else ClearLootMarkers();
+            // World loot uses game-owned screen-space widgets. No projected
+            // coordinates or per-frame overlay snapshot crosses this bridge.
+            if (scriptReply != "ok|[]") {
+                scriptUncertain = true;
+                AbortScriptHooks();
+                scriptError = "原生战利品提示维护回执未通过校验";
+            }
         }
         bool ScriptCleanup() {
             ClearLootMarkers();

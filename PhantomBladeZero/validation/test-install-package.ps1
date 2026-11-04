@@ -121,7 +121,7 @@ try {
         foreach ($required in @("GlossTrainer v$($release.version)", 'platform/steam', 'PBZ.exe', 'Insert',
             'version.dll', 'version.ini', 'scripts/PBZ.asi', 'scripts/GlossTrainer.asi', 'scripts/GlossTrainer/PBZ/',
             'ui.ini', 'hotkeys.ini', 'features.ini', 'language.ini', 'PhantomBladeZero/v',
-            '7b4fcd286a350780faf0824d73aa150b21cbf1bccde883e6a96386cbe09973b4', 'bcdec.txt')) {
+            'CL-302256_JKS-17280', '4415933ce33476f14c837abb61a1b60af8b78cd81783896501913a7aac69e423', 'bcdec.txt')) {
             if (-not $text.Contains($required)) { throw "$readme is missing its PBZ installation contract: $required" }
         }
         Check ($text -notmatch '\{\{[A-Z_]+\}\}' -and $text -notmatch 'b1-Win64-Shipping\.exe|xmake bi') "$readme describes PBZ paths and controls without unresolved placeholders or a Wukong installer command"
