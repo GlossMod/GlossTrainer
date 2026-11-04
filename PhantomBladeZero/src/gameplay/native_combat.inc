@@ -1,8 +1,8 @@
 // Exact-build combat hooks. Included inside native_adapter's anonymous namespace.
         using AttributePreChange = void(__fastcall*)(void*, const void*, float*);
-        constexpr Address BasicAttributeVtableRva = 0xbc80180;
-        constexpr Address ShachiPreCurrentRva = 0x5dd5470;
-        constexpr Address ShachiPreBaseRva = 0x5dd5360;
+        constexpr Address BasicAttributeVtableRva = 0xbce8960;
+        constexpr Address ShachiPreCurrentRva = 0x5e1e400;
+        constexpr Address ShachiPreBaseRva = 0x5e1e2f0;
         struct CombatBinding {
             Context context;
             Address attributes{}, property{}, darkSourceProperty{};
@@ -18,7 +18,7 @@
         bool CombatBindingCurrent() {
             if (stopping.load() || faulted.load() || !LocalGameThread() || !combatBinding.attributes) return false;
             const auto& bound = combatBinding.context;
-            const auto engine = Read<Address>(base + 0xdf741c8);
+            const auto engine = Read<Address>(base + 0xdfe9278);
             const auto viewport = Read<Address>(engine + 0xc88);
             const auto players = Read<Address>(bound.instance + 0x38);
             return Read<Address>(viewport + 0x78) == bound.world &&
@@ -218,11 +218,11 @@
         std::atomic<bool> combatCleanupRequested{}, combatCleanupComplete{};
 
         Address PerfectTagFunction(bool add) {
-            const auto type = Read<Address>(base + 0xe019ac8);
+            const auto type = Read<Address>(base + 0xe08ead0);
             if (!ObjectValid(type) || ObjectName(type) != "PBZAbilityBlueprintLibrary") return 0;
             const auto name = add ? "AddLooseGameplayTag" : "RemoveLooseGameplayTag";
             const auto function = FindFunction(type, name);
-            return CombatSignature(function, name, add ? 0x65c0740 : 0x65c2ed0, 0x04422401, 18, {
+            return CombatSignature(function, name, add ? 0x6609620 : 0x660bdb0, 0x04422401, 18, {
                 {"Actor", "ObjectProperty", 0, 8, 0x18001000000280ull, "Actor"},
                 {"GameplayTag", "StructProperty", 8, 8, 0x18001008000182ull, "GameplayTag"},
                 {"bShouldReplicate", "BoolProperty", 16, 1, 0x18001040000280ull, ""},
@@ -279,21 +279,21 @@
                 Read<Address>(input + 0x20) != context.pawn) return false;
             const auto query = FindFunction(Read<Address>(deflect + 0x10), "GetNearestValidReceivedFrame");
             const auto activate = FindFunction(Read<Address>(input + 0x10), "TryActivateExternalActionAbilityInterruptLowerByTag");
-            const auto system = Read<Address>(Read<Address>(base + 0xdf4d1c0) + 0x20);
+            const auto system = Read<Address>(Read<Address>(base + 0xdfc2270) + 0x20);
             const auto time = FindFunction(system, "GetGameTimeInSeconds");
-            return CombatSignature(query, "GetNearestValidReceivedFrame", 0x5fd7c90, 0x04420401, 100, {
+            return CombatSignature(query, "GetNearestValidReceivedFrame", 0x6022950, 0x04420401, 100, {
                 {"DeflectAngle", "FloatProperty", 0, 4, 0x18001040000280ull, ""},
                 {"MaxPreimpactTime", "FloatProperty", 4, 4, 0x18001040000280ull, ""},
                 {"IsDodge", "BoolProperty", 8, 1, 0x18001040000280ull, ""},
                 {"CurrentHandle", "IntProperty", 12, 4, 0x18001040000280ull, ""},
                 {"OutFrame", "StructProperty", 16, 80, 0x10001000000180ull, "DeflectReceiveFrame"},
                 {"ReturnValue", "IntProperty", 96, 4, 0x18001040000780ull, ""}}) &&
-                CombatSignature(activate, "TryActivateExternalActionAbilityInterruptLowerByTag", 0x5de66e0, 0x04420401, 21, {
+                CombatSignature(activate, "TryActivateExternalActionAbilityInterruptLowerByTag", 0x5e2f7b0, 0x04420401, 21, {
                 {"AbilityTag", "StructProperty", 0, 8, 0x18001008000182ull, "GameplayTag"},
                 {"InputAction", "ObjectProperty", 8, 8, 0x18001000000282ull, "InputAction"},
                 {"ActionPriority", "IntProperty", 16, 4, 0x18001040000280ull, ""},
                 {"ReturnValue", "BoolProperty", 20, 1, 0x18001040000780ull, ""}}) &&
-                CombatSignature(time, "GetGameTimeInSeconds", 0x3f9a910, 0x14022403, 16, {
+                CombatSignature(time, "GetGameTimeInSeconds", 0x3fadf80, 0x14022403, 16, {
                 {"WorldContextObject", "ObjectProperty", 0, 8, 0x18001000000282ull, "Object"},
                 {"ReturnValue", "DoubleProperty", 8, 8, 0x18001040000780ull, ""}});
         }
@@ -355,7 +355,7 @@
             if (!perfectDodgeEnabled) return;
             if (!DodgeContractCurrent(context, Clock::now())) { perfectDodgeEnabled = false; combatError = "闪避入口已变化，自动操作已停止"; return; }
             const auto deflect = Read<Address>(context.pawn + 0xed0), input = Read<Address>(context.pawn + 0xeb8);
-            const auto system = Read<Address>(Read<Address>(base + 0xdf4d1c0) + 0x20);
+            const auto system = Read<Address>(Read<Address>(base + 0xdfc2270) + 0x20);
             const auto cdo = Read<Address>(system + 0x160);
             struct Time { Address world; double result; } time{context.world, -1};
             struct Query {

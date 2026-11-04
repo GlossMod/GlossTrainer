@@ -9,7 +9,7 @@ param(
     [switch]$GridFixture,
     [ValidateSet('network', 'available', 'current', 'error', 'checking')][string]$UpdateState = 'network',
     [string]$IconSamplePath,
-    [ValidateSet('grid', 'hover', 'quantity', 'features', 'settings', 'menu-key', 'menu-capture')][string]$FixtureView = 'grid',
+    [ValidateSet('grid', 'hover', 'quantity', 'features', 'distance-features', 'settings', 'menu-key', 'menu-capture')][string]$FixtureView = 'grid',
     [ValidateRange(0.8, 1.5)][double]$Scale = 1,
     [Parameter(Mandatory = $true)][string]$OutputDirectory
 )
@@ -33,10 +33,10 @@ $null = New-Item -ItemType Directory -Path $settings -Force
 $testAsi = Join-Path $output "artifact/$artifactName"
 Copy-Item -LiteralPath $asi -Destination $testAsi
 if ($GridFixture) {
-    if ($FixtureView -notin @('features', 'settings', 'menu-key', 'menu-capture') -and (-not $IconSamplePath -or (Get-Item -LiteralPath $IconSamplePath).Length -ne 262144)) {
+    if ($FixtureView -notin @('features', 'distance-features', 'settings', 'menu-key', 'menu-capture') -and (-not $IconSamplePath -or (Get-Item -LiteralPath $IconSamplePath).Length -ne 262144)) {
         throw 'Grid fixture requires one captured 512x512 BC3 sample (262144 bytes).'
     }
-    if ($FixtureView -notin @('features', 'settings', 'menu-key', 'menu-capture')) { Copy-Item -LiteralPath $IconSamplePath -Destination (Join-Path $settings 'fixture.dxt5') }
+    if ($FixtureView -notin @('features', 'distance-features', 'settings', 'menu-key', 'menu-capture')) { Copy-Item -LiteralPath $IconSamplePath -Destination (Join-Path $settings 'fixture.dxt5') }
     [IO.File]::WriteAllText((Join-Path $settings 'fixture-mode.txt'), $FixtureView)
 }
 $scaleText = $Scale.ToString([Globalization.CultureInfo]::InvariantCulture)

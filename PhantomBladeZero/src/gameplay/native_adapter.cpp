@@ -4,6 +4,8 @@
 #include "item_quantity.hpp"
 #include "item_scan_schedule.hpp"
 #include "item_loading_budget.hpp"
+#include "item_catalog_progress.hpp"
+#include "item_image_identity.hpp"
 #include "performance_scope.hpp"
 #include "item_action_index.hpp"
 #include "item_text_cache.hpp"
@@ -13,6 +15,10 @@
 #include "combat_rules.hpp"
 #include "attribute_rules.hpp"
 #include "movement_rules.hpp"
+#include "camera_rules.hpp"
+#include "inventory_edit_rules.hpp"
+#include "collectible_names.hpp"
+#include "loot_markers.hpp"
 #include "extended_rules.hpp"
 #include "resource_rules.hpp"
 #include "cooldown_rules.hpp"
@@ -48,10 +54,10 @@ namespace gloss::gameplay::native {
     namespace {
         using Address = std::uintptr_t;
         using ProcessEvent = void(__fastcall*)(void*, void*, void*);
-        constexpr Address ActorProcessEventRva = 0x3abd7f0;
-        constexpr Address ObjectProcessEventRva = 0x1631410;
-        constexpr Address GameThreadIdRva = 0xdcba820;
-        constexpr std::string_view SupportedHash = "7b4fcd286a350780faf0824d73aa150b21cbf1bccde883e6a96386cbe09973b4";
+        constexpr Address ActorProcessEventRva = 0x3ac2f60;
+        constexpr Address ObjectProcessEventRva = 0x1630720;
+        constexpr Address GameThreadIdRva = 0xdd2f820;
+        constexpr std::string_view SupportedHash = "4415933ce33476f14c837abb61a1b60af8b78cd81783896501913a7aac69e423";
         constexpr std::array<unsigned char, 11> ActorEntry{0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x6c, 0x24, 0x18, 0x57};
         constexpr std::array<unsigned char, 12> ObjectEntry{0x40, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57};
 
@@ -103,7 +109,6 @@ namespace gloss::gameplay::native {
         bool activeBound{};
         std::string creationContext;
         bool creationAttempted{};
-        Address activeCheat{};
         thread_local bool insideAdapter{};
         std::mutex debugMutex;
 
@@ -171,7 +176,7 @@ namespace gloss::gameplay::native {
         const std::string* NameText(std::uint32_t id) {
             const auto blockIndex = id >> 16;
             const auto offset = (id & 0xffffu) * 2u;
-            const auto blocks = base + 0xdd11ad0;
+            const auto blocks = base + 0xdd86ad0;
             const auto currentBlock = Read<std::uint32_t>(blocks - 8);
             const auto currentCursor = Read<std::uint32_t>(blocks - 4);
             if (blockIndex > currentBlock || blockIndex >= 8192) return nullptr;
@@ -294,7 +299,7 @@ namespace gloss::gameplay::native {
             const auto allocatedBits = Read<Address>(map + 32);
             const auto bits = allocatedBits ? allocatedBits : map + 16;
             if (!allocatedBits && numBits > 128) return 0;
-            const auto expectedClass = Read<Address>(base + 0xe019f88);
+            const auto expectedClass = Read<Address>(base + 0xe08ef90);
             if (!ObjectValid(expectedClass) || ObjectName(expectedClass) != "PBZBackPackSubsystem") return 0;
             for (std::int32_t index = 0; index < count; ++index) {
                 if (!(Read<std::uint32_t>(bits + (index / 32) * 4) & (1u << (index % 32)))) continue;
@@ -343,7 +348,7 @@ namespace gloss::gameplay::native {
                 {"health", "当前生命", health ? std::format("{:.1f}", health->current) : "未回读"},
                 {"max_health", "最大生命", health ? std::format("{:.1f}", health->maximum) : "未回读"},
                 {"thread", "游戏线程", std::to_string(GetCurrentThreadId())},
-                {"profile", "版本契约", "CL-301524_JKS-17219 · SHA-256 匹配"},
+                {"profile", "版本契约", "CL-302256_JKS-17280 · SHA-256 匹配"},
                 {"verification", "效果验证", "调用仅在专属回读通过时显示为已验证"}};
             if (context) {
                 if (const auto resource = ReadUltimate(*context)) {
@@ -367,7 +372,7 @@ namespace gloss::gameplay::native {
             GetBackend().PublishStatistics(std::move(statistics));
         }
         std::optional<Context> CurrentContext() {
-            const auto engine = Read<Address>(base + 0xdf741c8);
+            const auto engine = Read<Address>(base + 0xdfe9278);
             const auto viewport = Read<Address>(engine + 0xc88);
             Context context;
             context.world = Read<Address>(viewport + 0x78);
@@ -392,8 +397,10 @@ namespace gloss::gameplay::native {
             if (expectedThread.load(std::memory_order_relaxed) != tid) expectedThread.store(tid);
             return tid && tid == GetCurrentThreadId();
         }
-        const ExpectedFunction* Contract(std::string_view name) {
-            for (const auto& item : ExpectedFunctions) if (item.name == name) return &item;
+        constexpr std::string_view LegacyGmUnavailable = "当前游戏版本已移除 GM 实现，功能不可用";
+        const ExpectedFunction* Contract(std::string_view) {
+            // CL-302256 retains the reflected names, but their native bodies are
+            // no-op stubs. The historical table must never authorize dispatch.
             return nullptr;
         }
         std::size_t SizeOf(ParamType type) {
@@ -444,7 +451,7 @@ namespace gloss::gameplay::native {
             if (!ObjectValid(function) || ObjectName(function) != (getter ? "GetGlobalTimeDilation" : "SetGlobalTimeDilation") ||
                 Read<std::uint32_t>(function + 0x100) != (getter ? 0x14022403u : 0x04022403u) ||
                 Read<std::uint8_t>(function + 0x104) != 2 || Read<std::uint16_t>(function + 0x106) != 12 ||
-                Read<Address>(function + 0x128) != base + (getter ? 0x3f98a20 : 0x3fa0bf0)) return false;
+                Read<Address>(function + 0x128) != base + (getter ? 0x3fac090 : 0x3fb4260)) return false;
             auto property = Read<Address>(function + 0x50);
             if (Name(Read<std::uint32_t>(property + 0x20)) != "WorldContextObject" ||
                 !PropertyLayout(property, "ObjectProperty", 8, 0) ||
@@ -456,7 +463,7 @@ namespace gloss::gameplay::native {
                 !Read<Address>(property + 0x10);
         }
         bool TimeDilationReady() {
-            const auto owner = Read<Address>(base + 0xdf45bf8);
+            const auto owner = Read<Address>(base + 0xdfbac68);
             return ObjectValid(owner) && ObjectName(owner) == "GameplayStatics" &&
                 ObjectValid(Read<Address>(owner + 0x160)) &&
                 TimeDilationSignature(FindFunction(owner, "SetGlobalTimeDilation"), false) &&
@@ -471,7 +478,7 @@ namespace gloss::gameplay::native {
             if (parsed.ec != std::errc{} || parsed.ptr != argument.data() + argument.size() ||
                 !std::isfinite(value) || value < 0.1f || value > 3.0f)
                 return {RequestState::Failed, "时间倍率必须在 0.1–3.0 之间"};
-            const auto owner = Read<Address>(base + 0xdf45bf8);
+            const auto owner = Read<Address>(base + 0xdfbac68);
             const auto cdo = Read<Address>(owner + 0x160);
             struct Parameters { Address world; float value; } parameters{context.world, value};
             if (!CallProcessEvent(cdo, FindFunction(owner, "SetGlobalTimeDilation"), &parameters)) {
@@ -500,8 +507,8 @@ namespace gloss::gameplay::native {
                 if (Name(found->second) == text) return NameValue{found->second, 0};
                 cache.erase(found);
             }
-            const auto last = Read<std::uint32_t>(base + 0xdd11ac8);
-            const auto cursor = Read<std::uint32_t>(base + 0xdd11acc);
+            const auto last = Read<std::uint32_t>(base + 0xdd86ac8);
+            const auto cursor = Read<std::uint32_t>(base + 0xdd86acc);
             if (last >= 8192 || cursor > 0x20000) return {};
             // A missing name stays missing until the append-only pool grows.
             static thread_local MissingNameCache missing;
@@ -519,7 +526,7 @@ namespace gloss::gameplay::native {
                 const auto size = block == last ? cursor : 0x20000;
                 const std::uint32_t first = block == scannedBlock ? scannedCursor : 0;
                 if (size < first + text.size() + 2) continue;
-                if (!ReadBytes(Read<Address>(base + 0xdd11ad0 + block * 8) + first, bytes.data() + first, size - first)) {
+                if (!ReadBytes(Read<Address>(base + 0xdd86ad0 + block * 8) + first, bytes.data() + first, size - first)) {
                     completeScan = false;
                     continue;
                 }
@@ -548,7 +555,7 @@ namespace gloss::gameplay::native {
             const auto state = Read<Address>(context.pawn + 0xf28);
             if (!ObjectValid(state)) return {};
             const auto function = FindFunction(Read<Address>(state + 0x10), "InExactState");
-            if (!ObjectValid(function) || Read<Address>(function + 0x128) != base + 0x5d962a0 ||
+            if (!ObjectValid(function) || Read<Address>(function + 0x128) != base + 0x5dded70 ||
                 Read<std::uint32_t>(function + 0x100) != 0x54420401 ||
                 Read<std::uint8_t>(function + 0x104) != 2 || Read<std::uint16_t>(function + 0x106) != 9) return {};
             auto parameter = Read<Address>(function + 0x50);
@@ -571,17 +578,20 @@ namespace gloss::gameplay::native {
             }
             return parameters.result != 0;
         }
-        ExecutionResult ReadLocation(const Context& context) {
+        bool LocationReady(const Context& context) {
             const auto function = FindFunction(Read<Address>(context.pawn + 0x10), "K2_GetActorLocation");
             const auto parameter = Read<Address>(function + 0x50);
-            if (!ObjectValid(function) || Read<Address>(function + 0x128) != base + 0x3acceb0 ||
-                Read<std::uint32_t>(function + 0x100) != 0x54820401 ||
-                Read<std::uint8_t>(function + 0x104) != 1 || Read<std::uint16_t>(function + 0x106) != 24 ||
-                Name(Read<std::uint32_t>(parameter + 0x20)) != "ReturnValue" ||
-                !PropertyLayout(parameter, "StructProperty", 24, 0) ||
-                ObjectName(Read<Address>(parameter + 0x70)) != "Vector" ||
-                Read<std::uint64_t>(parameter + 0x38) != 0x18001040000780ull || Read<Address>(parameter + 0x10))
-                return {RequestState::Failed, "坐标返回结构未通过契约核对"};
+            return ObjectValid(function) && Read<Address>(function + 0x128) == base + 0x3ad2cb0 &&
+                Read<std::uint32_t>(function + 0x100) == 0x54820401 &&
+                Read<std::uint8_t>(function + 0x104) == 1 && Read<std::uint16_t>(function + 0x106) == 24 &&
+                Name(Read<std::uint32_t>(parameter + 0x20)) == "ReturnValue" &&
+                PropertyLayout(parameter, "StructProperty", 24, 0) &&
+                ObjectName(Read<Address>(parameter + 0x70)) == "Vector" &&
+                Read<std::uint64_t>(parameter + 0x38) == 0x18001040000780ull && !Read<Address>(parameter + 0x10);
+        }
+        ExecutionResult ReadLocation(const Context& context) {
+            if (!LocationReady(context)) return {RequestState::Failed, "坐标返回结构未通过契约核对"};
+            const auto function = FindFunction(Read<Address>(context.pawn + 0x10), "K2_GetActorLocation");
             struct Vector { double x, y, z; } value{};
             if (!CallProcessEvent(context.pawn, function, &value)) {
                 faulted.store(true);
@@ -599,7 +609,7 @@ namespace gloss::gameplay::native {
             const auto component = Read<Address>(context.pawn + 0x750);
             if (!ObjectValid(component)) return {};
             const auto function = FindFunction(Read<Address>(component + 0x10), "GetGameplayTagCount");
-            if (!ObjectValid(function) || Read<Address>(function + 0x128) != base + 0x4c8a000 ||
+            if (!ObjectValid(function) || Read<Address>(function + 0x128) != base + 0x4cb6940 ||
                 Read<std::uint32_t>(function + 0x100) != 0x54020403 ||
                 Read<std::uint8_t>(function + 0x104) != 2 || Read<std::uint16_t>(function + 0x106) != 12) return {};
             auto parameter = Read<Address>(function + 0x50);
@@ -627,14 +637,16 @@ namespace gloss::gameplay::native {
         #include "native_attributes.inc"
         #include "native_combat.inc"
         #include "native_movement.inc"
+        #include "native_camera.inc"
         void RefreshExtendedCapabilities(const ToggleState& state) {
             // Components can arrive after the initial session bind. Reuse the
             // observed contract for both the toggle and its flight actions.
             for (const auto& toggle : ToggleCatalog()) {
                 if (toggle.id != state.id) continue;
                 const auto* feature = FindFeature(toggle.onFeatureId);
-                if (feature && feature->functionName == "Native_ExtendedFeature" && state.known)
-                    GetBackend().SetCapability(toggle.onFeatureId, true, "参数契约已核对，可提交调用");
+                if (feature && feature->functionName == "Native_ExtendedFeature")
+                    GetBackend().SetCapability(toggle.onFeatureId, state.known,
+                        state.known ? "参数契约已核对，可提交调用" : state.reason);
             }
             if (state.id == "flight") {
                 for (const auto id : {"flight_up", "flight_down"})
@@ -643,13 +655,14 @@ namespace gloss::gameplay::native {
         }
         // Slice 0 is the combat group, then each movement toggle, the four extended
         // groups and each economy switch, ending with the statistics read-back.
-        constexpr std::size_t ToggleSliceCount = 1 + MovementToggleIds.size() + 4 + 3;
+        constexpr std::size_t ToggleSliceCount = 1 + MovementToggleIds.size() + CameraToggleIds.size() + 1 + 4 + 4 + 3;
         constexpr std::size_t StatusSliceCount = ToggleSliceCount + 1;
         StatusSchedule statusSchedule;
         std::vector<ToggleState> statusStates;
         void AppendToggleSlice(const Context& context, std::size_t slice, std::vector<ToggleState>& states) {
             if (slice) { AppendExtendedToggleSlice(context, slice - 1, states); return; }
             const auto invulnerable = ReadGameplayTagCount(context, "CharacterState.Stand.Invulnerable.Debug");
+            if (faulted.load()) return;
             states.push_back(ShachiToggleState());
             states.push_back(DarkSourceToggleState());
             states.push_back(PerfectDeflectState(context));
@@ -663,8 +676,10 @@ namespace gloss::gameplay::native {
         // Immediate pass for a just-executed request. Results gathered by a pass in
         // progress may predate that request, so they are dropped.
         void PublishToggles(const Context& context) {
+            if (faulted.load()) return;
             std::vector<ToggleState> states;
-            for (std::size_t slice = 0; slice < ToggleSliceCount; ++slice) AppendToggleSlice(context, slice, states);
+            for (std::size_t slice = 0; slice < ToggleSliceCount && !faulted.load(); ++slice) AppendToggleSlice(context, slice, states);
+            if (faulted.load()) return;
             statusStates.clear();
             statusSchedule.Restart();
             PublishToggleStatesFrom(std::move(states));
@@ -678,6 +693,7 @@ namespace gloss::gameplay::native {
             if (slice < ToggleSliceCount) AppendToggleSlice(context, slice, statusStates);
             else {
                 PublishReadback(ReadHealth(context), &context);
+                if (faulted.load()) return;
                 PublishToggleStatesFrom(std::exchange(statusStates, {}));
             }
             if (statusSchedule.Finished(StatusSliceCount)) statusSchedule.Complete(now);
@@ -753,7 +769,7 @@ namespace gloss::gameplay::native {
             if (!ObjectValid(function) || ObjectName(function) != "SpawnObject" ||
                 Read<std::uint32_t>(function + 0x100) != 0x04022403 ||
                 Read<std::uint8_t>(function + 0x104) != 3 || Read<std::uint16_t>(function + 0x106) != 24 ||
-                Read<Address>(function + 0x128) != base + 0x3fa4970) return false;
+                Read<Address>(function + 0x128) != base + 0x3fb7fe0) return false;
             std::array<bool, 3> found{};
             auto property = Read<Address>(function + 0x50);
             for (unsigned i = 0; property && i < 8; ++i) {
@@ -771,7 +787,7 @@ namespace gloss::gameplay::native {
             return !property && std::all_of(found.begin(), found.end(), [](bool value) { return value; });
         }
         bool EnsureCheat(Context& context, std::string& reason) {
-            const auto owner = Read<Address>(base + 0xe0121e0);
+            const auto owner = Read<Address>(base + 0xe0870f8);
             if (!ObjectValid(owner) || ObjectName(owner) != "PBZCheatManager") {
                 reason = "PBZCheatManager 类尚未就绪"; return false;
             }
@@ -795,8 +811,8 @@ namespace gloss::gameplay::native {
             if (!within || !IsClass(Read<Address>(context.controller + 0x10), within)) {
                 reason = "CheatClass 的 ClassWithin 与控制器不符"; return false;
             }
-            const auto function = Read<Address>(base + 0xdf46760);
-            const auto spawnOwner = Read<Address>(base + 0xdf45bf8);
+            const auto spawnOwner = Read<Address>(base + 0xdfbac68);
+            const auto function = FindFunction(spawnOwner, "SpawnObject");
             const auto cdo = Read<Address>(spawnOwner + 0x160);
             if (!SpawnSignature(function) || !ObjectValid(cdo) || ObjectName(spawnOwner) != "GameplayStatics") {
                 reason = "SpawnObject 反射入口未通过完整签名核对"; return false;
@@ -882,27 +898,176 @@ namespace gloss::gameplay::native {
             return true;
         }
         #include "native_items.inc"
+        #include "native_accessories.inc"
+        #include "native_scripts.inc"
         #include "native_damage.inc"
         #include "native_cooldown.inc"
         #include "native_stealth.inc"
         #include "native_progress.inc"
         #include "native_extended.inc"
+        #include "native_inventory_edit.inc"
         #include "native_medicine.inc"
+
+        ExecutionResult FullHeal(const Context& context) {
+            if (!PlayerAttributesReady(context)) return {RequestState::Failed, "本地玩家属性契约未通过，未恢复生命"};
+            const auto before = ReadHealth(context);
+            if (!before || before->maximum < 1) return {RequestState::Failed, "当前生命上限未通过实际回读"};
+            const auto identity = CaptureAttributeIdentity(context);
+            const auto property = FindProperty(Read<Address>(identity.attributes + 0x10), "Health");
+            if (!PropertyLayout(property, "StructProperty", 16, 0x58) ||
+                ObjectName(Read<Address>(property + 0x70)) != "GameplayAttributeData")
+                return {RequestState::Failed, "生命属性布局未通过核对，未恢复生命"};
+            if (!SetEngineAttribute(identity.component, property, before->maximum)) {
+                faulted.store(true);
+                GetBackend().SetRuntimeState(false, "恢复生命调用异常，适配器停止");
+                return {RequestState::Indeterminate, "恢复生命调用异常，结果无法确认"};
+            }
+            ++dispatchedCalls;
+            if (!AttributeIdentityCurrent(context, identity))
+                return {RequestState::Indeterminate, "恢复生命后玩家属性对象变化，结果无法确认"};
+            const auto after = ReadHealth(context);
+            PublishReadback(after, &context);
+            if (!after) return {RequestState::Indeterminate, "恢复生命后实际属性无法回读"};
+            if (std::abs(after->current - after->maximum) <= (std::max)(0.01f, std::abs(after->maximum) * 1e-5f))
+                return {RequestState::Verified, std::format("生命属性回读 {:.1f} / {:.1f}，已恢复至实际生效上限", after->current, after->maximum)};
+            return {RequestState::Failed, std::format("生命调用已返回，但实际回读 {:.1f} / {:.1f} 未恢复至上限", after->current, after->maximum)};
+        }
+
+        constexpr std::string_view InvulnerableTag = "CharacterState.Stand.Invulnerable.Debug";
+        struct InvulnerableBinding {
+            Context context;
+            TagTargetIdentity identity;
+            LooseTagContribution contribution;
+            bool enabled{};
+        } invulnerableBinding;
+        TagTargetStatus InvulnerableTargetStatus() {
+            const auto& identity = invulnerableBinding.identity;
+            if (!identity.Valid() || !ObjectValid(identity.world) ||
+                Read<std::uint32_t>(identity.world + 0xc) != identity.worldIndex ||
+                !ObjectValid(identity.pawn) || Read<std::uint32_t>(identity.pawn + 0xc) != identity.pawnIndex ||
+                !ObjectValid(identity.component) || Read<std::uint32_t>(identity.component + 0xc) != identity.componentIndex)
+                return TagTargetStatus::Expired;
+            if (!LocalGameThread() || stopping.load() || faulted.load() ||
+                !PropertyLayout(FindProperty(Read<Address>(identity.pawn + 0x10), "AbilitySystemComponent"), "ObjectProperty", 8, 0x750) ||
+                Read<Address>(identity.pawn + 0x750) != identity.component || Read<Address>(identity.component + 0x20) != identity.pawn ||
+                !ClassNamed(Read<Address>(identity.component + 0x10), "PBZAbilitySystemComponent")) return TagTargetStatus::Unavailable;
+            return TagTargetStatus::Current;
+        }
+        bool InvulnerableTagCall(bool add, bool& dispatched) {
+            dispatched = false;
+            if (InvulnerableTargetStatus() != TagTargetStatus::Current) return false;
+            const auto function = PerfectTagFunction(add);
+            const auto tag = FindExistingName(InvulnerableTag);
+            const auto owner = Read<Address>(function + 0x20), cdo = Read<Address>(owner + 0x160);
+            if (!function || !tag || !ObjectValid(cdo)) return false;
+            struct Parameters { Address actor; NameValue tag; std::uint8_t replicate{}, result{}; }
+                parameters{invulnerableBinding.identity.pawn, *tag};
+            if (InvulnerableTargetStatus() != TagTargetStatus::Current) return false;
+            dispatched = true;
+            const bool called = CallProcessEvent(cdo, function, &parameters);
+            ++dispatchedCalls;
+            if (!called) {
+                faulted.store(true);
+                GetBackend().SetRuntimeState(false, "无敌标签调用异常，适配器停止；保留贡献记录且不再调用引擎");
+                return false;
+            }
+            return parameters.result != 0;
+        }
+        bool RemoveInvulnerableContribution() {
+            auto& binding = invulnerableBinding;
+            binding.enabled = false;
+            if (!binding.contribution.owned) { binding = {}; return true; }
+            const auto status = InvulnerableTargetStatus();
+            if (status == TagTargetStatus::Expired) { binding = {}; return true; }
+            if (status != TagTargetStatus::Current) return false;
+            auto& contribution = binding.contribution;
+            const auto before = ReadGameplayTagCount(binding.context, InvulnerableTag);
+            if (!before || *before > 100001) return false;
+            if (contribution.removalPending) {
+                if (!contribution.ObserveRemoval(before)) return false;
+            } else if (!contribution.ObserveNoContribution(*before)) {
+                if (!contribution.BeginRemove(*before)) return false;
+                bool dispatched{};
+                InvulnerableTagCall(false, dispatched);
+                if (!dispatched) { contribution.CancelUnexecutedRemoval(); return false; }
+                if (InvulnerableTargetStatus() != TagTargetStatus::Current) return false;
+                if (!contribution.ObserveRemoval(ReadGameplayTagCount(binding.context, InvulnerableTag))) return false;
+            }
+            binding = {};
+            return true;
+        }
+        bool InvulnerableReady(const Context& context) {
+            return PerfectTagFunction(true) && PerfectTagFunction(false) && FindExistingName(InvulnerableTag) &&
+                ReadGameplayTagCount(context, InvulnerableTag).has_value();
+        }
+        ExecutionResult ExecuteInvulnerable(const Context& context, const Request& request) {
+            if (request.arguments.size() != 1 || (request.arguments[0] != "on" && request.arguments[0] != "off"))
+                return {RequestState::Failed, "无敌开关参数无效"};
+            if (request.arguments[0] == "off") {
+                const bool removed = RemoveInvulnerableContribution();
+                return {removed ? RequestState::Verified : RequestState::Indeterminate,
+                    removed ? "已移除本修改器添加的无敌标签贡献，保留游戏原有状态" : "无敌标签移除尚未通过回读，不会重复减计数"};
+            }
+            if (!InvulnerableReady(context)) return {RequestState::Failed, "本地玩家无敌标签或 Add/Remove 契约未通过"};
+            const auto component = Read<Address>(context.pawn + 0x750);
+            const TagTargetIdentity identity{context.world, context.pawn, component, context.worldIndex,
+                Read<std::uint32_t>(context.pawn + 0xc), Read<std::uint32_t>(component + 0xc)};
+            auto& binding = invulnerableBinding;
+            if (binding.enabled && binding.identity == identity && binding.contribution.confirmed &&
+                InvulnerableTargetStatus() == TagTargetStatus::Current) {
+                const auto count = ReadGameplayTagCount(context, InvulnerableTag);
+                if (count && *count > binding.contribution.baseline)
+                    return {RequestState::Verified, "修改器无敌标签贡献仍在能力系统中，实际受击效果需实战验证"};
+            }
+            if (!RemoveInvulnerableContribution()) return {RequestState::Indeterminate, "前次无敌标签贡献尚未清理，未重复添加"};
+            binding.context = context;
+            binding.identity = identity;
+            if (InvulnerableTargetStatus() != TagTargetStatus::Current) return {RequestState::Failed, "玩家能力系统身份已变化，未添加无敌标签"};
+            const auto before = ReadGameplayTagCount(context, InvulnerableTag);
+            if (!before || !binding.contribution.BeginAdd(*before)) return {RequestState::Failed, "无敌标签原始计数无效，未添加"};
+            bool dispatched{};
+            const bool called = InvulnerableTagCall(true, dispatched);
+            if (!dispatched) binding.contribution.Clear();
+            const auto after = dispatched && InvulnerableTargetStatus() == TagTargetStatus::Current ?
+                ReadGameplayTagCount(context, InvulnerableTag) : std::nullopt;
+            if (!binding.contribution.ObserveAdd(after) || !called) {
+                const bool removed = RemoveInvulnerableContribution();
+                return {removed ? RequestState::Failed : RequestState::Indeterminate,
+                    removed ? "无敌标签新增未通过回读，已撤销本次贡献" : "无敌标签新增结果尚未确认，保留清理记录且不会自动重试"};
+            }
+            binding.enabled = true;
+            return {RequestState::Verified, "已向本地玩家新增一份无敌标签并通过计数回读；受击和换图行为需实战验证"};
+        }
 
         ExecutionResult Execute(const Request& request) {
             if (stopping.load() || faulted.load() || !LocalGameThread()) return {RequestState::Failed, "游戏线程条件失效"};
             const auto context = CurrentContext();
-            if (!context || context->Key() != activeSession || context->cheat != activeCheat || !ObjectValid(context->cheat)) {
+            if (!context || !activeBound || !context->SameKey(activeContext) || context->Key() != activeSession) {
                 GetBackend().SetRuntimeState(false, "世界或玩家已变化，等待重新核对");
                 return {RequestState::Indeterminate, "调用前会话失效，未执行"};
             }
             const auto* feature = FindFeature(request.featureId);
+            if (request.featureId == "script_probe") return ScriptProbe(*context);
             if (request.featureId == "grant_item") return GrantItem(*context, request);
+            if (request.featureId == "set_item_quantity") return ExecuteInventoryEdit(*context, request);
             if (request.featureId == "set_max_health") return SetMaxHealth(*context, request);
             if (request.featureId == "refill_medicine") return RefillMedicine(*context);
+            if (request.featureId == "full_heal") return FullHeal(*context);
+            if (request.featureId == "get_location") return ReadLocation(*context);
+            if (request.featureId == "get_health") {
+                const auto health = ReadHealth(*context);
+                PublishReadback(health, &*context);
+                if (!health) return {RequestState::Failed, "生命属性对象或反射布局未通过核对"};
+                return {RequestState::Verified, std::format("当前生命 {:.1f} / {:.1f}（真实属性回读）", health->current, health->maximum)};
+            }
+            if (feature && feature->functionName == "Native_Invulnerable") {
+                const auto result = ExecuteInvulnerable(*context, request);
+                if (!faulted.load()) PublishToggles(*context);
+                return result;
+            }
             if (feature && (feature->functionName == "Native_ExtendedFeature" || feature->functionName == "Native_ExtendedAction")) {
                 const auto result = ExecuteExtended(*context, request);
-                PublishToggles(*context);
+                if (!faulted.load()) PublishToggles(*context);
                 return result;
             }
             if (feature && feature->functionName == "Native_InfiniteDarkSource") {
@@ -923,16 +1088,11 @@ namespace gloss::gameplay::native {
             if (feature && feature->functionName == "SetGlobalTimeDilation") return SetTimeDilation(*context, request);
             const auto* expected = feature ? Contract(feature->functionName) : nullptr;
             std::string reason;
-            if (!feature || !expected || !CatalogMatches(*feature, *expected, reason)) return {RequestState::Failed, reason};
+            if (!feature) return {RequestState::Failed, "功能不存在"};
+            if (!expected) return {RequestState::Failed, std::string(LegacyGmUnavailable)};
+            if (!CatalogMatches(*feature, *expected, reason)) return {RequestState::Failed, reason};
             const auto function = FindFunction(Read<Address>(context->cheat + 0x10), expected->name);
             if (!Signature(function, *expected, reason)) return {RequestState::Failed, reason};
-            if (request.featureId == "get_location") return ReadLocation(*context);
-            if (request.featureId == "get_health") {
-                const auto health = ReadHealth(*context);
-                PublishReadback(health, &*context);
-                if (!health) return {RequestState::Failed, "生命属性对象或反射布局未通过核对，未调用 GM 日志入口"};
-                return {RequestState::Verified, std::format("当前生命 {:.1f} / {:.1f}（真实属性回读）", health->current, health->maximum)};
-            }
             std::vector<std::byte> parameters;
             std::vector<std::vector<wchar_t>> strings;
             if (!Pack(*expected, request, parameters, strings, reason)) return {RequestState::Failed, reason};
@@ -950,16 +1110,6 @@ namespace gloss::gameplay::native {
             if (!after || after->Key() != current->Key()) {
                 GetBackend().SetRuntimeState(false, "调用后世界或玩家会话变化");
                 return {RequestState::Indeterminate, "调用后会话变化，效果与异步任务完成情况未知"};
-            }
-            if (request.featureId == "full_heal") {
-                const auto health = ReadHealth(*after);
-                PublishReadback(health, &*after);
-                if (health) {
-                    float target = health->maximum;
-                    if (std::abs(health->current - target) <= std::max(0.01f, std::abs(target) * 1e-5f))
-                        return {RequestState::Verified, std::format("生命属性回读 {:.1f}，与目标 {:.1f} 一致", health->current, target)};
-                    return {RequestState::Dispatched, std::format("调用已返回；生命回读 {:.1f} / {:.1f}，与目标 {:.1f} 不一致", health->current, health->maximum, target)};
-                }
             }
             if (request.featureId == "refill_ultimate") {
                 const auto resource = ReadUltimate(*after);
@@ -1009,12 +1159,13 @@ namespace gloss::gameplay::native {
                 GetCurrentThreadId(), expectedThread.load()));
             if (faulted.load()) return;
             std::string reason;
-            if (!EnsureCheat(context, reason)) { GetBackend().SetRuntimeState(false, std::move(reason), context.Key()); return; }
+            // Supported native actions use the local pawn and verified engine
+            // helpers directly. They do not need a spawned CheatManager.
             const auto attributes = Read<Address>(context.pawn + 0x758);
             const bool attributesChanged = combatBinding.attributes && (attributes != combatBinding.attributes ||
                 Read<std::uint32_t>(attributes + 0xc) != combatBinding.attributeIndex ||
                 Read<std::uint32_t>(context.pawn + 0xc) != combatBinding.pawnIndex);
-            if (!activeBound || !context.SameKey(activeContext) || activeCheat != context.cheat || attributesChanged || !GetBackend().IsReady()) {
+            if (!activeBound || !context.SameKey(activeContext) || attributesChanged || !GetBackend().IsReady()) {
                 const auto key = context.Key();
                 // A new session may have reused addresses; nothing it finds can be stale.
                 propertyLookups.Clear();
@@ -1024,10 +1175,18 @@ namespace gloss::gameplay::native {
                 // Object storage can be reused without changing Context::Key().
                 // Invalidate queued work/read-back and re-arm saved toggles before rebinding.
                 GetBackend().SetRuntimeState(false, "玩家对象已变化，等待重新绑定", key);
+                if (!RemoveInvulnerableContribution()) {
+                    GetBackend().SetRuntimeState(false, "旧玩家无敌标签贡献尚未确认清理", key);
+                    return;
+                }
                 CombatSessionChanged(context);
-                const bool movementRestored = MovementSessionChanged(context);
-                const bool extendedRestored = ExtendedSessionChanged(context);
-                if (!movementRestored || !extendedRestored) {
+                const bool movementRestored = !faulted.load() && MovementSessionChanged(context);
+                const bool cameraRestored = !faulted.load() && CameraSessionChanged(context);
+                const bool accessoriesRestored = !faulted.load() && AccessoriesSessionChanged(context);
+                const bool scriptsRestored = !faulted.load() && ScriptSessionChanged(context);
+                const bool extendedRestored = !faulted.load() && ExtendedSessionChanged(context);
+                if (faulted.load()) return;
+                if (!movementRestored || !cameraRestored || !accessoriesRestored || !scriptsRestored || !extendedRestored) {
                     GetBackend().SetRuntimeState(false, "原参数尚未恢复；飞行时请移动到空旷处", key);
                     return;
                 }
@@ -1037,7 +1196,6 @@ namespace gloss::gameplay::native {
                 activeSession = key;
                 activeContext = context;
                 activeBound = true;
-                activeCheat = context.cheat;
                 GetBackend().SetRuntimeState(true, "运行时契约已核对；调用结果仍需游戏内验证", key);
                 ResetItemImages(GetBackend().GetSnapshot().generation);
                 for (const auto& feature : Catalog()) {
@@ -1045,6 +1203,8 @@ namespace gloss::gameplay::native {
                     reason.clear();
                     bool ready = expected && CatalogMatches(feature, *expected, reason);
                     if (ready) ready = Signature(FindFunction(Read<Address>(context.cheat + 0x10), expected->name), *expected, reason);
+                    if (!feature.functionName.starts_with("Native_") && feature.functionName != "SetGlobalTimeDilation")
+                        reason = LegacyGmUnavailable;
                     if (feature.functionName == "SetGlobalTimeDilation") {
                         ready = TimeDilationReady();
                         reason = ready ? "" : "时间缩放 Set/Get 反射契约未通过";
@@ -1053,9 +1213,16 @@ namespace gloss::gameplay::native {
                         // Per-item signatures and live inventory are checked again before every grant.
                         ready = true;
                     }
+                    // The diagnostic itself checks a possibly delayed script environment.
+                    if (feature.functionName == "Native_ScriptProbe") ready = true;
+                    if (feature.functionName == "Native_SetItemQuantity") ready = InventoryEditCapability(context, reason);
                     if (feature.functionName == "Native_InfiniteShachi") ready = combatReady;
                     if (feature.functionName == "Native_InfiniteDarkSource") ready = DarkSourceReady();
                     if (feature.functionName == "Native_SetMaxHealth") ready = MaxHealthReady(context);
+                    if (feature.functionName == "Native_ReadHealth") ready = ReadHealth(context).has_value();
+                    if (feature.functionName == "Native_ReadLocation") ready = LocationReady(context);
+                    if (feature.functionName == "Native_FullHeal") ready = MaxHealthReady(context);
+                    if (feature.functionName == "Native_Invulnerable") ready = feature.id.ends_with("_off") || InvulnerableReady(context);
                     // The backpack can load after this bind; every refill checks its contract again.
                     if (feature.functionName == "Native_RefillMedicine") ready = true;
                     if (feature.functionName == "Native_PerfectDeflect") ready = PerfectTagFunction(true) && PerfectTagFunction(false);
@@ -1068,10 +1235,28 @@ namespace gloss::gameplay::native {
                 PublishReadback(ReadHealth(context), &context);
             }
             MovementTick(context);
+            if (faulted.load()) return;
+            CameraTick(context);
+            if (faulted.load()) return;
+            AccessoriesTick(context);
+            if (faulted.load()) return;
             StatusTick(context, now);
+            if (faulted.load()) return;
             RefreshItems(context);
-            GetBackend().Pump(Execute, 1);
+            if (faulted.load()) return;
+            static Clock::time_point nextInventoryCapability;
+            if (GetBackend().ItemPageActive() && now >= nextInventoryCapability) {
+                nextInventoryCapability = now + std::chrono::seconds(1);
+                std::string inventoryReason;
+                const bool inventoryReady = InventoryEditCapability(context, inventoryReason);
+                GetBackend().SetCapability("set_item_quantity", inventoryReady, inventoryReason);
+            }
+            { PerformanceScope requestPerformance(9); GetBackend().Pump(Execute, 1); }
+            if (faulted.load()) return;
+            { PerformanceScope scriptPerformance(8); ScriptTick(context); }
+            if (faulted.load()) return;
             { PerformanceScope combatPerformance(4); CombatTick(context); }
+            if (faulted.load()) return;
             ProcessItemImage(context);
         }
         void __fastcall HookActorProcessEvent(void* object, void* function, void* parameters) {
@@ -1081,9 +1266,13 @@ namespace gloss::gameplay::native {
             if (combatCleanupRequested.load() && !insideAdapter && LocalGameThread()) {
                 insideAdapter = true;
                 const bool combat = CombatCleanup();
-                const bool movement = MovementCleanup();
-                const bool extended = ExtendedCleanup();
-                combatCleanupComplete.store(combat && movement && extended);
+                const bool movement = !faulted.load() && MovementCleanup();
+                const bool camera = !faulted.load() && CameraCleanup();
+                const bool accessories = !faulted.load() && AccessoriesCleanup();
+                const bool scripts = !faulted.load() && ScriptCleanup();
+                const bool extended = !faulted.load() && ExtendedCleanup();
+                const bool invulnerable = !faulted.load() && RemoveInvulnerableContribution();
+                combatCleanupComplete.store(combat && movement && camera && accessories && scripts && extended && invulnerable);
                 insideAdapter = false;
                 return;
             }
@@ -1212,6 +1401,7 @@ namespace gloss::gameplay::native {
             PrepareEconomyHooks();
             PrepareCooldownHook();
             PrepareShachiCostHooks();
+            PrepareScriptVerifyHook();
         }
         originalActorProcessEvent = reinterpret_cast<ProcessEvent>(base + ActorProcessEventRva);
         GetBackend().SetRuntimeState(false, "版本已核对，等待本地玩家与游戏线程 Tick");
@@ -1236,7 +1426,8 @@ namespace gloss::gameplay::native {
         const bool damageRestored = RestoreDamageHooks();
         const bool cooldownRestored = RestoreCooldownHooks();
         const bool economyRestored = RestoreExtendedHooks();
-        const bool combatRestored = shachiRestored && damageRestored && cooldownRestored && economyRestored;
+        const bool scriptsRestored = RestoreScriptHooks();
+        const bool combatRestored = shachiRestored && damageRestored && cooldownRestored && economyRestored && scriptsRestored;
         GetBackend().SetRuntimeState(false, "适配器正在停止；模块固定到进程退出");
         if (monitorThread) {
             if (WaitForSingleObject(monitorThread, 1500) != WAIT_OBJECT_0) return false;
@@ -1293,6 +1484,14 @@ namespace gloss::gameplay::native {
                 text += JsonString(state.parameters[i]);
             }
             text += "]}";
+        }
+        text += "],\"lootMarkers\":[";
+        first = true;
+        for (const auto& marker : GetLootMarkers()) {
+            if (!first) text += ',';
+            first = false;
+            text += std::format("{{\"label\":{},\"distanceM\":{},\"x\":{},\"y\":{}}}",
+                JsonString(marker.label), marker.distance, marker.x, marker.y);
         }
         text += std::format("],\"itemPageActive\":{},\"itemsReady\":{},\"itemCount\":{},\"itemCatalogStatus\":{},\"requests\":[",
             GetBackend().ItemPageActive(), snapshot.itemsReady, snapshot.items.size(), JsonString(snapshot.itemCatalogStatus));

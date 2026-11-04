@@ -1,4 +1,5 @@
 #include "../src/gameplay/item_images.hpp"
+#include "../src/gameplay/item_image_identity.hpp"
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -191,6 +192,38 @@ namespace
             CHECK(rejected[0].error == "图片响应队列已满");
         }
     }
+
+    void TestWeakObservationRequiresOwnerSourceAndFullObjectIdentity()
+    {
+        const ItemImageObjectIdentity texture{0x100000, 0x200000, 0x300000, 17, 41,
+            (std::uint64_t{2} << 32) | 123};
+        CHECK(texture.Valid());
+        ItemImageObservation observed{101, 7, "/Game/Icons/T_Icon.T_Icon", texture};
+        CHECK(observed.Matches(101, 7, observed.source, texture));
+        CHECK(!observed.Matches(102, 7, observed.source, texture)); // Session/bridge generation.
+        CHECK(!observed.Matches(101, 8, observed.source, texture)); // Culture/table rebuild.
+        CHECK(!observed.Matches(101, 7, "/Game/Icons/T_Fallback.T_Fallback", texture));
+        auto current = texture;
+        ++current.serial;
+        CHECK(!observed.Matches(101, 7, observed.source, current)); // Same address and index recycled.
+        current = texture; ++current.index;
+        CHECK(!observed.Matches(101, 7, observed.source, current));
+        current = texture; ++current.address;
+        CHECK(!observed.Matches(101, 7, observed.source, current));
+        current = texture; ++current.type;
+        CHECK(!observed.Matches(101, 7, observed.source, current));
+        current = texture; ++current.outer;
+        CHECK(!observed.Matches(101, 7, observed.source, current));
+        current = texture; current.name += std::uint64_t{1} << 32;
+        CHECK(!observed.Matches(101, 7, observed.source, current)); // FName Number must participate.
+        current = texture; current.serial = 0;
+        CHECK(!current.Valid() && !observed.Matches(101, 7, observed.source, current));
+        ItemImageObservation withoutSerial{101, 7, observed.source, current};
+        CHECK(!withoutSerial.Matches(101, 7, observed.source, current));
+        observed.Clear();
+        CHECK(!observed.Matches(101, 7, "/Game/Icons/T_Icon.T_Icon", texture));
+        CHECK(observed.source.empty() && !observed.texture.Valid());
+    }
 }
 
 int main()
@@ -201,6 +234,7 @@ int main()
     TestDuplicateAtFullQueueDoesNotConsumeCapacity();
     TestResultCountBudgetAndDrainRecovery();
     TestResultByteBudgetAndOversizeFailure();
+    TestWeakObservationRequiresOwnerSourceAndFullObjectIdentity();
     if (failures)
         return 1;
     std::cout << "GlossTrainer PBZ item image bridge tests completed with " << failures << " failures\n";

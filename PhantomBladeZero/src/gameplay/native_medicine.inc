@@ -6,7 +6,7 @@
         constexpr std::int32_t MedicineCurrentOffset = 0x50, MedicineDisplayOffset = 0x54, MedicineMaximumOffset = 0x58;
         constexpr std::int32_t MedicineTopSlotOffset = 0x618, MedicineBottomSlotOffset = 0x610;
         constexpr std::int32_t MedicineRestoreDelegateOffset = 0x2b8;
-        constexpr Address MedicineBroadcastRva = 0x65d0100;
+        constexpr Address MedicineBroadcastRva = 0x6618f40;
         struct MedicineParameter { std::string_view type; std::int32_t size, offset; };
         struct MedicineEntry { NameValue id{}; Address info{}; };
 
@@ -79,9 +79,9 @@
             problem = MedicinePropertyProblem(infoClass, "CurrentTime", "IntProperty", 4, MedicineCurrentOffset);
             if (problem.empty()) problem = MedicinePropertyProblem(infoClass, "DisplayTime", "IntProperty", 4, MedicineDisplayOffset);
             if (problem.empty()) problem = MedicinePropertyProblem(infoClass, "MaxTime", "IntProperty", 4, MedicineMaximumOffset);
-            if (problem.empty()) problem = MedicineFunctionProblem(type, "GetMedicineTotalMaxUsage", 0x65d50e0, 0x54020401, 12,
+            if (problem.empty()) problem = MedicineFunctionProblem(type, "GetMedicineTotalMaxUsage", 0x661de50, 0x54020401, 12,
                 {{"NameProperty", 8, 0}, {"IntProperty", 4, 8}});
-            if (problem.empty()) problem = MedicineFunctionProblem(type, "UseMedicine", 0x65dac70, 0x04020401, 12,
+            if (problem.empty()) problem = MedicineFunctionProblem(type, "UseMedicine", 0x66239e0, 0x04020401, 12,
                 {{"NameProperty", 8, 0}, {"IntProperty", 4, 8}});
             if (problem.empty()) problem = MedicinePropertyProblem(type, "RestoreMedicineDelegate", "MulticastInlineDelegateProperty", 16, MedicineRestoreDelegateOffset);
             constexpr std::array<unsigned char, 13> BroadcastEntry{0x48,0x83,0xec,0x48,0x8b,0x44,0x24,0x70,0x48,0x89,0x54,0x24,0x20};

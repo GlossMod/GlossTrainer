@@ -37,8 +37,8 @@ namespace
             {"Native_InfiniteShachi", {{}, 1}},
             {"Native_InfiniteDarkSource", {{}, 1}},
             {"Native_PerfectDeflect", {{}, 1}}, {"Native_PerfectDodge", {{}, 1}},
-            {"GM_GetHealth", {{}, 0}}, {"Native_SetMaxHealth", {{ParamType::Float}, 0}},
-            {"GM_FullHeal", {{}, 0}}, {"GM_State", {{}, 3}},
+            {"Native_ReadHealth", {{}, 0}}, {"Native_SetMaxHealth", {{ParamType::Float}, 0}},
+            {"Native_FullHeal", {{}, 0}}, {"Native_Invulnerable", {{}, 1}},
             {"Native_RefillMedicine", {{}, 0}}, {"GM_InfiniteUltimateShachi", {{}, 0}},
             {"GM_FillAllMaterilas", {{}, 0}}, {"GM_GiveMedicine", {{ParamType::Name}, 0}},
             {"GM_GiveAccessory", {{ParamType::Name}, 0}},
@@ -54,7 +54,7 @@ namespace
             {"UpgradeAccessory", {{ParamType::Name, ParamType::Int}, 0}},
             {"GM_ActivateTalent", {{ParamType::Name}, 0}},
             {"GM_ActivateAllTalent", {{}, 0}}, {"GM_DiscoverAllEnemies", {{}, 0}},
-            {"GM_GetPlayerLocation", {{}, 0}}, {"GM_SavePosition", {{ParamType::String}, 0}},
+            {"Native_ReadLocation", {{}, 0}}, {"GM_SavePosition", {{ParamType::String}, 0}},
             {"GM_MoveTo", {{ParamType::String, ParamType::Float, ParamType::Float, ParamType::String}, 0}},
             {"GM_StopMove", {{}, 0}}, {"GM_IsMoveToComplete", {{}, 0}},
             {"GM_Travel", {{ParamType::String, ParamType::String, ParamType::String}, 0}},
@@ -76,7 +76,8 @@ namespace
         for (const auto& feature : Catalog()) {
             if (feature.functionName.empty() || feature.functionName == "SetGlobalTimeDilation" ||
                 feature.functionName == "Native_GrantItem" || feature.functionName == "Native_ExtendedFeature" ||
-                feature.functionName == "Native_ExtendedAction")
+                feature.functionName == "Native_ExtendedAction" || feature.functionName == "Native_ScriptProbe" ||
+                feature.functionName == "Native_SetItemQuantity")
                 continue;
             const auto contract = expected.find(feature.functionName);
             CHECK(contract != expected.end());
@@ -133,7 +134,8 @@ namespace
         CHECK(give && !ValidateParameters(*give, {"medicine-name"}, error));
 
         const auto* state = FindFeature("state_invulnerable_on");
-        CHECK(state && state->fixedArguments == std::vector<std::string>({"preset", "invulnerable", "on"}));
+        CHECK(state && state->functionName == "Native_Invulnerable");
+        CHECK(state && state->fixedArguments == std::vector<std::string>({"on"}));
         CHECK(state && state->params.empty());
 
         const auto* save = FindFeature("save_position");
@@ -154,7 +156,7 @@ namespace
     void TestToggleCatalogHasUniqueReversibleStatePairs()
     {
         const auto& toggles = ToggleCatalog();
-        CHECK(toggles.size() == 27);
+        CHECK(toggles.size() == 34);
         std::map<std::string, bool> ids;
         std::map<std::string, bool> featureIds;
         for (const auto& toggle : toggles) {
@@ -313,7 +315,7 @@ namespace
             captured = request.arguments;
             return ExecutionResult{RequestState::Verified, "read back"};
         }, 1) == 1);
-        CHECK(captured == std::vector<std::string>({"preset", "invulnerable", "on"}));
+        CHECK(captured == std::vector<std::string>({"on"}));
         const auto stateSnapshot = backend.GetSnapshot();
         const auto* verified = FindRecord(stateSnapshot, state.requestId);
         CHECK(verified && verified->state == RequestState::Verified);
@@ -1143,6 +1145,165 @@ namespace
         }
     }
 
+    void TestLootDistanceParametersAreValidatedAndFailedEditsPreserveVerifiedValues()
+    {
+        struct DistanceFeature {
+            std::string_view toggleId, onId, offId;
+            double minimum, maximum;
+            std::string_view defaultValue, chosenValue, rejectedValue;
+        };
+        const std::vector<DistanceFeature> features{
+            {"auto_collect", "auto_collect_on", "auto_collect_off", 1, 50, "10", "17.5", "50.1"},
+            {"highlight_loot", "highlight_loot_on", "highlight_loot_off", 1, 100, "50", "75.25", "100.1"}
+        };
+        for (const auto& item : features) {
+            const auto* on = FindFeature(item.onId);
+            const auto* off = FindFeature(item.offId);
+            CHECK(on && off);
+            if (!on || !off) continue;
+            CHECK(on->functionName == "Native_ExtendedFeature");
+            CHECK(on->fixedArguments == std::vector<std::string>({std::string(item.toggleId), "on"}));
+            CHECK(on->params.size() == 1);
+            if (on->params.size() == 1) {
+                CHECK(on->params[0].name == "distance_m");
+                CHECK(on->params[0].type == ParamType::Float);
+                CHECK(on->params[0].minimum == item.minimum && on->params[0].maximum == item.maximum);
+            }
+            CHECK(DefaultParameters(*on) == std::vector<std::string>{std::string(item.defaultValue)});
+            CHECK(off->fixedArguments == std::vector<std::string>({std::string(item.toggleId), "off"}));
+            CHECK(off->params.empty() && DefaultParameters(*off).empty());
+            std::string error;
+            CHECK(ValidateParameters(*on, {std::to_string(item.minimum)}, error));
+            CHECK(ValidateParameters(*on, {std::to_string(item.maximum)}, error));
+            for (const auto value : {"nan", "inf", "-inf", "0.99", "101", "1junk"})
+                CHECK(!ValidateParameters(*on, {value}, error));
+            CHECK(!ValidateParameters(*on, {std::string(item.rejectedValue)}, error));
+        }
+
+        const auto file = SettingsFile("loot-distance-failed-edits");
+        Backend backend;
+        CHECK(backend.InitializeSettings(file));
+        Ready(backend, {"auto_collect_on", "auto_collect_off", "highlight_loot_on", "highlight_loot_off"});
+        for (const auto& item : features) {
+            CHECK(backend.Submit(item.onId, {std::string(item.chosenValue)}).accepted);
+            CHECK(backend.Pump([&](const Request& request) {
+                CHECK(request.featureId == item.onId);
+                CHECK(request.arguments == std::vector<std::string>({std::string(item.toggleId), "on",
+                    std::string(item.chosenValue)}));
+                return ExecutionResult{RequestState::Verified, "distance accepted"};
+            }, 1) == 1);
+            CHECK(Preference(backend, item.toggleId).parameters ==
+                std::vector<std::string>{std::string(item.chosenValue)});
+        }
+        CHECK(backend.FlushSettings());
+        const auto verifiedFile = ReadSettings(file);
+
+        for (const auto& item : features) {
+            for (const auto value : {"nan", "inf", "0", "0.99", "101", "1junk"})
+                CHECK(!backend.Submit(item.onId, {value}).accepted);
+            CHECK(!backend.Submit(item.onId, {std::string(item.rejectedValue)}).accepted);
+            for (const auto state : {RequestState::Failed, RequestState::Dispatched, RequestState::Indeterminate}) {
+                CHECK(backend.Submit(item.onId, {"20"}).accepted);
+                CHECK(backend.Pump([&](const Request& request) {
+                    CHECK(request.featureId == item.onId);
+                    return ExecutionResult{state, "unverified distance update"};
+                }, 1) == 1);
+                CHECK(Preference(backend, item.toggleId).enabled);
+                CHECK(Preference(backend, item.toggleId).parameters ==
+                    std::vector<std::string>{std::string(item.chosenValue)});
+                CHECK(backend.FlushSettings());
+                CHECK(ReadSettings(file) == verifiedFile);
+            }
+        }
+
+        for (const auto& item : features) {
+            // Off is parameterless even if the caller supplies a stale/invalid draft.
+            CHECK(backend.Submit(item.offId, {"nan"}).accepted);
+            CHECK(backend.Pump([&](const Request& request) {
+                CHECK(request.featureId == item.offId);
+                CHECK(request.arguments == std::vector<std::string>({std::string(item.toggleId), "off"}));
+                return ExecutionResult{RequestState::Verified, "disabled"};
+            }, 1) == 1);
+            CHECK(!Preference(backend, item.toggleId).enabled);
+            CHECK(Preference(backend, item.toggleId).parameters ==
+                std::vector<std::string>{std::string(item.chosenValue)});
+        }
+    }
+
+    void TestLootDistanceLegacyDefaultsAndCustomSettingsRestoreFixedArguments()
+    {
+        for (const auto version : {"1", "2"}) {
+            const auto file = SettingsFile(std::string("loot-distance-legacy-v") + version);
+            WriteSettings(file, std::string("[meta]\nversion=") + version +
+                "\n[toggles]\nauto_collect=1\nhighlight_loot=1\n");
+            Backend legacy;
+            CHECK(legacy.InitializeSettings(file));
+            CHECK(Preference(legacy, "auto_collect").enabled);
+            CHECK(Preference(legacy, "highlight_loot").enabled);
+            CHECK(Preference(legacy, "auto_collect").parameters == std::vector<std::string>{"10"});
+            CHECK(Preference(legacy, "highlight_loot").parameters == std::vector<std::string>{"50"});
+            Ready(legacy, {"auto_collect_on", "highlight_loot_on"});
+            legacy.PublishToggleStates({{"auto_collect", true, false, "off"},
+                {"highlight_loot", true, false, "off"}});
+            int restored{};
+            for (const auto& expected : std::vector<std::pair<std::string, std::vector<std::string>>>{
+                {"auto_collect_on", {"auto_collect", "on", "10"}},
+                {"highlight_loot_on", {"highlight_loot", "on", "50"}}}) {
+                CHECK(legacy.Pump([&](const Request& request) {
+                    CHECK(request.restoration);
+                    CHECK(request.featureId == expected.first);
+                    CHECK(request.arguments == expected.second);
+                    ++restored;
+                    return ExecutionResult{RequestState::Verified, "legacy default restored"};
+                }, 1) == 1);
+            }
+            CHECK(restored == 2);
+            CHECK(!Preference(legacy, "auto_collect").restorePending);
+            CHECK(!Preference(legacy, "highlight_loot").restorePending);
+        }
+
+        const auto file = SettingsFile("loot-distance-custom-round-trip");
+        Backend configured;
+        CHECK(configured.InitializeSettings(file));
+        Ready(configured, {"auto_collect_on", "highlight_loot_on"});
+        CHECK(configured.Submit("auto_collect_on", {"23.5"}).accepted);
+        CHECK(configured.Pump([](const Request& request) {
+            CHECK(request.arguments == std::vector<std::string>({"auto_collect", "on", "23.5"}));
+            return ExecutionResult{RequestState::Verified, "verified"};
+        }, 1) == 1);
+        CHECK(configured.Submit("highlight_loot_on", {"82.75"}).accepted);
+        CHECK(configured.Pump([](const Request& request) {
+            CHECK(request.arguments == std::vector<std::string>({"highlight_loot", "on", "82.75"}));
+            return ExecutionResult{RequestState::Verified, "verified"};
+        }, 1) == 1);
+        CHECK(configured.FlushSettings());
+        const auto saved = ReadSettings(file);
+        CHECK(saved.find("[parameters.auto_collect]\ndistance_m=23.5") != std::string::npos);
+        CHECK(saved.find("[parameters.highlight_loot]\ndistance_m=82.75") != std::string::npos);
+
+        Backend restarted;
+        CHECK(restarted.InitializeSettings(file));
+        CHECK(Preference(restarted, "auto_collect").enabled && Preference(restarted, "auto_collect").restorePending);
+        CHECK(Preference(restarted, "highlight_loot").enabled && Preference(restarted, "highlight_loot").restorePending);
+        CHECK(Preference(restarted, "auto_collect").parameters == std::vector<std::string>{"23.5"});
+        CHECK(Preference(restarted, "highlight_loot").parameters == std::vector<std::string>{"82.75"});
+        Ready(restarted, {"auto_collect_on", "highlight_loot_on"});
+        restarted.PublishToggleStates({{"auto_collect", true, false, "off"},
+            {"highlight_loot", true, false, "off"}});
+        CHECK(restarted.Pump([](const Request& request) {
+            CHECK(request.restoration && request.featureId == "auto_collect_on");
+            CHECK(request.arguments == std::vector<std::string>({"auto_collect", "on", "23.5"}));
+            return ExecutionResult{RequestState::Verified, "restored"};
+        }, 1) == 1);
+        CHECK(restarted.Pump([](const Request& request) {
+            CHECK(request.restoration && request.featureId == "highlight_loot_on");
+            CHECK(request.arguments == std::vector<std::string>({"highlight_loot", "on", "82.75"}));
+            return ExecutionResult{RequestState::Verified, "restored"};
+        }, 1) == 1);
+        CHECK(!Preference(restarted, "auto_collect").restorePending);
+        CHECK(!Preference(restarted, "highlight_loot").restorePending);
+    }
+
     void TestExtendedActionsNeverBecomeRestorationRequests()
     {
         const auto file = SettingsFile("extended-actions");
@@ -1227,6 +1388,8 @@ int main(int argc, char** argv)
     TestParameterizedToggleRoundTripRestorationAndSessionChanges();
     TestFailedParameterEditsPreserveVerifiedIntentAndCloseIgnoresDraft();
     TestParameterSettingsLegacyVersionMalformedValuesAndUnknownIds();
+    TestLootDistanceParametersAreValidatedAndFailedEditsPreserveVerifiedValues();
+    TestLootDistanceLegacyDefaultsAndCustomSettingsRestoreFixedArguments();
     TestExtendedActionsNeverBecomeRestorationRequests();
     if (failures)
         return 1;

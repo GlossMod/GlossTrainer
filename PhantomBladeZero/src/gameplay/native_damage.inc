@@ -1,10 +1,10 @@
 // Included after native_combat.inc and native_items.inc. Only the verified
 // game thread edits temporary calculator output; no persistent attributes change.
         using DamageCalculation = void(__fastcall*)(Address, Address, Address, Address, Address, Address);
-        constexpr Address DamageCalculationRva = 0x7d679d0;
+        constexpr Address DamageCalculationRva = 0x7dc4910;
         constexpr Address DamageCalculationSlot = 0x2b8;
         constexpr std::array<Address, 6> DamageVtables{
-            0xc65f700, 0xc65f9c0, 0xc65fc80, 0xc660010, 0xc660938, 0xc65f440};
+            0xc6d81d0, 0xc6d8490, 0xc6d8750, 0xc6d8ae0, 0xc6d9718, 0xc6d7f10};
         struct DamageSwitch {
             std::string_view id;
             bool enabled{};
@@ -39,7 +39,7 @@
         }
         bool DamageFunctionContract(Address owner) {
             const auto function = FindFunction(owner, "CalculateAttributeModification");
-            if (!ObjectValid(function) || Read<Address>(function + 0x128) != base + 0x5da64e0 ||
+            if (!ObjectValid(function) || Read<Address>(function + 0x128) != base + 0x5def2a0 ||
                 Read<std::uint32_t>(function + 0x100) != 0x54420400 ||
                 Read<std::uint8_t>(function + 0x104) != 5 || Read<std::uint16_t>(function + 0x106) != 256) return false;
             auto field = Read<Address>(function + 0x50);
@@ -57,7 +57,7 @@
             return DamageMapProperty(field, "TargetModification", 0xb0, true) && !Read<Address>(field + 0x10);
         }
         bool DamageClassContract() {
-            const auto owner = Read<Address>(base + 0xe053aa0);
+            const auto owner = Read<Address>(base + 0xe0c8b28);
             return ObjectValid(owner) && ObjectName(owner) == "DamageCalculator_PBZBase" &&
                 DamageFunctionContract(owner);
         }

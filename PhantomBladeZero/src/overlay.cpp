@@ -7,6 +7,8 @@
 #include "gameplay/backend.hpp"
 #include "gameplay/catalog.hpp"
 #include "gameplay/item_quantity.hpp"
+#include "gameplay/inventory_edit_rules.hpp"
+#include "gameplay/loot_markers.hpp"
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <shellapi.h>
@@ -21,6 +23,7 @@
 #include <format>
 #include <functional>
 #include <map>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -92,6 +95,7 @@ namespace gloss::overlay
             int quantity{1};
             std::uint64_t generation{};
             std::array<char, 64> quantityText{'1'};
+            bool setQuantity{};
         } itemSelection;
         struct ItemReceipt
         {
@@ -99,6 +103,7 @@ namespace gloss::overlay
             std::string key, name;
             int quantity{};
             ULONGLONG submittedAt{};
+            bool setting{};
         };
         std::vector<ItemReceipt> itemReceipts;
         enum class ToastTone { Info, Success, Failure, Uncertain };
@@ -409,6 +414,8 @@ namespace gloss::overlay
         }
         std::string AvailabilityReason(const gameplay::Snapshot &snapshot, const gameplay::FeatureDef &feature)
         {
+            if (!snapshot.ready && !snapshot.status.empty())
+                return snapshot.status;
             if (!settings.debug)
                 return feature.functionName.empty() ? "暂不支持此功能。" :
                     snapshot.ready ? "当前功能暂不可用。" : "请进入游戏存档后重试。";
@@ -628,13 +635,36 @@ namespace gloss::overlay
             if (showLabel)
                 ImGui::TextUnformatted(Text(param.label));
             ImGui::SetNextItemWidth(width > 0 ? width : ImGui::GetContentRegionAvail().x);
+            const bool bounded = std::isfinite(param.minimum) && std::isfinite(param.maximum) && param.minimum < param.maximum;
+            bool slider = false;
             switch (param.type)
             {
             case gameplay::ParamType::Float:
-                ImGui::InputDouble("##value", &editor.number, 0, 0, "%.9g");
+                if (bounded)
+                {
+                    slider = true;
+                    ImGui::SliderScalar("##value", ImGuiDataType_Double, &editor.number,
+                        &param.minimum, &param.maximum, param.name == "distance_m" ? Text("%.6g 米") : "%.6g",
+                        ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoRoundToFormat);
+                }
+                else
+                    ImGui::InputDouble("##value", &editor.number, 0, 0, "%.9g");
                 break;
             case gameplay::ParamType::Int:
-                ImGui::InputScalar("##value", ImGuiDataType_S64, &editor.integer);
+                // ImGui's signed scalar sliders reserve half the type's range.
+                // Keep unrestricted or wider integer parameters as exact inputs.
+                if (bounded && param.minimum >= static_cast<double>(std::numeric_limits<std::int64_t>::min() / 2) &&
+                    param.maximum < static_cast<double>(std::numeric_limits<std::int64_t>::max() / 2) &&
+                    std::ceil(param.minimum) < std::floor(param.maximum))
+                {
+                    slider = true;
+                    const auto minimum = static_cast<std::int64_t>(std::ceil(param.minimum));
+                    const auto maximum = static_cast<std::int64_t>(std::floor(param.maximum));
+                    ImGui::SliderScalar("##value", ImGuiDataType_S64, &editor.integer,
+                        &minimum, &maximum, "%lld", ImGuiSliderFlags_AlwaysClamp);
+                }
+                else
+                    ImGui::InputScalar("##value", ImGuiDataType_S64, &editor.integer);
                 break;
             case gameplay::ParamType::Bool:
                 ImGui::Checkbox(WidgetLabel("参数值 true / false"), &editor.boolean);
@@ -647,7 +677,8 @@ namespace gloss::overlay
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             {
                 if (param.type == gameplay::ParamType::Float || param.type == gameplay::ParamType::Int)
-                    ImGui::SetTooltip(Text("%s\n允许范围：%g ～ %g\n输入仅暂存，点击应用后提交。"), Text(param.label), param.minimum, param.maximum);
+                    ImGui::SetTooltip(Text(slider ? "%s\n允许范围：%g ～ %g\n拖动调整，Ctrl+点击精确输入。\n点击应用后提交。" :
+                        "%s\n允许范围：%g ～ %g\n输入仅暂存，点击应用后提交。"), Text(param.label), param.minimum, param.maximum);
                 else if (param.type == gameplay::ParamType::Name)
                     ImGui::SetTooltip(Text("输入游戏中已存在的 FName 比较 ID：十进制或 0x 十六进制，可附加 :number。"));
             }
@@ -714,7 +745,8 @@ namespace gloss::overlay
             {
                 BeginAutoCard("game-status", scale);
                 Label(snapshot.ready ? "已连接游戏" : "等待游戏", 22, accent);
-                ImGui::TextWrapped("%s", Text(snapshot.ready ? "选择修改功能或物品，开始使用游戏内工具。" : "进入游戏存档后即可使用可用功能。"));
+                ImGui::TextWrapped("%s", Text(snapshot.ready ? "选择修改功能或物品，开始使用游戏内工具。" :
+                    snapshot.status.empty() ? "进入游戏存档后即可使用可用功能。" : snapshot.status));
                 ImGui::Spacing();
                 if (ImGui::Button(WidgetLabel("修改功能"), ImVec2(136 * scale, 32 * scale)))
                     SelectPage(1);
@@ -998,7 +1030,7 @@ namespace gloss::overlay
             Label("修改功能", 24, ImGui::GetStyleColorVec4(ImGuiCol_Text));
             ImGui::SameLine(0, 16 * scale);
             ImGui::TextDisabled(Text("共 %zu 项"), static_cast<std::size_t>(count));
-            RowTooltip(snapshot.ready ? "已连接游戏" : "等待游戏", settings.debug ? snapshot.status : "进入存档后使用可用功能。", scale);
+            RowTooltip(snapshot.ready ? "已连接游戏" : "等待游戏", settings.debug || !snapshot.ready ? snapshot.status : "进入存档后使用可用功能。", scale);
             ImGui::SetCursorPos(ImVec2(right - 268 * scale, headingY));
             ImGui::SetNextItemWidth(268 * scale);
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(34 * scale, 10 * scale));
@@ -1258,32 +1290,32 @@ namespace gloss::overlay
                     switch (record->state)
                     {
                     case gameplay::RequestState::Verified:
-                        ShowFormattedToast("获取 {0} 个{1}成功", receipt->name, record->message,
-                            ToastTone::Success, receipt->requestId, receipt->quantity);
+                        ShowFormattedToast(receipt->setting ? "已设置{}的数量" : "获取 {0} 个{1}成功", receipt->name, record->message,
+                            ToastTone::Success, receipt->requestId, receipt->setting ? 0 : receipt->quantity);
                         break;
                     case gameplay::RequestState::Failed:
                     case gameplay::RequestState::Expired:
                     case gameplay::RequestState::Cancelled:
-                        ShowFormattedToast("获取 {0} 个{1}失败", receipt->name, record->message,
-                            ToastTone::Failure, receipt->requestId, receipt->quantity);
+                        ShowFormattedToast(receipt->setting ? "设置{}的数量失败" : "获取 {0} 个{1}失败", receipt->name, record->message,
+                            ToastTone::Failure, receipt->requestId, receipt->setting ? 0 : receipt->quantity);
                         break;
                     default:
-                        ShowFormattedToast("获取 {0} 个{1}结果未确认", receipt->name, record->message,
-                            ToastTone::Uncertain, receipt->requestId, receipt->quantity);
+                        ShowFormattedToast(receipt->setting ? "设置{}的数量结果未确认" : "获取 {0} 个{1}结果未确认", receipt->name, record->message,
+                            ToastTone::Uncertain, receipt->requestId, receipt->setting ? 0 : receipt->quantity);
                         break;
                     }
                 }
                 else if (snapshot.generation != receipt->generation)
-                    ShowFormattedToast("获取 {0} 个{1}结果未确认", receipt->name,
-                        "游戏会话已变化，请检查背包；不会自动重试。", ToastTone::Uncertain, receipt->requestId, receipt->quantity);
+                    ShowFormattedToast(receipt->setting ? "设置{}的数量结果未确认" : "获取 {0} 个{1}结果未确认", receipt->name,
+                        "游戏会话已变化，请检查背包；不会自动重试。", ToastTone::Uncertain, receipt->requestId, receipt->setting ? 0 : receipt->quantity);
                 else if (GetTickCount64() - receipt->submittedAt < 10000)
                 {
                     ++receipt;
                     continue;
                 }
                 else
-                    ShowFormattedToast("获取 {0} 个{1}结果未确认", receipt->name,
-                        "暂未取得操作结果，请检查背包；不会自动重试。", ToastTone::Uncertain, receipt->requestId, receipt->quantity);
+                    ShowFormattedToast(receipt->setting ? "设置{}的数量结果未确认" : "获取 {0} 个{1}结果未确认", receipt->name,
+                        "暂未取得操作结果，请检查背包；不会自动重试。", ToastTone::Uncertain, receipt->requestId, receipt->setting ? 0 : receipt->quantity);
                 receipt = itemReceipts.erase(receipt);
             }
         }
@@ -1385,7 +1417,7 @@ namespace gloss::overlay
                 if (busy)
                     ImGui::TextColored(accent, Text("正在获取，请稍候…"));
                 else if (ownedUnique)
-                    ImGui::TextDisabled(Text("已拥有，不能重复获取。"));
+                    ImGui::TextDisabled(Text("已拥有，点击图标管理数量。"));
                 else if (!snapshot.ready)
                     ImGui::TextDisabled(Text("进入游戏存档后获取。"));
                 else if (!snapshot.itemsReady)
@@ -1444,7 +1476,7 @@ namespace gloss::overlay
             draw->PopClipRect();
             if (hovered || focused)
                 ItemDetails(item, snapshot, scale);
-            return pressed && canGrant;
+            return pressed && snapshot.ready && snapshot.itemsReady && !busy && (canGrant || item.owned > 0);
         }
         void ItemsPage(const gameplay::Snapshot &snapshot, float scale)
         {
@@ -1603,6 +1635,13 @@ namespace gloss::overlay
             const auto selectItem = [&](const gameplay::ItemEntry &item)
             {
                 itemSelection = {item.key, 1, snapshot.generation};
+                itemSelection.setQuantity = !item.available && item.owned > 0;
+                if (itemSelection.setQuantity) {
+                    itemSelection.quantity = static_cast<int>(std::min<std::int64_t>(item.owned, gameplay::MaxItemQuantity));
+                    const auto encoded = std::to_chars(itemSelection.quantityText.data(),
+                        itemSelection.quantityText.data() + itemSelection.quantityText.size() - 1, itemSelection.quantity);
+                    *encoded.ptr = '\0';
+                }
                 openQuantity = true;
             };
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 2 * scale));
@@ -1680,14 +1719,28 @@ namespace gloss::overlay
                     ImGui::TextWrapped("%s", item.name.c_str());
                     if (item.owned >= 0)
                         ImGui::TextDisabled(Text("已持有：%lld"), static_cast<long long>(item.owned));
+                    const auto setMode = [&](bool set) {
+                        itemSelection.setQuantity = set;
+                        itemSelection.quantity = set ? static_cast<int>(std::clamp<std::int64_t>(item.owned, 0, gameplay::MaxItemQuantity)) : 1;
+                        const auto encoded = std::to_chars(itemSelection.quantityText.data(),
+                            itemSelection.quantityText.data() + itemSelection.quantityText.size() - 1, itemSelection.quantity);
+                        *encoded.ptr = '\0';
+                    };
+                    if (ImGui::RadioButton(WidgetLabel("增加数量"), !itemSelection.setQuantity)) setMode(false);
+                    ImGui::SameLine();
+                    if (ImGui::RadioButton(WidgetLabel("设置数量"), itemSelection.setQuantity)) setMode(true);
+                    const bool setting = itemSelection.setQuantity;
+                    const int minimum = setting ? 0 : 1;
                     const int maximum = std::max(1, item.maxQuantity);
                     const bool unrestricted = maximum == gameplay::MaxItemQuantity;
-                    if (unrestricted)
+                    if (setting)
+                        ImGui::TextDisabled("%s", Text("目标数量（0 表示删除，装备类暂不支持减量）"));
+                    else if (unrestricted)
                         ImGui::TextDisabled("%s", Text("数量（至少 1）"));
                     else
                         ImGui::TextDisabled(Text("数量（1 ～ %d）"), maximum);
                     bool validQuantity = true;
-                    ImGui::BeginDisabled(maximum == 1);
+                    ImGui::BeginDisabled(!setting && maximum == 1);
                     if (unrestricted)
                     {
                         const float buttonSize = ImGui::GetFrameHeight();
@@ -1695,7 +1748,8 @@ namespace gloss::overlay
                         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 2 * (buttonSize + spacing));
                         ImGui::InputText("##quantity", itemSelection.quantityText.data(), itemSelection.quantityText.size(),
                             ImGuiInputTextFlags_CharsDecimal);
-                        validQuantity = gameplay::ParseItemQuantity(itemSelection.quantityText.data(), itemSelection.quantity);
+                        validQuantity = setting ? gameplay::ParseInventoryTarget(itemSelection.quantityText.data(), itemSelection.quantity) :
+                            gameplay::ParseItemQuantity(itemSelection.quantityText.data(), itemSelection.quantity);
                         const auto stepQuantity = [&](int step) {
                             itemSelection.quantity += step;
                             const auto result = std::to_chars(itemSelection.quantityText.data(),
@@ -1704,9 +1758,9 @@ namespace gloss::overlay
                         };
                         ImGui::SameLine(0, spacing);
                         ImGui::PushButtonRepeat(true);
-                        ImGui::BeginDisabled(!validQuantity || itemSelection.quantity <= 1);
+                        ImGui::BeginDisabled(!validQuantity || itemSelection.quantity <= minimum);
                         if (ImGui::Button("-##quantity-minus", ImVec2(buttonSize, buttonSize)))
-                            stepQuantity(ImGui::GetIO().KeyCtrl ? -std::min(10, itemSelection.quantity - 1) : -1);
+                            stepQuantity(ImGui::GetIO().KeyCtrl ? -std::min(10, itemSelection.quantity - minimum) : -1);
                         ImGui::EndDisabled();
                         ImGui::SameLine(0, spacing);
                         ImGui::BeginDisabled(!validQuantity || itemSelection.quantity >= maximum);
@@ -1719,17 +1773,20 @@ namespace gloss::overlay
                     {
                         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
                         if (ImGui::InputInt("##quantity", &itemSelection.quantity, 1, 10))
-                            itemSelection.quantity = std::clamp(itemSelection.quantity, 1, maximum);
+                            itemSelection.quantity = std::clamp(itemSelection.quantity, minimum, maximum);
                     }
                     ImGui::EndDisabled();
                     const bool busy = ItemPending(item.key);
-                    const bool fitsInventory = !unrestricted || item.owned < 0 ||
+                    const bool fitsInventory = setting || !unrestricted || item.owned < 0 ||
                         gameplay::ItemQuantityFitsInventory(item.owned, itemSelection.quantity);
-                    const bool canGrant = snapshot.ready && snapshot.itemsReady && item.available && item.maxQuantity > 0 && !busy &&
-                        validQuantity && fitsInventory && itemSelection.quantity >= 1 && itemSelection.quantity <= maximum;
+                    const bool itemAllowed = setting ? item.owned >= 0 : item.available;
+                    const auto* editFeature = gameplay::FindFeature("set_item_quantity");
+                    const bool featureAllowed = !setting || (editFeature && FeatureReady(snapshot, *editFeature));
+                    const bool canGrant = snapshot.ready && snapshot.itemsReady && itemAllowed && featureAllowed && item.maxQuantity > 0 && !busy &&
+                        validQuantity && fitsInventory && itemSelection.quantity >= minimum && itemSelection.quantity <= maximum;
                     if (!canGrant)
                         ImGui::TextWrapped("%s", Text(busy ? "正在获取此物品，请稍候。" : !snapshot.ready ? "请先进入游戏存档。" :
-                            !snapshot.itemsReady ? "物品列表正在加载，请稍候。" : !validQuantity ? "请输入有效的正整数。" :
+                            !snapshot.itemsReady ? "物品列表正在加载，请稍候。" : !validQuantity ? "请输入有效的整数数量。" :
                             !fitsInventory ? "当前数量加请求数量会溢出，未执行" : item.reason.empty() ? "此物品暂不可获取。" : item.reason.c_str()));
                     ImGui::Spacing();
                     if (ImGui::Button(WidgetLabel("取消"), ImVec2(140 * scale, 32 * scale)))
@@ -1743,13 +1800,19 @@ namespace gloss::overlay
                     if (ImGui::Button(WidgetLabel("确定"), ImVec2(140 * scale, 32 * scale)))
                     {
                         const auto quantity = itemSelection.quantity;
-                        const auto result = gameplay::GetBackend().SubmitItem(item.key, quantity);
-                        submissionNotice = {true, result.accepted, result.requestId, "grant_item", result.message};
+                        const auto result = setting ? gameplay::GetBackend().Submit("set_item_quantity", {item.key, std::to_string(quantity)}) :
+                            gameplay::GetBackend().SubmitItem(item.key, quantity);
+                        submissionNotice = {true, result.accepted, result.requestId, setting ? "set_item_quantity" : "grant_item", result.message};
                         if (result.accepted)
                         {
-                            itemReceipts.push_back({result.requestId, snapshot.generation, item.key, item.name, quantity, GetTickCount64()});
-                            ShowFormattedToast("正在获取 {0} 个{1}…", item.name, result.message,
-                                ToastTone::Info, result.requestId, quantity);
+                            if (!setting) {
+                                itemReceipts.push_back({result.requestId, snapshot.generation, item.key, item.name, quantity, GetTickCount64()});
+                                ShowFormattedToast("正在获取 {0} 个{1}…", item.name, result.message,
+                                    ToastTone::Info, result.requestId, quantity);
+                            } else {
+                                itemReceipts.push_back({result.requestId, snapshot.generation, item.key, item.name, quantity, GetTickCount64(), true});
+                                ShowFormattedToast("正在设置{}的数量…", item.name, result.message, ToastTone::Info, result.requestId);
+                            }
                         }
                         else
                             ShowFormattedToast("获取 {0} 个{1}失败", item.name, result.message, ToastTone::Failure, 0, quantity);
@@ -2142,6 +2205,19 @@ namespace gloss::overlay
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         ui::BeginItemIconFrame();
+        for (const auto& marker : gameplay::GetLootMarkers()) {
+            const ImVec2 point(marker.x, marker.y);
+            if (point.x < 0 || point.y < 0 || point.x > io.DisplaySize.x || point.y > io.DisplaySize.y) continue;
+            const char* name = marker.label == "Chest" ? Text("宝箱") : marker.label == "Note" ? Text("纸条") : Text("战利品");
+            const auto label = std::format("{} · {:.1f} m", name, marker.distance);
+            auto* draw = ImGui::GetBackgroundDrawList();
+            const auto textSize = ImGui::CalcTextSize(label.c_str());
+            const ImVec2 origin(point.x - textSize.x * .5f, point.y - 27 * scale);
+            draw->AddRectFilled(ImVec2(origin.x - 6 * scale, origin.y - 3 * scale),
+                ImVec2(origin.x + textSize.x + 6 * scale, origin.y + textSize.y + 3 * scale), IM_COL32(15, 17, 21, 210), 4 * scale);
+            draw->AddCircle(point, 5 * scale, IM_COL32(250, 198, 95, 255), 12, 2 * scale);
+            draw->AddText(origin, IM_COL32(255, 222, 159, 255), label.c_str());
+        }
         // Copying the model takes the lock the game thread needs. Revision is read
         // first, so a change during the copy is simply fetched again next frame.
         static gameplay::Snapshot snapshot;

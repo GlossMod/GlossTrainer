@@ -1,9 +1,9 @@
 // Exact-build Blueprint VM output filters. Damage and native GE magnitudes are
 // deliberately outside this allowlist; no ability/default/attribute is patched.
         using ShachiCostVm = void(__fastcall*)(Address, Address, void*);
-        constexpr std::array<Address, 2> ShachiCostVmRvas{0x1631900, 0x1634d50};
+        constexpr std::array<Address, 2> ShachiCostVmRvas{0x1630dc0, 0x1634230};
         constexpr std::array<std::array<unsigned char, 18>, 2> ShachiCostVmEntries{{
-            {0x48,0x89,0x5c,0x24,0x20,0x56,0x57,0x41,0x56,0x48,0x83,0xec,0x70,0x48,0x8b,0x05,0x6c,0xc0},
+            {0x48,0x89,0x5c,0x24,0x20,0x56,0x57,0x41,0x56,0x48,0x83,0xec,0x70,0x48,0x8b,0x05,0xac,0x1b},
             {0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x57,0x48,0x81,0xec,0x90,0,0,0}}};
         constexpr std::array<unsigned char, 15> ShachiCostWeakEntry{
             0x44,0x8b,0x49,0x04,0x45,0x85,0xc9,0x74,0x48,0x8b,0x01,0x85,0xc0,0x78,0x42};
@@ -52,10 +52,10 @@
         bool ShachiCostHooksOwned() noexcept { return ShachiCostHookOwnership(0) && ShachiCostHookOwnership(1); }
         bool ShachiCostWeakContract() noexcept {
             std::array<unsigned char, ShachiCostWeakEntry.size()> actual{};
-            return ReadBytes(base + 0x16730b0, actual.data(), actual.size()) && actual == ShachiCostWeakEntry;
+            return ReadBytes(base + 0x1672710, actual.data(), actual.size()) && actual == ShachiCostWeakEntry;
         }
         Address ShachiCostWeakObject(Address weak) noexcept {
-            __try { return reinterpret_cast<Address(__fastcall*)(Address)>(base + 0x16730b0)(weak); }
+            __try { return reinterpret_cast<Address(__fastcall*)(Address)>(base + 0x1672710)(weak); }
             __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
         }
         bool ShachiCostArray(Address address, Address& data, std::int32_t& count, int limit) noexcept {
@@ -77,7 +77,7 @@
             const auto getter = FindFunction(owner, "Get Shachi Cost");
             const auto field = Read<Address>(getter + 0x50);
             if (!ObjectValid(owner) || !ObjectValid(getter) || Read<Address>(getter + 0x20) != owner ||
-                Read<Address>(getter + 0x128) != base + 0x1631800 ||
+                Read<Address>(getter + 0x128) != base + 0x1630cc0 ||
                 Read<std::uint32_t>(getter + 0x100) != 0x5c480000 ||
                 Read<std::uint8_t>(getter + 0x104) != 1 || Read<std::uint16_t>(getter + 0x106) != 8 ||
                 Name(Read<std::uint32_t>(field + 0x20)) != "ReturnValue" ||

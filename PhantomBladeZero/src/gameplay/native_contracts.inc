@@ -1,5 +1,6 @@
-// Generated from read-only native metadata and matching runtime reflection.
-// PBZ.exe SHA256 7b4fcd286a350780faf0824d73aa150b21cbf1bccde883e6a96386cbe09973b4
+// Historical CL-301524_JKS-17219 contracts, retained for audit only.
+// CL-302256_JKS-17280 removed the GM business implementations. Contract()
+// refuses these entries; active features use independently verified native paths.
 constexpr ExpectedFunction ExpectedFunctions[] = {
     {"GetAllMedicines", 0x6521310, 0, 0, {{}}},
     {"GetAllWeapons", 0x6521330, 0, 0, {{}}},

@@ -23,7 +23,13 @@
             std::int32_t subsystemSlot{-1};
         };
         std::array<EconomyBinding, 3> economyBindings{};
-        constexpr std::array<Address, 3> EconomyRvas{0x6974ca0, 0x696c480, 0x69a3180};
+        // Manual inventory reduction is intentional even while protection is on.
+        // The scope is entered only around that one validated game-thread call.
+        thread_local unsigned inventoryEditDepth{};
+        struct ProtectedProp { NameValue id; Address row; std::int32_t slot; };
+        std::vector<ProtectedProp> protectedProps;
+        ItemSparseMap protectedPropTable;
+        constexpr std::array<Address, 3> EconomyRvas{0x69b2c70, 0x69a91a0, 0x6a0d110};
         constexpr std::array<std::array<unsigned char, 10>, 3> EconomyEntries{{
             {0x48,0x89,0x5c,0x24,0x18,0x55,0x57,0x41,0x56,0x48},
             {0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10},
@@ -81,6 +87,68 @@
                     economySwitches[index].enabled && EconomyHookOwnership(index) && EconomyBindingCurrent(index, object);
             } catch (...) { return false; }
         }
+        bool EconomyReadPropPolicy(Address row, InventoryRowPolicy& policy) {
+            std::uint64_t attribute{}, integration{}, flow{}, ability{};
+            std::int32_t dialogue{};
+            if (!ReadBytes(row + 0x24c, &policy.itemType, 1) || !ReadBytes(row + 0x26c, &policy.detailType, 1) ||
+                !ReadBytes(row + 0x274, &policy.materialType, 1) || !ReadBytes(row + 0x328, &attribute, 8) ||
+                !ReadBytes(row + 0x244, &integration, 8) || !ReadBytes(row + 0x280, &flow, 8) || !ReadBytes(row + 0x300, &ability, 8) ||
+                !ReadBytes(row + 0x258, &dialogue, 4) || dialogue < 0 || dialogue > 1024) return false;
+            policy.attributeEffect = attribute != 0;
+            policy.integration = integration != 0;
+            policy.flow = flow != 0;
+            policy.dialogue = dialogue != 0;
+            policy.ability = ability != 0;
+            return true;
+        }
+        bool EconomyPropLayout(Address backpack) {
+            const auto type = Read<Address>(backpack + 0x10);
+            const auto getter = FindFunction(type, "GetPropData");
+            const auto structure = Read<Address>(FindProperty(getter, "ReturnValue") + 0x70);
+            return ItemRowLayout(type, ItemTables[0]) &&
+                PropertyLayout(FindProperty(structure, "ItemType"), "EnumProperty", 1, 0x24c) &&
+                PropertyLayout(FindProperty(structure, "ItemDetailType"), "EnumProperty", 1, 0x26c) &&
+                PropertyLayout(FindProperty(structure, "MaterialType"), "EnumProperty", 1, 0x274) &&
+                PropertyLayout(FindProperty(structure, "AddAttributeGE"), "SoftClassProperty", 40, 0x320) &&
+                PropertyLayout(FindProperty(structure, "ItemGA"), "SoftClassProperty", 40, 0x2f8) &&
+                PropertyLayout(FindProperty(structure, "IntegrationItemID"), "NameProperty", 8, 0x244) &&
+                PropertyLayout(FindProperty(structure, "RunFlowAsset"), "SoftObjectProperty", 40, 0x278) &&
+                PropertyLayout(FindProperty(structure, "DialogueGroupIDs"), "ArrayProperty", 16, 0x250);
+        }
+        bool EconomyPrepareConsumables(Address backpack) {
+            protectedProps.clear();
+            if (!EconomyPropLayout(backpack) || !ItemTableValid(ItemTables[0], protectedPropTable)) return false;
+            const auto map = base + ItemTables[0].tableRva + 8;
+            for (int slot = 0; slot < protectedPropTable.count; ++slot) {
+                bool allocated{};
+                if (!ItemSlotAllocated(map, protectedPropTable, slot, allocated)) return false;
+                if (!allocated) continue;
+                ItemMapEntry item;
+                if (!ItemReadMapEntry(protectedPropTable, slot, item)) return false;
+                const auto id = Name(item.id.comparison);
+                InventoryRowPolicy policy;
+                if (!id || item.id.number || !EconomyReadPropPolicy(item.value, policy)) continue;
+                if (InventoryConsumableAllowed(*id, policy) && ItemSameName(item.id, Read<NameValue>(item.value + 8)))
+                    protectedProps.push_back({item.id, item.value, slot});
+            }
+            return true;
+        }
+        bool EconomyConsumableCurrent(NameValue item) {
+            if (inventoryEditDepth) return false;
+            const auto found = std::find_if(protectedProps.begin(), protectedProps.end(),
+                [&](const auto& entry) { return ItemSameName(entry.id, item); });
+            if (found == protectedProps.end()) return false;
+            ItemSparseMap current;
+            bool allocated{};
+            ItemMapEntry entry;
+            InventoryRowPolicy policy;
+            const auto map = base + ItemTables[0].tableRva + 8;
+            return ItemReadMap(map, current) && ItemSameMap(current, protectedPropTable) &&
+                ItemSlotAllocated(map, current, found->slot, allocated) && allocated &&
+                ItemReadMapEntry(current, found->slot, entry) && entry.value == found->row && ItemSameName(entry.id, item) &&
+                ItemSameName(Read<NameValue>(found->row + 8), item) && EconomyReadPropPolicy(found->row, policy) &&
+                InventoryConsumableAllowed("Item_Traversing", policy);
+        }
         void __fastcall HookMedicineUse(Address object, NameValue item, std::int32_t count) {
             ++callbacksInFlight;
             __try {
@@ -93,7 +161,7 @@
         void __fastcall HookPropsRemove(Address object, std::int32_t count, NameValue item, bool broadcast) {
             ++callbacksInFlight;
             __try {
-                if (EconomyShouldPrevent(1, object, count)) {
+                if (EconomyShouldPrevent(1, object, count) && EconomyConsumableCurrent(item)) {
                     count = 0; ++economySwitches[1].prevented;
                 }
                 originalPropsRemove(object, count, item, broadcast);
@@ -117,14 +185,14 @@
             if (!ObjectValid(object)) return false;
             const auto type = Read<Address>(object + 0x10);
             bool signature{};
-            if (index == 0) signature = CombatSignature(FindFunction(type, "UseMedicine"), "UseMedicine", 0x65dac70, 0x04020401, 12, {
+            if (index == 0) signature = CombatSignature(FindFunction(type, "UseMedicine"), "UseMedicine", 0x66239e0, 0x04020401, 12, {
                 {"MedicineID","NameProperty",0,8,0x18001040000280ull,""},
                 {"Num","IntProperty",8,4,0x18001040000280ull,""}});
-            if (index == 1) signature = CombatSignature(FindFunction(type, "RemovePropsFromBackPack"), "RemovePropsFromBackPack", 0x65d9440, 0x04020401, 13, {
+            if (index == 1) signature = CombatSignature(FindFunction(type, "RemovePropsFromBackPack"), "RemovePropsFromBackPack", 0x66221b0, 0x04020401, 13, {
                 {"Num","IntProperty",0,4,0x18001040000280ull,""},
                 {"ItemId","NameProperty",4,8,0x18001040000280ull,""},
                 {"bSendBroadcast","BoolProperty",12,1,0x18001040000280ull,""}});
-            if (index == 2) signature = CombatSignature(FindFunction(type, "SellShopItems"), "SellShopItems", 0x65aec20, 0x04420401, 20, {
+            if (index == 2) signature = CombatSignature(FindFunction(type, "SellShopItems"), "SellShopItems", 0x65f7b00, 0x04420401, 20, {
                 {"ShopGroupTag","StructProperty",0,8,0x18001000000080ull,"GameplayTag"},
                 {"ShopItemID","NameProperty",8,8,0x18001048000382ull,""},
                 {"SellNumber","IntProperty",16,4,0x18001040000280ull,""}});
@@ -204,6 +272,9 @@
             return complete;
         }
         bool ExtendedCapability(const Context& context, std::string_view id, std::string& reason) {
+            if (CameraFeature(id)) return CameraCapability(context, id, reason);
+            if (id == "all_accessories") return AccessoriesReady(context, reason);
+            if (ScriptFeature(id)) return ScriptCapability(context, reason);
             if (MovementFeature(id)) return MovementCapability(context, id, reason);
             if (DamageFeature(id)) return DamageCapability(context, id, reason);
             if (ResourcesFeature(id)) return ResourcesCapability(context, id, reason);
@@ -226,6 +297,13 @@
         ExecutionResult ExecuteExtended(const Context& context, const Request& request) {
             if (request.arguments.empty()) return {RequestState::Failed, "扩展功能参数缺失"};
             const auto& id = request.arguments[0];
+            if (CameraFeature(id)) return ExecuteCamera(context, request);
+            if (ScriptFeature(id)) return ExecuteScript(context, request);
+            if (id == "all_accessories") {
+                auto forwarded = request;
+                forwarded.arguments.erase(forwarded.arguments.begin());
+                return ExecuteAccessories(context, forwarded);
+            }
             if (MovementFeature(id)) return ExecuteMovement(context, request);
             if (DamageFeature(id)) return ExecuteDamage(context, request);
             if (ResourcesFeature(id)) return ExecuteResources(context, request);
@@ -250,10 +328,14 @@
                 for (std::size_t i = 0; i < economySwitches.size(); ++i) if (economySwitches[i].id == id) {
                     const bool enabled = request.arguments[1] == "on";
                     EconomyBinding candidate;
+                    if (enabled && i == 1 && !EconomyPrepareConsumables(Backpack(context)))
+                        return {RequestState::Failed, "消耗品白名单或物品分类契约未通过，未启用"};
                     if (enabled && (!EconomyContract(context, i, &candidate) || !InstallEconomyHook(i)))
                         return {RequestState::Failed, "扣减入口核对或安装失败，未启用"};
                     economyBindings[i] = enabled ? candidate : EconomyBinding{};
                     economySwitches[i].enabled = enabled;
+                    if (i == 1) return {RequestState::Verified, enabled ?
+                        std::format("仅保护 {} 种已核实消耗品；任务、铸魂、永久强化与未知物品正常扣减", protectedProps.size()) : "已停止物品扣减保护"};
                     return {RequestState::Verified, enabled ? "扣减保护已安装；实际使用次数会在状态中回读" : "已停止扣减保护"};
                 }
             }
@@ -265,6 +347,18 @@
                 return;
             }
             slice -= MovementToggleIds.size();
+            if (slice < CameraToggleIds.size()) {
+                states.push_back(CameraToggleState(context, std::string(CameraToggleIds[slice])));
+                return;
+            }
+            slice -= CameraToggleIds.size();
+            if (!slice) { states.push_back(AccessoriesToggleState(context)); return; }
+            --slice;
+            if (slice < ScriptToggleIds.size()) {
+                states.push_back(ScriptToggleState(context, ScriptToggleIds[slice]));
+                return;
+            }
+            slice -= ScriptToggleIds.size();
             const auto append = [&](std::vector<ToggleState> group) {
                 for (auto& state : group) states.push_back(std::move(state));
             };
@@ -281,7 +375,8 @@
             const bool known = EconomyContract(context, index) &&
                 (!state.enabled || EconomyBindingCurrent(index, economyBindings[index].object));
             states.push_back({std::string(state.id), known, known && state.enabled,
-                std::format("已保护 {} 次扣减；开关关闭后正常消耗", state.prevented)});
+                index == 1 ? std::format("仅保护 {} 种已核实消耗品，已保护 {} 次；任务及铸魂材料正常扣减", protectedProps.size(), state.prevented) :
+                    std::format("已保护 {} 次扣减；开关关闭后正常消耗", state.prevented)});
         }
         bool ExtendedSessionChanged(const Context& context) {
             DamageSessionChanged();
@@ -290,11 +385,13 @@
             const bool stealth = StealthSessionChanged(context);
             for (auto& state : economySwitches) state.enabled = false;
             economyBindings = {};
+            protectedProps.clear();
             return restored && stealth;
         }
         bool ExtendedCleanup() {
             for (auto& state : economySwitches) state.enabled = false;
             economyBindings = {};
+            protectedProps.clear();
             const bool damage = DamageCleanup();
             const bool cooldown = CooldownCleanup();
             const bool resources = ResourcesCleanup();

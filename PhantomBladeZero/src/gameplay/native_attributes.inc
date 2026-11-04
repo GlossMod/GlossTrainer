@@ -4,18 +4,18 @@
             constexpr std::array<unsigned char, 10> ctor{0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x74,0x24,0x18};
             constexpr std::array<unsigned char, 9> setter{0x40,0x53,0x48,0x83,0xec,0x70,0x48,0x8b,0xd9};
             constexpr std::array<unsigned char, 10> release{0x48,0x85,0xc9,0x74,0x2e,0x53,0x48,0x83,0xec,0x20};
-            return std::memcmp(reinterpret_cast<void*>(base + 0x4c4fb60), ctor.data(), ctor.size()) == 0 &&
-                std::memcmp(reinterpret_cast<void*>(base + 0x4c7a520), setter.data(), setter.size()) == 0 &&
-                std::memcmp(reinterpret_cast<void*>(base + 0x12e1930), release.data(), release.size()) == 0;
+            return std::memcmp(reinterpret_cast<void*>(base + 0x4c7c470), ctor.data(), ctor.size()) == 0 &&
+                std::memcmp(reinterpret_cast<void*>(base + 0x4ca6e60), setter.data(), setter.size()) == 0 &&
+                std::memcmp(reinterpret_cast<void*>(base + 0x12e0af0), release.data(), release.size()) == 0;
         }
         bool SetEngineAttribute(Address component, Address property, float value) noexcept {
             alignas(8) std::array<std::byte, 56> descriptor{};
             bool success{};
             __try {
-                reinterpret_cast<void*(__fastcall*)(void*, void*)>(base + 0x4c4fb60)(
+                reinterpret_cast<void*(__fastcall*)(void*, void*)>(base + 0x4c7c470)(
                     descriptor.data(), reinterpret_cast<void*>(property));
                 if (Read<Address>(reinterpret_cast<Address>(descriptor.data()) + 0x10) == property) {
-                    reinterpret_cast<void(__fastcall*)(void*, const void*, float)>(base + 0x4c7a520)(
+                    reinterpret_cast<void(__fastcall*)(void*, const void*, float)>(base + 0x4ca6e60)(
                         reinterpret_cast<void*>(component), descriptor.data(), value);
                     success = true;
                 }
@@ -25,7 +25,7 @@
             __try {
                 for (const auto offset : {0x20u, 0u}) {
                     const auto allocation = Read<Address>(reinterpret_cast<Address>(descriptor.data()) + offset);
-                    if (allocation) reinterpret_cast<void(__fastcall*)(void*)>(base + 0x12e1930)(reinterpret_cast<void*>(allocation));
+                    if (allocation) reinterpret_cast<void(__fastcall*)(void*)>(base + 0x12e0af0)(reinterpret_cast<void*>(allocation));
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) { success = false; }
             return success;

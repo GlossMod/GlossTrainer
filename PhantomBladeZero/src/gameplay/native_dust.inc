@@ -8,7 +8,7 @@
         bool DustFunctionValid(Address function) {
             if (!ObjectValid(function) || ObjectName(function) != "AddDustNum" ||
                 ObjectName(Read<Address>(function + 0x20)) != "PBZBackPackSubsystem" ||
-                Read<Address>(function + 0x128) != base + 0x65d0610 ||
+                Read<Address>(function + 0x128) != base + 0x6619450 ||
                 Read<std::uint32_t>(function + 0x100) != 0x04020401 ||
                 Read<std::uint8_t>(function + 0x104) != 1 || Read<std::uint16_t>(function + 0x106) != 4) return false;
             const auto parameter = Read<Address>(function + 0x50);

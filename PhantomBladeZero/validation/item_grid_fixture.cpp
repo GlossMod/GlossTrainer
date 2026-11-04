@@ -136,6 +136,22 @@ namespace gloss::input {
             };
             ImGui::AddContextHook(ImGui::GetCurrentContext(), &hook);
         }
+        if (value == "distance-features") {
+            // Fixture-only input targets the resource tab of the fixed 1280x720
+            // validation layout. It never sends input to a desktop/game window.
+            ImGuiContextHook hook;
+            hook.Type = ImGuiContextHookType_NewFramePre;
+            hook.Callback = [](ImGuiContext*, ImGuiContextHook*) {
+                if (!overlay::Visible()) return;
+                static unsigned frames{};
+                ++frames;
+                auto& io = ImGui::GetIO();
+                io.AddMousePosEvent(frames < 15 ? 782.f : 1200.f, frames < 15 ? 179.f : 700.f);
+                if (frames == 10) io.AddMouseButtonEvent(0, true);
+                if (frames == 11) io.AddMouseButtonEvent(0, false);
+            };
+            ImGui::AddContextHook(ImGui::GetCurrentContext(), &hook);
+        }
         if (value == "features") {
             std::string error;
             gloss::hotkeys::GetRegistry().Set("toggle:infinite_dark_source", {VK_F24, 7}, {}, error);
@@ -245,14 +261,16 @@ namespace {
             backend.PublishItems({std::move(item)}, true, "资源界面测试样本");
             return;
         }
-        if (modeName == "features") {
+        if (modeName == "features" || modeName == "distance-features") {
             auto& backend = gloss::gameplay::GetBackend();
             backend.SetRuntimeState(true, "仅用于界面测试，不连接游戏", "features-fixture");
             for (const auto& feature : gloss::gameplay::Catalog())
                 if (!feature.functionName.empty()) backend.SetCapability(feature.id, true, "界面测试样本");
             std::vector<gloss::gameplay::ToggleState> states;
             for (const auto& toggle : gloss::gameplay::ToggleCatalog())
-                states.push_back({toggle.id, true, toggle.id == "infinite_dark_source", "界面测试状态，不连接游戏"});
+                states.push_back({toggle.id, true, toggle.id == "infinite_dark_source" ||
+                    (modeName == "distance-features" && (toggle.id == "auto_collect" || toggle.id == "highlight_loot")),
+                    "界面测试状态，不连接游戏", gloss::gameplay::DefaultParameters(*gloss::gameplay::FindFeature(toggle.onFeatureId))});
             backend.PublishToggleStates(std::move(states));
             return;
         }

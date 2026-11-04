@@ -1,6 +1,7 @@
 #include "runtime.hpp"
 #include "ime.hpp"
 #include "input_mouse_shortcuts.hpp"
+#include "input_capture_rules.hpp"
 #include "hotkeys.hpp"
 #include <MinHook.h>
 #include <imgui.h>
@@ -27,10 +28,11 @@ namespace gloss::input
         struct WindowState
         {
             HWND window{};
-            WNDPROC original{};
+            std::atomic<WNDPROC> original{};
             std::mutex mutex;
             RECT desiredClip{};
             bool hasDesiredClip{}, clipSuppressed{}, cursorCaptured{}, pendingRelease{};
+            MenuMouseCapture menuMouseCapture;
             bool rawMouseOnly{}, rawKeyboardOnly{};
             std::array<bool, 256> gameKeys{}, systemKeys{};
             std::array<bool, 256> rawShortcutDown{}, legacyShortcutDown{}, shortcutConsumed{}, rawShortcutConsumed{};
@@ -184,7 +186,7 @@ namespace gloss::input
             }
             // Only called by our window-thread message handler, with no input/ImGui lock.
             for (const auto &release : releases)
-                CallWindowProcW(state->original, state->window, release.message, release.key, release.parameters);
+                CallWindowProcW(state->original.load(), state->window, release.message, release.key, release.parameters);
         }
         void RestoreClip(const std::shared_ptr<WindowState> &state)
         {
@@ -249,8 +251,12 @@ namespace gloss::input
                 }
                 if (pending)
                     ReleaseGameKeys(state);
-                if (GetCapture() == state->window)
-                    ReleaseCapture();
+                bool releaseCapture{};
+                {
+                    std::lock_guard lock(state->mutex);
+                    releaseCapture = state->menuMouseCapture.ReleaseIfOwned(GetCapture() == state->window);
+                }
+                if (releaseCapture) ReleaseCapture();
             }
             if (ime::Sync(state->window, Active(state->window)))
                 ReadRawRegistration(state);
@@ -481,7 +487,7 @@ namespace gloss::input
                 if (valid)
                     TrackRaw(state, raw);
                 ReleaseFilterScope filter(handle, 0, suppressed);
-                return CallWindowProcW(state->original, state->window, WM_INPUT, wparam, lparam);
+                return CallWindowProcW(state->original.load(), state->window, WM_INPUT, wparam, lparam);
             }
             bool releaseKeyboard{};
             USHORT mouseUps{};
@@ -512,7 +518,7 @@ namespace gloss::input
             {
                 ReleaseFilterScope filter(handle, mouseUps, suppressed);
                 // Do not hold either mutex while the game's procedure reads this real handle.
-                return CallWindowProcW(state->original, state->window, WM_INPUT, wparam, lparam);
+                return CallWindowProcW(state->original.load(), state->window, WM_INPUT, wparam, lparam);
             }
             return DefWindowProcW(state->window, WM_INPUT, wparam, lparam);
         }
@@ -541,6 +547,11 @@ namespace gloss::input
             const auto state = FindState(window);
             if (!state)
                 return DefWindowProcW(window, message, wparam, lparam);
+            if (message == WM_CAPTURECHANGED && reinterpret_cast<HWND>(lparam) != window)
+            {
+                std::lock_guard lock(state->mutex);
+                state->menuMouseCapture.Lost();
+            }
             if (message == CursorSync || message == ime::UpdateMessage)
             {
                 SyncCursor(state);
@@ -651,7 +662,7 @@ namespace gloss::input
                     return ime::ProcessMessage(window, message, wparam, lparam);
                 // Inactive game IME messages must also skip the backend's default
                 // processing, so the original window procedure receives them once.
-                return CallWindowProcW(state->original, window, message, wparam, lparam);
+                return CallWindowProcW(state->original.load(), window, message, wparam, lparam);
             }
             if ((message == WM_CHAR || message == WM_UNICHAR) && !Active(window) && ime::OwnsMessages(window))
                 return 0;
@@ -664,7 +675,12 @@ namespace gloss::input
                 {
                     std::lock_guard lock(OverlayMutex());
                     if (ImGui::GetCurrentContext())
+                    {
+                        const bool capturedBefore = GetCapture() == window;
                         ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam);
+                        std::lock_guard stateLock(state->mutex);
+                        state->menuMouseCapture.ObserveBackend(capturedBefore, GetCapture() == window);
+                    }
                 }
                 if (Active(window) && (IsInputMessage(message) || message == WM_SETCURSOR))
                     return message == WM_SETCURSOR ? TRUE : 0;
@@ -680,12 +696,12 @@ namespace gloss::input
                 }
                 RestoreClip(state);
                 ime::Detach(window);
-                const auto result = CallWindowProcW(state->original, window, message, wparam, lparam);
+                const auto result = CallWindowProcW(state->original.load(), window, message, wparam, lparam);
                 std::lock_guard lock(windowsMutex);
                 windows.erase(window);
                 return result;
             }
-            return CallWindowProcW(state->original, window, message, wparam, lparam);
+            return CallWindowProcW(state->original.load(), window, message, wparam, lparam);
         }
         template <typename T>
         bool Hook(const char *name, void *replacement, T *original)
@@ -728,7 +744,7 @@ namespace gloss::input
             state = std::make_shared<WindowState>();
             state->window = window;
             state->original = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(window, GWLP_WNDPROC));
-            if (!state->original || state->original == &WindowProc)
+            if (!state->original.load() || state->original.load() == &WindowProc)
                 return false;
             {
                 std::lock_guard lock(windowsMutex);
@@ -742,6 +758,10 @@ namespace gloss::input
                 windows.erase(window);
                 return false;
             }
+            // The subclass chain may have changed after GetWindowLongPtr. Forward
+            // through the actual predecessor returned by the atomic replacement.
+            if (previous && previous != reinterpret_cast<LONG_PTR>(&WindowProc))
+                state->original.store(reinterpret_cast<WNDPROC>(previous));
         }
         {
             std::lock_guard lock(state->mutex);

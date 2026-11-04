@@ -2,7 +2,7 @@
 // from only the weapon timer. The getter also includes the generic timer, so
 // override its temporary result without editing either timer or talent values.
         using SwitchCooldownQuery = float(__fastcall*)(Address, const NameValue*);
-        constexpr Address SwitchCooldownQueryRva = 0x5e76860;
+        constexpr Address SwitchCooldownQueryRva = 0x5ec0340;
         constexpr std::array<unsigned char, 16> SwitchCooldownEntry{
             0x40,0x53,0x55,0x57,0x48,0x83,0xec,0x70,0x48,0x83,0xb9,0xe8,0,0,0,0};
         constexpr std::array<std::string_view, 4> SwitchCooldownSlotNames{
@@ -30,7 +30,7 @@
         }
         bool CooldownFunctionContract(Address type) {
             return CombatSignature(FindFunction(type, "GetCurrentChangeWeaponCooldown"),
-                "GetCurrentChangeWeaponCooldown", 0x5e0bb90, 0x54420401, 12, {
+                "GetCurrentChangeWeaponCooldown", 0x5e54f90, 0x54420401, 12, {
                     {"SlotTag","StructProperty",0,8,0x18001008000182ull,"GameplayTag"},
                     {"ReturnValue","FloatProperty",8,4,0x18001040000780ull,""}});
         }

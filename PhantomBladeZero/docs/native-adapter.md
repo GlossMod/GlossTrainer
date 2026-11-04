@@ -1,14 +1,14 @@
 # PBZ 原生适配
 
-适配目标：CL-301524_JKS-17219，UE 5.7.4 Shipping，主程序 SHA-256 `7b4fcd286a350780faf0824d73aa150b21cbf1bccde883e6a96386cbe09973b4`。
+适配目标：CL-302256_JKS-17280，Windows x64 Shipping，主程序 SHA-256 `4415933ce33476f14c837abb61a1b60af8b78cd81783896501913a7aac69e423`。
 
-当前源码已实现全量物品目录、数量发放与结果读回，并收敛用户界面；本轮 Debug / Release 构建和 Gameplay 测试通过。**本轮新版已部署，尚未完成实机验证，以下新增物品行为描述的是实现与验证条件。**旧版部署及实机结果保留在 [验证记录](verification.md)。
+当前源码迁移原生接口、战斗/移动钩子与物品目录地址，并保留精确版本与反射检查。构建、实机结果及边界见 [验证记录](verification.md) 最后一节；历史版本的实测结果仅适用于对应旧版本。
 
 ## 分层
 
 - `catalog` 定义功能、类型、用户参数、固定参数、输入范围及进度影响。
 - `backend` 管理有界队列、有效期、会话代次、互斥与结果历史。回调锁外执行，同一时间只有一个 Pump；旧会话、过期或撤销 capability 的请求不执行。异常与会话中断标记结果未知，不自动重试。
-- `native_adapter` 检查磁盘哈希和入口字节，跟踪引擎、世界、本地玩家和 Pawn。监测线程只检查/安装虚表回调，构建 CheatManager、调用 ProcessEvent 和读回均在当前控制器 ReceiveTick 的游戏线程中执行。
+- `native_adapter` 检查磁盘哈希和入口字节，跟踪引擎、世界、本地玩家和 Pawn。监测线程只检查/安装虚表回调，调用 ProcessEvent 和读回均在当前控制器 ReceiveTick 的游戏线程中执行。
 - `native_items.inc` 定义本版本五张物品表、行布局、文本解析和背包发放契约，在游戏线程生成完整目录、解析本地化并回读库存。
 - `overlay` 从同一帧 Snapshot 显示就绪原因、实际统计和结果，仅提交用户参数；固定参数由 Backend 添加。当前保留五页导航和亮暗主题，传送页隐藏；Debug 新配置默认关闭并持久化，关闭时隐藏请求历史、实际读回和开发诊断。
 
@@ -18,19 +18,19 @@
 
 控制器 ProcessEvent 虚表槽 `+0x260` 只有在原值匹配本版本 Actor ProcessEvent 时才原子替换。回调先执行原函数，再核对当前控制器、ReceiveTick、GGameThreadId。启动时尚无角色会等待；加载/暂停超过两秒无 Tick 会停止接收请求。世界、控制器或 Pawn 变化会清除旧请求，重新验证运行时。
 
-Shipping 的 EnableCheats 路径为空，适配器通过已核对的 GameplayStatics.SpawnObject 在游戏线程创建控制器指定的 CheatClass；验证 ClassWithin、Outer 和派生类，将引用保存在控制器 CheatManager UPROPERTY。每个控制器上下文仅尝试一次，失败不循环创建。
+本版本原生功能不依赖 CheatManager，也不创建 CheatManager。旧 GM 函数即使反射签名仍存在，其业务实现已经成为空操作；Contract() 拒绝全部历史 GM 契约，能力发布和执行均显示明确的不可用原因。历史契约表仅保留作审计对照。
 
 模块在发布回调地址前固定至进程退出。停用恢复仍归本模块所有的虚表槽，等待监测线程/回调；不能据此调用 FreeLibrary。开发调试副本使用 GameplayOnly 入口，正式版本由 Loader 调用 InitializeASI，一次性安装原生层和输入/图形层。
 
 ## 契约及读回
 
-GM exec 编译表沿用已核对的静态与运行时契约，目录只启用其中所选玩法动作；当前物品发放使用独立的背包函数契约。参数数量、偏移、类型、尺寸、flags、native RVA 在调用前重新检查，FName 参数只能引用本进程已有名称。比较名称按 Unreal 大小写不敏感语义处理（MedicineId 可读成 MedicineID）。不把 FName ID 当成跨进程稳定物品 ID。
+旧 GM exec 编译表不参与本版本执行；物品发放使用独立的背包函数契约。参数数量、偏移、类型、尺寸、flags、native RVA 在调用前重新检查，FName 参数只能引用本进程已有名称。比较名称按 Unreal 大小写不敏感语义处理（MedicineId 可读成 MedicineID）。不把 FName ID 当成跨进程稳定物品 ID。
 
-生命从 BasicAttributeSet.Health/Health_Max 当前值读取；GM_GetHealth 是 void 日志函数，不被误作 float 返回。`Native_SetMaxHealth` 使用引擎构造的 GameplayAttribute 描述符设置 Health_Max base，再读取实际上限并设置 Health；两次调用后都检查 pawn/ASC/AttributeSet 指针与 UObject index。描述符按原生 GM 实现用引擎分配器释放，生命及上限同时匹配才标 Verified。无敌读 AbilitySystemComponent.GetGameplayTagCount；标签存在不替代实战验证。
+生命从 BasicAttributeSet.Health/Health_Max 当前值读取；GM_GetHealth 是 void 日志函数，不被误作 float 返回。`Native_SetMaxHealth` 使用引擎构造的 GameplayAttribute 描述符设置 Health_Max base，再读取实际上限并设置 Health；两次调用后都检查 pawn/ASC/AttributeSet 指针与 UObject index。描述符按原生 GM 实现用引擎分配器释放，生命及上限同时匹配才标 Verified。恢复生命使用同一原生属性设置器并读回当前值及上限。无敌通过已验证的 Add/RemoveLooseGameplayTag 添加一个标签贡献；重复开启不会重复计数，关闭只撤销本修改器贡献并保留游戏原有计数。会话切换、停用或异常时保留尚未确认的清理记录；SEH 后停止引擎调用。状态通过 AbilitySystemComponent.GetGameplayTagCount 回读，标签存在不替代实战验证。
 
 时间倍率用 GameplayStatics.Set/GetGlobalTimeDilation，限制 0.1–3.0，设为 1 恢复；坐标用 K2_GetActorLocation 返回 24 字节 double Vector。背包从当前 WorldSubsystem 稀疏映射核对类和 Outer 后读取，补充真实终结技资源及当前药品名称/本次 FName ID。
 
-GM_InfiniteUltimateShachi 的旧版实测修改背包 CurrentUltimateCharge、MaxUltimateCharge 至 2147083648，充能 100%；不能称为普通补满或可逆开关。批量进度等尚无专属业务读回的调用只报告 Dispatched，意味着 native 调用返回，不意味着业务成功或存盘成功。
+GM_InfiniteUltimateShachi 的旧版实测修改背包 CurrentUltimateCharge、MaxUltimateCharge 至 2147083648，充能 100%；不能称为普通补满或可逆开关。本版本此命令与其他依赖旧 GM 的批量进度入口均已禁用，不再报告空调用成功。
 
 ## 完整物品目录与数量发放
 
@@ -54,7 +54,7 @@ Backend 校验目录键、整数数量及分类上限；原生层再次校验本
 
 ## 动态图片、富文本与战斗（2026-10-29 更新）
 
-`native_items.inc` 在游戏线程使用游戏的 LoadAsset_Blocking 加载物品软纹理引用，延迟至少一帧再读取已核对的 TexturePlatformData/Mip/BulkData。每次最多处理一个请求，常规失败下帧才尝试备用纹理。图片桥按会话 epoch 丢弃过期结果；`item_icons.cpp` 在工作线程解码 BC1/2/3/7、RGBA/BGRA，缩小至最长边 256，再每帧最多上传一个 GPU 纹理。最多 64 个 GPU 图片；DX11/DX12 的淘汰分别等待事件查询/实际完成的 fence。解码器许可证为仓库 `licenses/bcdec.txt`。不写图集、不打包游戏图片。
+`native_items.inc` 在游戏线程使用游戏的 LoadAsset_Blocking 加载物品软纹理引用，延迟至少一帧再读取已核对的 TexturePlatformData/Mip/BulkData。目录建立和输入对象发现按时间/条目预算分批；每次最多处理一个图片请求。具有有效弱身份的稳定 Texture2D 会跨等待复用，只有对象、路径、会话或目录代次变化才重新加载；无 serial 的对象保留完整重验证路径。图片桥按会话 epoch 丢弃过期结果；`item_icons.cpp` 在工作线程解码 BC1/2/3/7、RGBA/BGRA，缩小至最长边 256，再每帧最多上传一个 GPU 纹理。最多 64 个 GPU 图片；DX11/DX12 的淘汰分别等待事件查询/实际完成的 fence。解码器许可证为仓库 `licenses/bcdec.txt`。不写图集、不打包游戏图片。
 
 `native_item_input.inc` 按路径找到游戏 DT_RichTextInputAction，校验 RichTextInputActionMapping 结构，用其中软 InputAction 的包名和对象名匹配当前 EnhancedActionMappings。CommonInputSubsystem 的 CurrentInputType 与 GamepadInputType 决定当前设备和按键名称；250ms 检查一次。无设备覆盖的实际武器五种动作均已只读核对。保留原始描述，映射变化后重新格式化；`item_richtext.cpp` 保留相邻重复按键、样式内文字、换行与未解析标签占位。带特殊覆盖的动作暂不猜测默认映射。动态数值标签尚未完整适配，会明确标注待读取。
 
@@ -84,3 +84,17 @@ Backend 校验目录键、整数数量及分类上限；原生层再次校验本
 设置升级为兼容旧格式的 v2，按功能保存最后成功的倍率值；失败请求不覆盖上次有效参数，关闭不依赖编辑框中尚未提交的内容。飞行升降默认 Page Up / Page Down，保留用户改键、显式解绑与已有冲突。新增中英文状态、亮暗四列界面；界面宿主验证与游戏内验证分别记录。
 
 “忽略升级条件”在两轮实机测试中仍需材料，按用户反馈从 v1.1.0 撤下。已移除功能目录、专用原生钩子及其启动和清理路径；旧设置中的该功能 ID 不再识别。失败调查仅保留在验证记录和根 output 中。
+
+## v1.2.0 脚本功能与相机、饰品
+
+`native_scripts.inc` 只在已核对的本地游戏线程同步执行固定私有模块。每个 Puerts 环境先执行最小 ACK 探针，核对实例索引、环境、loader/logger 和本机构造/加载/验证入口契约；六个临时 loader/logger 槽每次调用后恢复。新版模块完整性验证入口只准入当前调用精确私有路径及 Load 返回的同一描述符、缓冲区、长度和字节内容，其他请求调用原验证函数。
+
+自动收集、高亮和传送共享 250ms 维护。成功启用脚本组后持有属于本模块的窄验证钩子，稳定维护不再反复执行 MinHook Enable/Disable；空闲 TLS 门关闭，普通模块仍走原验证。最后一个开关关闭、探针、清理、失败或环境失配会恢复验证入口；恢复失败保留所有权记录并停止适配器。完整入口字节或本模块补丁收据始终重新核对，不覆盖第三方改动。首次开启和末次关闭仍可能产生一次性的钩子管理开销。
+
+附近交互仅来自本地 InteractComponent，支持原生 Pickup、精确宝箱类和精确 BP_Rubbish 场景掉落类。后者要求 `Not Interact` 明确为 false、场景键有效；218 个 BookPage 后缀用于纸条标记，其余有效场景掉落标记为 Loot，不把场景键当作背包物品 ID。NPC、梯子及其他开关不在白名单。每次维护最多轮转检查 128 个稀疏槽、分类 32 个新对象，并优先检查游戏当前交互目标；最多保留 32 个候选，每轮重新验证成员关系、对象、类别和归属。4096 槽极端密集表完整轮转最长约 32 秒，当前交互目标不等待轮转。自动模式忙碌、空中或战斗时提前返回；两项同时开启共享一次扫描。
+
+交互范围使用原生 `GetValidDistance(actor, pawn)`，不以 DistanceA/B/C 搜索层级或 Actor 原点距离推断可交互范围；高亮和自动收集分别使用用户保存的米制距离（默认 50 米和 10 米）。只对原生 Pickup 调用 `IsValidPickup`。交互前保留正常状态和 CanTriggerInteract，最后一个 Blueprint predicate 返回后再次核对本地 pawn/component/owner、actor 身份、类别、完整路径和重新读取的当前目标/候选表，每轮最多尝试一次。DoInteract 非 true 结果间隔 1.5 秒重试；true 仅记录受理并防重放，不视为背包变化或拾取完成，因为游戏的失败与长按分支也可能返回 true。受理记录只在同一查询代次确认两套来源都已完整访问后清理，范围刷新或稀疏表变化会使旧完整性证明失效。关闭、会话变化和清理释放候选包装引用，跨轮持有的 Puerts 包装对象对 GC 的具体影响尚未实机证明。现场证据和返回值语义见[拾取审查](../../output/pbz-features-20261104/performance/pickup-audit.md)。
+
+高亮经 ProjectWorldToScreen 返回最多 32 个屏幕标记，严格 JSON 校验后发布，750ms 未更新即过期。渲染线程只读取标记，不访问引擎对象。免费传送沿用原始传送业务并跳过道具数量/扣减；限制开关与免费开关独立，目标仍需有效且已激活。游戏禁止字符串动态编译，因此传送方法使用经原方法源码核对的静态函数。
+
+`native_camera.inc` 保存实际相机模式的距离、垂直偏移原值，关闭或会话切换时恢复；模式自身范围可能比 UI 目录范围更窄。`native_accessories.inc` 按已拥有未装备饰品调用本地 GE 辅助函数，以精确 handle 记录和撤销本模块贡献，不修改装备槽；次级效果与所有饰品组合尚未取得完整实机 on/off 证明。数量编辑、收藏品名称与分类见 [收藏品说明](collectible-names.md)。本版验证范围、性能口径和安装产物以 [验证记录](verification.md) 为准。

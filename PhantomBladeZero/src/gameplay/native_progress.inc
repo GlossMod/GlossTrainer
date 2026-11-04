@@ -8,8 +8,8 @@
             if (!LocalGameThread() || !ObjectValid(object) || Read<Address>(object + 0x20) != context.world ||
                 !PropertyLayout(FindProperty(type, "bCanSelectNightMare"), "BoolProperty", 1, 0x294) ||
                 Read<std::uint32_t>(FindProperty(type, "bCanSelectNightMare") + 0x70) != 0xff010001 ||
-                !CombatSignature(FindFunction(type, "MarkSelectNightMare"), "MarkSelectNightMare", 0x65eef60, 0x04020401, 0, {}) ||
-                !CombatSignature(FindFunction(type, "CanSelectNightMare"), "CanSelectNightMare", 0x65ed7e0, 0x54020401, 1, {
+                !CombatSignature(FindFunction(type, "MarkSelectNightMare"), "MarkSelectNightMare", 0x6637e20, 0x04020401, 0, {}) ||
+                !CombatSignature(FindFunction(type, "CanSelectNightMare"), "CanSelectNightMare", 0x66366a0, 0x54020401, 1, {
                     {"ReturnValue", "BoolProperty", 0, 1, 0x18001040000780ull, ""}})) return 0;
             return object;
         }

@@ -1,5 +1,6 @@
 #include "../src/gameplay/item_scan_schedule.hpp"
 #include "../src/gameplay/item_loading_budget.hpp"
+#include "../src/gameplay/item_catalog_progress.hpp"
 #include <iostream>
 using namespace gloss::gameplay;
 int main() {
@@ -42,6 +43,57 @@ int main() {
     CHECK(late.Continue(start + seconds(1))); // Always make one unit of progress.
     late.Consume();
     CHECK(!late.Continue(start + seconds(1)));
+    // An unfinished table cannot publish a catalog; a reset discards its slot,
+    // allocated count and all later phases rather than resuming stale pointers.
+    ItemCatalogProgress progress;
+    CHECK(!progress.Complete());
+    progress.tableReady = true;
+    progress.slot = 640;
+    progress.allocated = 640;
+    progress.FinishTable(5);
+    CHECK(progress.table == 1 && progress.slot == 0 && progress.allocated == 0 && !progress.tableReady);
+    CHECK(progress.phase == ItemCatalogProgress::Phase::Tables && !progress.Complete());
+    progress = {};
+    CHECK(progress.table == 0 && progress.row == 0 && progress.slot == 0 && !progress.tableReady);
+    for (unsigned table = 0; table < 5; ++table) progress.FinishTable(5);
+    CHECK(progress.phase == ItemCatalogProgress::Phase::ParentIndex && !progress.Complete());
+    progress.row = 789;
+    progress.FinishRows(790);
+    CHECK(progress.phase == ItemCatalogProgress::Phase::ParentIndex); // Interrupted join stays private.
+    progress.row = 790;
+    progress.FinishRows(790);
+    CHECK(progress.phase == ItemCatalogProgress::Phase::ParentLinks && progress.row == 0);
+    progress.row = 790;
+    progress.FinishRows(790);
+    CHECK(progress.phase == ItemCatalogProgress::Phase::VerifyTables && progress.table == 0);
+    for (unsigned table = 0; table < 4; ++table) {
+        progress.FinishVerification(5);
+        CHECK(!progress.Complete());
+    }
+    // A reload during final verification resets the entire prefix too.
+    auto failedBuild = progress;
+    failedBuild = {};
+    CHECK(failedBuild.phase == ItemCatalogProgress::Phase::Tables && failedBuild.table == 0 && !failedBuild.Complete());
+    progress.FinishVerification(5);
+    CHECK(progress.Complete());
+    // Catalog setup, empty sparse slots, links and checks must each consume the
+    // shared cap; reaching a deadline cannot immediately start the name phase.
+    ItemLoadingBudget catalogBuild(start, milliseconds(1), 32);
+    unsigned work{};
+    while (catalogBuild.Continue(start)) { ++work; catalogBuild.Consume(); }
+    CHECK(work == 32 && !catalogBuild.Continue(start));
+    // A slow UObject-discovery batch resumes at the next unread slot, within
+    // the existing 50ms throttle, rather than rescanning its completed prefix.
+    ItemScanSchedule inputDiscovery;
+    CHECK(inputDiscovery.Begin(start, 2000));
+    ItemLoadingBudget discoveryBudget(start, microseconds(500), 512);
+    CHECK(discoveryBudget.Continue(start));
+    ++inputDiscovery.cursor;
+    discoveryBudget.Consume();
+    CHECK(!discoveryBudget.Continue(start + milliseconds(1)));
+    inputDiscovery.Finish(start, 2000);
+    CHECK(inputDiscovery.Begin(start + milliseconds(50), 2000));
+    CHECK(inputDiscovery.cursor == 1 && inputDiscovery.End(2000) == 513);
     std::cout << "Item scan scheduling: " << failures << " failures\n";
     return failures ? 1 : 0;
 }

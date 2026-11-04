@@ -1,0 +1,3 @@
+interface:
+  display_name: "修改器性能优化"
+  short_description: "定位并优化修改器每帧开销、卡顿、反射缓存及线程争用问题"

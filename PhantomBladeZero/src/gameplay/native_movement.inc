@@ -153,7 +153,7 @@
         }
         std::optional<float> ReadMovementGlobalTime(const Context& context) {
             if (!MovementContextCurrent(context) || !TimeDilationReady()) return {};
-            const auto owner = Read<Address>(base + 0xdf45bf8);
+            const auto owner = Read<Address>(base + 0xdfbac68);
             struct Parameters { Address world; float value; } parameters{context.world,
                 std::numeric_limits<float>::quiet_NaN()};
             if (!CallProcessEvent(Read<Address>(owner + 0x160), FindFunction(owner, "GetGlobalTimeDilation"), &parameters))
@@ -165,7 +165,7 @@
             if (!MovementContextCurrent(context) || !TimeDilationReady() || !std::isfinite(value) || value < 0.0001f || value > 20)
                 return {RequestState::Failed, "全局时间倍率契约或恢复值无效"};
             const auto worldIdentity = MovementWorldIdentity(context);
-            const auto owner = Read<Address>(base + 0xdf45bf8);
+            const auto owner = Read<Address>(base + 0xdfbac68);
             struct Parameters { Address world; float value; } parameters{context.world, value};
             if (!CallProcessEvent(Read<Address>(owner + 0x160), FindFunction(owner, "SetGlobalTimeDilation"), &parameters))
                 return {RequestState::Indeterminate, "全局时间倍率调用异常，保留原值记录"};
@@ -516,12 +516,12 @@
                 ClassNamed(Read<Address>(capsule + 0x10), "CapsuleComponent") ? capsule : 0;
         }
         Address FlightSystemLibrary() {
-            const auto type = Read<Address>(Read<Address>(base + 0xdf4d1c0) + 0x20);
+            const auto type = Read<Address>(Read<Address>(base + 0xdfc2270) + 0x20);
             return ObjectValid(type) && ObjectName(type) == "KismetSystemLibrary" &&
                 ObjectValid(Read<Address>(type + 0x160)) ? type : 0;
         }
         bool FlightTraceSignature(Address function) {
-            if (!CombatSignature(function, "CapsuleTraceSingleByProfile", 0x407bb80, 0x04c22403, 401, {
+            if (!CombatSignature(function, "CapsuleTraceSingleByProfile", 0x4091ea0, 0x04c22403, 401, {
                 {"WorldContextObject", "ObjectProperty", 0, 8, 0x18001000000282ull, "Object"},
                 {"Start", "StructProperty", 8, 24, 0x18001040000282ull, "Vector"},
                 {"End", "StructProperty", 0x20, 24, 0x18001040000282ull, "Vector"},
@@ -554,24 +554,24 @@
                 PropertyLayout(FindProperty(movementType, "MovementMode"), "ByteProperty", 1, 0x241) &&
                 PropertyLayout(FindProperty(movementType, "CustomMovementMode"), "ByteProperty", 1, 0x242) &&
                 PropertyLayout(collision, "BoolProperty", 1, 0x5d) && Read<std::uint32_t>(collision + 0x70) == 0x04040001 &&
-                CombatSignature(FindFunction(movementType, "SetMovementMode"), "SetMovementMode", 0x3d276f0, 0x04020402, 2, {
+                CombatSignature(FindFunction(movementType, "SetMovementMode"), "SetMovementMode", 0x3d32eb0, 0x04020402, 2, {
                     {"NewMovementMode", "ByteProperty", 0, 1, 0x18001040000280ull, "EMovementMode"},
                     {"NewCustomMode", "ByteProperty", 1, 1, 0x18001040000280ull, ""}}) &&
-                CombatSignature(FindFunction(pawnType, "SetActorEnableCollision"), "SetActorEnableCollision", 0x3aceb90, 0x04020403, 1, {
+                CombatSignature(FindFunction(pawnType, "SetActorEnableCollision"), "SetActorEnableCollision", 0x3ad4990, 0x04020403, 1, {
                     {"bNewActorEnableCollision", "BoolProperty", 0, 1, 0x18001040000280ull, ""}}) &&
-                CombatSignature(FindFunction(pawnType, "GetActorEnableCollision"), "GetActorEnableCollision", 0x3ac8fd0, 0x54020401, 1, {
+                CombatSignature(FindFunction(pawnType, "GetActorEnableCollision"), "GetActorEnableCollision", 0x3acedd0, 0x54020401, 1, {
                     {"ReturnValue", "BoolProperty", 0, 1, 0x18001040000780ull, ""}}) &&
-                CombatSignature(FindFunction(pawnType, "K2_AddActorWorldOffset"), "K2_AddActorWorldOffset", 0x3acba60, 0x04c20403, 289, {
+                CombatSignature(FindFunction(pawnType, "K2_AddActorWorldOffset"), "K2_AddActorWorldOffset", 0x3ad1860, 0x04c20403, 289, {
                     {"DeltaLocation", "StructProperty", 0, 24, 0x18001040000280ull, "Vector"},
                     {"bSweep", "BoolProperty", 0x18, 1, 0x18001040000280ull, ""},
                     {"SweepHitResult", "StructProperty", 0x20, 256, 0x10009040000180ull, "HitResult"},
                     {"bTeleport", "BoolProperty", 0x120, 1, 0x18001040000280ull, ""}}) &&
-                CombatSignature(FindFunction(capsuleType, "GetScaledCapsuleSize"), "GetScaledCapsuleSize", 0x3d24cb0, 0x54420401, 8, {
+                CombatSignature(FindFunction(capsuleType, "GetScaledCapsuleSize"), "GetScaledCapsuleSize", 0x3d30470, 0x54420401, 8, {
                     {"OutRadius", "FloatProperty", 0, 4, 0x18001040000380ull, ""},
                     {"OutHalfHeight", "FloatProperty", 4, 4, 0x18001040000380ull, ""}}) &&
-                CombatSignature(FindFunction(capsuleType, "GetCollisionProfileName"), "GetCollisionProfileName", 0x3d73550, 0x54020403, 8, {
+                CombatSignature(FindFunction(capsuleType, "GetCollisionProfileName"), "GetCollisionProfileName", 0x3d7fff0, 0x54020403, 8, {
                     {"ReturnValue", "NameProperty", 0, 8, 0x18001040000780ull, ""}}) &&
-                CombatSignature(FindFunction(capsuleType, "K2_GetComponentLocation"), "K2_GetComponentLocation", 0x3dcd140, 0x54820403, 24, {
+                CombatSignature(FindFunction(capsuleType, "K2_GetComponentLocation"), "K2_GetComponentLocation", 0x3dda5d0, 0x54820403, 24, {
                     {"ReturnValue", "StructProperty", 0, 24, 0x18001040000780ull, "Vector"}}) &&
                 FlightTraceSignature(FindFunction(type, "CapsuleTraceSingleByProfile"));
             if (!valid) reason = "飞行移动模式、胶囊、碰撞与空间检查反射契约未通过";
@@ -712,7 +712,7 @@
                     "ObjectProperty", 8, 0x368)) return 0;
             const auto camera = Read<Address>(context.controller + 0x368);
             return ObjectValid(camera) && ClassNamed(Read<Address>(camera + 0x10), "PBZPlayerCameraManager") &&
-                Read<Address>(camera) == base + 0xc036f20 ? camera : 0;
+                Read<Address>(camera) == base + 0xc0ae700 ? camera : 0;
         }
         bool FovContract(const Context& context) {
             const auto camera = MovementCamera(context);
@@ -723,12 +723,12 @@
             std::array<unsigned char, setter.size()> observedSetter{};
             std::array<unsigned char, unlock.size()> observedUnlock{};
             const auto locked = Read<float>(camera + 0x2cc);
-            return Read<Address>(vtable + 0x800) == base + 0x4372da0 &&
-                Read<Address>(vtable + 0x808) == base + 0x4384680 && Read<Address>(vtable + 0x810) == base + 0x438ab90 &&
-                ReadBytes(base + 0x4384680, observedSetter.data(), observedSetter.size()) && observedSetter == setter &&
-                ReadBytes(base + 0x438ab90, observedUnlock.data(), observedUnlock.size()) && observedUnlock == unlock &&
+            return Read<Address>(vtable + 0x800) == base + 0x4392950 &&
+                Read<Address>(vtable + 0x808) == base + 0x43a4630 && Read<Address>(vtable + 0x810) == base + 0x43aab20 &&
+                ReadBytes(base + 0x43a4630, observedSetter.data(), observedSetter.size()) && observedSetter == setter &&
+                ReadBytes(base + 0x43aab20, observedUnlock.data(), observedUnlock.size()) && observedUnlock == unlock &&
                 std::isfinite(locked) && locked >= 0 && locked <= 360 &&
-                CombatSignature(FindFunction(Read<Address>(camera + 0x10), "GetFOVAngle"), "GetFOVAngle", 0x4393670, 0x54020402, 4, {
+                CombatSignature(FindFunction(Read<Address>(camera + 0x10), "GetFOVAngle"), "GetFOVAngle", 0x43b3600, 0x54020402, 4, {
                     {"ReturnValue", "FloatProperty", 0, 4, 0x18001040000780ull, ""}});
         }
         std::optional<float> ReadMovementFov(const Context& context) {
@@ -741,8 +741,8 @@
         }
         bool WriteMovementFovLeaf(Address camera, float value, bool unlock) noexcept {
             __try {
-                if (unlock) reinterpret_cast<void(__fastcall*)(void*)>(base + 0x438ab90)(reinterpret_cast<void*>(camera));
-                else reinterpret_cast<void(__fastcall*)(void*, float)>(base + 0x4384680)(reinterpret_cast<void*>(camera), value);
+                if (unlock) reinterpret_cast<void(__fastcall*)(void*)>(base + 0x43aab20)(reinterpret_cast<void*>(camera));
+                else reinterpret_cast<void(__fastcall*)(void*, float)>(base + 0x43a4630)(reinterpret_cast<void*>(camera), value);
                 return true;
             } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
@@ -799,10 +799,10 @@
         }
         bool AiMovementContract(const Context& context) {
             if (!MovementContextCurrent(context) || !AiMovementPawnClass(context) || !AttributeEntriesValid()) return false;
-            const auto owner = Read<Address>(base + 0xdf45bf8);
+            const auto owner = Read<Address>(base + 0xdfbac68);
             const auto function = FindFunction(owner, "GetAllActorsOfClass");
             if (!ObjectValid(owner) || ObjectName(owner) != "GameplayStatics" || !ObjectValid(Read<Address>(owner + 0x160)) ||
-                !CombatSignature(function, "GetAllActorsOfClass", 0x3f96270, 0x04422403, 32, {
+                !CombatSignature(function, "GetAllActorsOfClass", 0x3fa98e0, 0x04422403, 32, {
                     {"WorldContextObject", "ObjectProperty", 0, 8, 0x18001000000282ull, "Object"},
                     {"ActorClass", "ClassProperty", 8, 8, 0x1c001000000280ull, "Class"},
                     {"OutActors", "ArrayProperty", 16, 16, 0x10000000000380ull, ""}})) return false;
@@ -849,12 +849,12 @@
         }
         bool FreeMovementEngineArray(Address allocation) noexcept {
             if (!allocation) return true;
-            __try { reinterpret_cast<void(__fastcall*)(void*)>(base + 0x12e1930)(reinterpret_cast<void*>(allocation)); return true; }
+            __try { reinterpret_cast<void(__fastcall*)(void*)>(base + 0x12e0af0)(reinterpret_cast<void*>(allocation)); return true; }
             __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
         std::optional<std::vector<Address>> AiMovementPawns(const Context& context) {
             if (!AiMovementContract(context)) return {};
-            const auto owner = Read<Address>(base + 0xdf45bf8);
+            const auto owner = Read<Address>(base + 0xdfbac68);
             struct Parameters { Address world, type, data{}; std::int32_t count{}, capacity{}; }
                 parameters{context.world, AiMovementPawnClass(context)};
             const bool called = CallProcessEvent(Read<Address>(owner + 0x160), FindFunction(owner, "GetAllActorsOfClass"), &parameters);

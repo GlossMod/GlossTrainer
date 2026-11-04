@@ -39,12 +39,14 @@
             if (ItemInputTableValid()) return;
             itemInput.table = 0;
             const auto now = Clock::now();
-            const auto chunks = Read<Address>(base + 0xddb3c58);
-            const auto count = Read<std::uint32_t>(base + 0xddb3c60);
+            const auto chunks = Read<Address>(base + 0xde28c68);
+            const auto count = Read<std::uint32_t>(base + 0xde28c70);
             if (!chunks || count > 2000000) return;
             if (!itemInput.scan.Begin(now, count)) return;
             const auto end = itemInput.scan.End(count);
-            for (; itemInput.scan.cursor < end; ++itemInput.scan.cursor) {
+            ItemLoadingBudget budget(now, std::chrono::microseconds(500), 512);
+            for (; itemInput.scan.cursor < end && budget.Continue(Clock::now()); ++itemInput.scan.cursor) {
+                budget.Consume();
                 const auto index = itemInput.scan.cursor;
                 const auto chunk = Read<Address>(chunks + (index / 65536) * 8);
                 const auto object = Read<Address>(chunk + (index % 65536) * 24 + 8);

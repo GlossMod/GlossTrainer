@@ -1,6 +1,7 @@
 #include "renderer.hpp"
 #include "runtime.hpp"
 #include "item_icons.hpp"
+#include "dx11_extra_state.hpp"
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <imgui.h>
@@ -90,6 +91,8 @@ namespace gloss::graphics
                 if (!initialized_ || !target_ || DeviceLost())
                     return false;
                 OutputState state(context_.Get());
+                detail::ExtraShaderState<ID3D11DeviceContext, ID3D11ClassInstance,
+                    ID3D11HullShader, ID3D11DomainShader, ID3D11ComputeShader> shaders(context_.Get());
                 ImGui_ImplDX11_NewFrame();
                 overlay::DrawFrame("DirectX 11");
                 ID3D11RenderTargetView *target = target_.Get();

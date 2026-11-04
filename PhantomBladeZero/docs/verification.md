@@ -502,3 +502,79 @@ Debug、Release 的 PBZ 生产构建及各 21 套测试均通过，共 42 套，
 - 正式 `GlossTrainer.asi` SHA-256：`c8951632e1828f99f3d29378e5ff19176f146cef3068e0fdd2cc6d04f52301bb`。
 
 正式包由云端构建，与前文的本地包及手动候选包哈希不同；以上逐字节一致性指正式发布附件与正式 CI 上传的候选产物。本轮未安装到游戏目录，未新增游戏内验证。
+
+## 2026-11-04 适配 CL-302256_JKS-17280（1.1.2）
+
+当前本地游戏主程序为 `CL-302256_JKS-17280`，SHA-256 `4415933ce33476f14c837abb61a1b60af8b78cd81783896501913a7aac69e423`。已迁移精确版本门、ProcessEvent、FName 池、对象表、属性/战斗/移动钩子、物品表及相关原生入口；保留入口指令、对象身份、反射参数和游戏线程检查。[本轮汇总](../../output/pbz-update-20261104/summary.json)。
+
+新版旧 GM 路径存在空实现，不能仅替换 exec 地址后报告成功。全部历史 GM 契约停止授权调用；终结技大量补给、批量材料、升级/满级、天赋、图鉴等入口显示不可用。生命读取、坐标读取、恢复生命和无敌改用独立原生接口。无敌使用贡献记录避免重复添加，关闭只移除本修改器贡献；SEH 后停用适配器、保留未确认清理记录并禁止后续引擎访问。[实现报告](../../output/pbz-update-20261104/core/report.md)、[SEH 修复与回归说明](../../output/pbz-update-20261104/core/seh-fix.md)。
+
+| 检查 | 结果与证据 |
+| --- | --- |
+| Debug / Release | 两配置 PBZ 构建和各 21 套回归全部通过，共 42 套；生命周期每配置 546 项、0 失败。[测试结果](../../output/pbz-update-20261104/final-tests.json)，构建日志在同目录 `build-final-debug.log` / `build-final-release.log` |
+| 实机就绪与自动恢复 | 最终构建 PID 29500 中 `installed=true`、`ready=true`、`faulted=false`，游戏线程一致；无限暗源、完美格挡、完美闪避、无限纯杀气、无限药品五项原有开启项恢复。[最终回读](../../output/pbz-update-20261104/runtime-final.json) |
+| 原生操作读回 | 图标修正前同轮构建完成 18 次操作：坐标、恢复生命，无敌/全局时间/移速/视野/杀气保护/武器冷却/生命保护/飞行的开启与关闭，均返回专属回读验证。开关恢复至测试前状态；旧终结技 GM 请求在入队前拒绝。[命令与回读](../../output/pbz-update-20261104/runtime-commands.json) |
+| 物品目录与图标 | 五张表尺寸、行类型和槽位检查通过，完整目录 790 条加意识尘埃共 791 项，正常显示 418 项。各分类样本库存与唯一物品防重复状态正常；最终构建完成 Texture2D 加载、bulk 数据读取和实际图标显示。[物品反射证据](../../output/pbz-update-20261104/items/report.md)、[最终样本](../../output/pbz-update-20261104/runtime-final.json)、[实机截图](../../output/pbz-update-20261104/runtime-items-dark.jpg) |
+| 图片契约修正 | 运行时证实 `dfc2278` 指向 `LoadAssetClass`；`LoadAsset_Blocking` 的正确槽位为 `dfc2270`，native exec 为 `40c0800`，两参数 / 48 字节及字段完全匹配。早期静态 getter 配对的结论已撤回，以[运行时证据](../../output/pbz-update-20261104/image-contract-runtime.json)及[更正](../../output/pbz-update-20261104/hooks/runtime-corrections.json)为准 |
+| 停用与安装 | 图标修正前实例的游戏线程清理成功，回调恢复且无 fault；正常退出后替换文件，最终构建重启成功。原 ASI、四份配置、ProfileNLP 和 Steam 存档均已备份，测试参数恢复为用户原始 `features.ini`。[清理回读](../../output/pbz-update-20261104/runtime-shutdown.json)、[最终安装回执](../../output/pbz-update-20261104/install-receipt.json) |
+
+最终本地 [GlossTrainer.asi](../../output/pbz-update-20261104/artifact/GlossTrainer.asi) SHA-256 为 `86ba15e22be67e5aed7c3d83b3bd81982b79166d4204f06c4a58acb96a1789c1`，与游戏 `platform/steam/scripts/GlossTrainer.asi` 一致。只进行了本地构建及安装，未提交、推送或发布发行版。[运行日志](../../output/pbz-update-20261104/trainer-20261104.log)。
+
+验证边界：恢复生命在原本满血状态测试；无敌标签和钩子开关的读回不证明所有战斗、死亡及换图行为。未进行物品发放、升级、进度写入或存档重载测试；已有终结技异常大值来自历史版本，本轮未修改。18 次操作来自图标修正前构建，最终构建重新验证了启动、自动恢复、完整物品目录和图标。早期静态报告与历史证据保留，不能替代本节运行时结果。
+
+## 2026-11-04 至 11-05 v1.2.0 扩展与战利品性能修复
+
+在同一 `CL-302256_JKS-17280` 上增加免费/无限制传送、自动收集/高亮、相机距离/垂直偏移及全部背包饰品效果；有界参数改为滑块，保留 Ctrl+点击精确输入与“应用”提交。补充数量设置/安全减量、收藏品名称分类，以及 DX11 着色器状态和输入钩子衔接。功能实现、离线行为验证与实际游戏效果分别记录，不将脚本 ACK 当成拾取或传送完成。
+
+旧 v1.2.0 首次开启高亮曾因新版私有模块完整性验证失败而停用整个适配器，已增加严格私有验证路径和异常诊断。中间 B66 构建实机确认高亮/自动开关 ACK 与适配器仍就绪，但周期维护有严重性能问题；传送又遇到 V8 禁止字符串编译，最终源码已改为静态函数并在禁止编译的 VM 中验证。历史首次 SEH 的确切指令地址未捕获，不能倒推认定。
+
+| 验证 | 结果及证据 |
+| --- | --- |
+| 最终 Debug / Release | 各 26 套 C++ 测试全部通过，生命周期每配置 852 项；脚本 74、纸条 59、扫描调度 28 项通过。[Debug](../../output/pbz-features-20261104/performance/validation/tests-debug.json)、[Release](../../output/pbz-features-20261104/performance/validation/tests-release.json)、[构建及逐项日志](../../output/pbz-features-20261104/performance/validation/) |
+| 失败记录保留 | 新增生命周期测试曾将“双开后关闭高亮”误断言为释放租约，修正为仍持有，并新增“仅高亮开启后关闭”场景再复验通过。[失败原记录](../../output/pbz-features-20261104/performance/validation/tests-debug-lease-test-assertion-failure.json)。更早 accepted Debug 批次的持久化 Save 偶发失败及单独重跑通过记录亦保留，未删除失败证据 |
+| UI | 实现前生成并查看[滑块双主题原型](../../output/pbz-features-20261104/ui-slider-prototype.png)，提示词与 provider/model 在同目录；暗 DX11/亮 DX12 宿主通过，截图只证明可见区域。中间实机已观察有界参数滑块；未穷举所有参数/主题/输入边界 |
+| 旧版性能复现 | 固定角色场景、菜单关闭，B66 ASI：自动单开 4 个窗口共 138 次 Tick，加权平均 278.916ms、最大 345.141ms；高亮单开 5 窗口共 183 次，267.409ms、最大 299.766ms；两项关闭 2 窗口共 889 次，0.02498ms、最大 1.497ms。[自动](../../output/pbz-features-20261104/performance/before-auto-summary.json)、[高亮](../../output/pbz-features-20261104/performance/before-highlight-summary.json)、[关闭](../../output/pbz-features-20261104/performance/before-off-summary.json) |
+| 热点与修复 | 所用 MinHook 1.3.4 实证每次 Enable/Disable 都枚举/暂停/恢复其他线程，旧 4Hz 维护有每秒 8 次冻结周期。最终改为脚本组租约，稳定维护不再启停，并限制稀疏扫描工作量；六临时槽仍每次恢复、普通加载仍原验证。[只读审查](../../output/pbz-features-20261104/performance/audit.md)、[实现与边界](../../output/pbz-features-20261104/performance/implementation.md)、[源码与调度清单](../../output/pbz-features-20261104/performance/script-scheduling-final.json) |
+| 最终本地安装 | 游戏正常退出后备份 B66、存档与配置，安装 Release 并启动新进程 PID 86596；初始化日志显示 DX12 及输入层成功。保留用户最新配置，仅撤销本轮采样打开的高亮。[安装回执](../../output/pbz-features-20261104/performance/install-receipt.json) |
+
+本阶段本地 [GlossTrainer.asi](../../output/pbz-features-20261104/artifact/GlossTrainer.asi) SHA-256 `668E0C2DC07FCBF4386503574635551DB467386FDE37C8A08544B67C661B3D56`，与该阶段安装文件一致。没有提交、推送或发布。其后的观测与拾取修复见下节；该 ASI 不含下节的场景掉落识别修复。
+
+性能为已有 `Tick` 聚合墙钟范围，包含维护，不包含完整原游戏帧或覆盖层；`frame` 是嵌套的 Hook 内上下文/Tick 范围，不能相加或换算为 FPS。窗口由日志报告时间筛选，均值按调用数加权，原始日志在 performance/ 下；没有 p95/p99。离线 mock 的大表调用数下降不代表所有路径都更快，32 个有效候选因缓存成员重验会多一些容器调用。首次开启/末次关闭仍有一次性启停，密集大表远处新候选发现存在分批延迟。
+
+最终构建尚缺实机：新版单开/双开可比性能，实际自动拾取/高亮、传送四组合及消耗，相机跨模式恢复、全部饰品次级效果 on/off、数量修改和收藏品保存重载，以及第三方覆盖层/插帧组合。已有相机和脚本的中间构建 ACK/回读不能替代这些业务验证。
+
+## 2026-11-05 紫色场景掉落未自动拾取修复
+
+用户在紫光与 E 提示旁停留后，读取确认当前交互目标是精确 `BP_Rubbish_C`，场景键 `Zhengdaodaying.wmA.008`，`Not Interact=false`，`Pickups` 内容为 4 个 `Weapon_Material_05`。它不是原生 PBZPickupActor，场景键后缀也不属于 218 个 BookPage，旧规则因此在调用交互前将它过滤。证据见[现场字段](../../output/pbz-features-20261104/performance/live-rubbish-fields.json)、[反射结构](../../output/pbz-features-20261104/performance/live-rubbish-schema.json)、[掉落内容](../../output/pbz-features-20261104/performance/live-rubbish-loot-before.json)。空的调试物品页缓存不作为背包数量证据。
+
+修复扩展精确场景掉落类识别，保留本地归属、对象有效性及候选表边界；仅原生 Pickup 调用 IsValidPickup。交互改用 GetValidDistance 的真实 widget 范围，保留游戏的 CanTriggerInteract、状态检查及末次 Blueprint 回调后的身份/候选表重验。每轮最多一次请求，非 true 返回间隔 1.5 秒重试，true 只进入受理防重放记录。[修复说明](../../output/pbz-features-20261104/performance/autocollect-fix.md)、[独立交互语义审查](../../output/pbz-features-20261104/performance/pickup-audit.md)。DoInteract 的 true 可对应失败或长按受理，不能作为物品已入包的证明；这一分支尚未在现场观察。
+
+| 检查 | 结果与证据 |
+| --- | --- |
+| Debug | 首批 26 套中 25 套通过，Gameplay 的原子 Save 断言再次偶发失败，[原记录保留](../../output/pbz-features-20261104/pickup-fix/validation/tests-debug.json)。最终 payload 修改后重建 PBZ 与生命周期消费者；生命周期 852 项和 Gameplay 单独重跑均通过，[最终记录](../../output/pbz-features-20261104/pickup-fix/final-validation/tests-debug.json)。其他未变测试沿用首批通过结果 |
+| Release | 最终 PBZ 及测试全部构建成功，26 套均通过；生命周期 852 项。[结果](../../output/pbz-features-20261104/pickup-fix/final-validation/tests-release.json)、[日志](../../output/pbz-features-20261104/pickup-fix/final-validation/build-release.log) |
+| JS 与桥接 | 拾取 72、纸条 63、调度 28、完整功能 74 项，共 237 项全部通过，覆盖真实场景键、原生距离、失败冷却、接受后防重放和最后回调改变对象/地图的场景。12 段共 419 字节桥接契约匹配，脚本 SHA256 `3b28e5cf57700bb2bed9d15015573a6d5f80cef7ef97ad4addfdcb4bc2d5f020`。[逐项日志](../../output/pbz-features-20261104/pickup-fix/final-validation/) |
+| 性能观察 | 已安装 668E 构建的两段菜单隐藏稳定窗口共 1044 次 Tick，平均 0.06147ms、最大 1.635ms；79 次脚本桥平均 0.47829ms、最大 1.619ms。[汇总](../../output/pbz-features-20261104/performance/after-early-active-summary.json)。这不是严格同场景开关对比，也早于识别修复，不能证明真正拾取路径的性能；首次启用仍出现约 297ms 一次性 Tick |
+| 交付与安装 | 最终修复 [GlossTrainer.asi](../../output/pbz-features-20261104/pickup-fix/artifact/GlossTrainer.asi) SHA256 `6CD973C12E65A1A5ECEF5EF93F17B1FEF68C553C10A8A669DF71986AC23AEDB5`。产物已生成，检查时实际游戏 PID 86596 仍加载 668E。用户物理 Esc 已停止桌面控制，本轮未继续操作界面或替换已加载文件；修复版未安装、未实机验收 |
+
+拾取完成、材料实际增量、长按物件和不开重复奖励，以及修复后单开/双开性能仍需加载新 ASI 后验证。当前保存的用户开关不回退到早期采样配置；不将旧版低开销、开关 ACK 或请求 true 宣称为修复版实际拾取成功。本轮没有提交、推送或发布。
+
+## 2026-11-05 距离版当前性能只读分析
+
+距离版已于 01:54:38 本地安装，ASI SHA256 `797C85029E07075CB50BB97AECACF14FED7826956A5191793FAB4D6C41F2C9DC`；后续 PID 49504 的日志从 01:55:11.586 开始。02:00:28 的只读状态显示适配器 ready、无 fault、无待处理请求，自动收集 10 米、高亮 50 米均开启，并发布 11.41 米和 46.27 米标记。此状态不证明拾取完成或此前每个窗口的功能状态。[安装回执](../../output/pbz-distance-20261105/install-receipt.json)、[只读状态](../../output/pbz-performance-20261105/status-start-raw.json)。
+
+用户本轮要求分析性能，未重启、改开关或安装。菜单关闭期间约 120 秒自然观测有 6249 次修改器 Tick，加权平均 0.0965ms、最大 19.955ms；同期 474 次脚本桥平均 0.9206ms、最大 19.849ms、8 次 ≥2ms。后续物品页缓存就绪的三个窗口，1565 次 Tick 平均 0.1293ms、最大 1.600ms；118 次桥接平均 0.7500ms、最大 1.353ms。首次恢复窗口另有 438.356ms Tick 和 321.548ms 桥接峰值，不能并入稳定均值后忽略。
+
+仍有两类明确尾部问题：五个连续菜单窗口中 Tick 最大 1.887ms 且无 ≥2ms 样本，外层 `frame` 每窗各一次 ≥2ms、最大 11.183ms；源码显示 Tick 计时结束后在游戏线程逐行同步写性能日志，外层计时覆盖它，高度指向报告开销但尚缺独立 Log 计时/禁用对照。物品页冷加载三个窗口有 79/1563 次 Tick ≥2ms，最大 22.270ms；`RefreshItems` 最大 22.238ms，图片处理最大 5.244ms、66 次 ≥2ms。[完整分析](../../output/pbz-performance-20261105/report.md)、[聚合结果](../../output/pbz-performance-20261105/results.json)、[原始会话日志](../../output/pbz-performance-20261105/session-49504.log)。
+
+本报告中的 Tick、脚本桥、图片和 `frame` 是嵌套墙钟区段；`frame` 不是完整游戏帧。无固定场景关/单开/双开对照，无 Present/GPU、逐帧 p95/p99 或完整高频 Hook 计时，不能宣称 FPS 提升或损失比例。正常每秒原生范围查询仍是 O(tag 注册对象数)，32 项预算仅约束后续脚本处理；查询与 Blueprint 谓词未单独计时。
+
+只读审查另新增确定复现：距离缩小和候选重排可使跨快照 sweep 提前清理受理记录，导致再次 DoInteract。原 96 项距离测试通过的历史结果不覆盖此序列；新增回归在当前产品上失败，尚未修复，也没有证据表明该风险发生在本次现场或导致上述峰值。[审计及复现](../../output/pbz-distance-20261105/performance-readonly-audit.md)。02:03 汇总时游戏进程已不存在，未再次启动；本轮没有提交、推送或发布。
+
+## 2026-11-05 性能优化版
+
+针对上一节的三个热点完成了优化：性能聚合日志改为有界后台队列，游戏线程只格式化并入队，不再同步创建目录、检查文件、打开/关闭日志和调用 `OutputDebugStringA`；队列满时丢弃最旧诊断并写入一次溢出标记。物品目录构建拆成 1ms/32 单位阶段，输入对象发现增加 500us 边界；稳定纹理经过完整弱身份核验后复用等待中的加载结果，避免每 100ms 重复 `LoadAsset_Blocking`。范围候选按已取得距离优先检查最近项，并以同一查询代次的 visited 证明清理受理记录，关闭了范围缩小/重排导致重复 `DoInteract` 的回归。
+
+Debug、Release 均构建成功；受影响的性能、物品扫描、图片、物品缓存、Gameplay 和原生生命周期目标全部通过，生命周期为 920 项 0 失败；脚本回归 367 项 0 失败，新增固定调度入口为 413 字节。原始日志和测试输出见[优化目录](../../output/pbz-optimize-20261105/)。
+
+优化版 `GlossTrainer.asi` SHA-256 为 `23DED9E6999DDE14990F59B8D7314D46AD5CA4776E2A66BCBF91EFB2B6C87329`，已在游戏退出后安装；上一版 `797C...` 已备份，`features.ini` SHA-256 仍为 `41F89F647B6C3ACBCE5A0A08B009A671E69C534360B71414C1A029EE0611D263`。[安装回执](../../output/pbz-optimize-20261105/install-receipt.json)。本轮未启动游戏，故优化后的实机耗时、FPS、拾取奖励和页面冷加载对比仍待下一次固定场景采样。

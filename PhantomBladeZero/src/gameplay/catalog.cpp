@@ -59,7 +59,7 @@ namespace gloss::gameplay {
                 add("shachi_cost", "杀气消耗倍率", "调整玩家杀气消耗。", 2, value("杀气消耗倍率", "1", 0, 10));
                 add("pure_shachi_gain", "纯杀气获取倍率", "调整玩家纯杀气获取。", 2, value("纯杀气获取倍率", "1", 0, 100));
                 add("infinite_medicine", "无限药品", "阻止药品使用次数降低；关闭后恢复正常消耗。", 1);
-                add("infinite_items", "无限物品", "阻止可消耗物品扣减；不发放新物品。", 3);
+                add("infinite_items", "无限消耗品", "只保护已核对的消耗品；剧情、铸魂、材料和永久属性道具照常消耗。", 3);
                 add("infinite_shop_stock", "无限商店库存", "保护商店库存消耗；需核对实际商店交易路径。", 3);
                 add("move_speed", "移动速度倍率", "调整玩家移动速度；关闭后恢复原值。", 4, value("移动速度倍率", "1", 0.1, 5));
                 add("player_speed", "玩家速度倍率", "调整玩家时间速度，不改变全局时间倍率。", 4, value("玩家速度倍率", "1", 0.1, 5));
@@ -68,6 +68,15 @@ namespace gloss::gameplay {
                 add("jump_height", "跳跃高度倍率", "调整玩家跳跃高度；关闭后恢复原值。", 4, value("跳跃高度倍率", "1", 0.1, 10));
                 add("gravity", "重力倍率", "调整玩家重力；关闭后恢复原值。", 4, value("重力倍率", "1", 0, 5));
                 add("fov", "视野范围", "调整游戏相机视野；关闭后恢复原值。", 5, value("视野角度", "90", 30, 150));
+                add("camera_distance", "相机距离", "调整实际相机目标距离；还受当前相机模式范围约束，关闭恢复原值。", 5, value("相机距离", "350", 50, 2000));
+                add("camera_height", "相机垂直偏移", "在原相机高度上叠加偏移；关闭后恢复原值。", 5, value("垂直偏移", "0", -300, 300));
+                add("all_accessories", "全部饰品生效", "应用背包中未装备饰品的效果；关闭只移除本修改器添加的效果。", 3);
+                add("free_teleport", "免费随意传送", "地图传送不再消耗穿行符；地点和状态限制由独立开关控制。", 4);
+                add("unrestricted_teleport", "移除传送限制", "允许在铃铛附近等位置传送到已激活铃铛；使用原游戏传送与保存流程。", 4);
+                add("auto_collect", "自动收集战利品", "在设定距离内自动收集物品、纸条和宝箱；距离以米为单位。", 3,
+                    {Number("distance_m", "拾取距离（米）", "10", 1, 50)});
+                add("highlight_loot", "高亮附近战利品", "标示设定距离内可收集物品；距离以米为单位，关闭时清理标示。", 3,
+                    {Number("distance_m", "高亮距离（米）", "50", 1, 100)});
                 add("flight", "飞行", "启用玩家飞行并指定速度；关闭后恢复原移动模式。", 4, value("飞行速度", "600", 50, 5000));
                 return result;
             }();
@@ -85,10 +94,14 @@ namespace gloss::gameplay {
                     std::move(params), std::move(function), std::move(fixed), persistent,
                     "等待适配器核对对象、参数签名与调用条件；效果尚未验证"});
             };
-            add("get_health", "读取生命", "读取当前生命；只显示实际回读结果。", 1, 1, "GM_GetHealth");
+            add("get_health", "读取生命", "读取当前生命；只显示实际回读结果。", 1, 1, "Native_ReadHealth");
+            add("script_probe", "脚本桥自检", "只执行同步确认，不启用游戏功能。", 5, 0, "Native_ScriptProbe");
+            add("set_item_quantity", "设置物品数量", "增加、减少持有数量，0 表示删除；减量只支持已核对的物品类型。", 3, 0, "Native_SetItemQuantity",
+                {{"item_key", "物品目录键", ParamType::String, "", 0, 0, 128},
+                 Number("quantity", "目标数量", "0", 0, MaxItemQuantity, ParamType::Int)}, true);
             add("set_max_health", "设置最大生命值", "设置玩家最大生命值，同时恢复生命至实际生效的上限。", 1, 1, "Native_SetMaxHealth",
                 {Number("health", "最大生命值", "1000", 1, 100000000)});
-            add("full_heal", "恢复生命", "恢复生命并比较当前生命与上限；读回一致后显示已验证。", 1, 1, "GM_FullHeal");
+            add("full_heal", "恢复生命", "恢复生命并比较当前生命与上限；读回一致后显示已验证。", 1, 1, "Native_FullHeal");
             for (const bool enabled : {true, false}) {
                 add(enabled ? "infinite_dark_source_on" : "infinite_dark_source_off", "无限暗源", "开启时补满暗源并保护消耗；关闭后恢复正常扣减，不改变上限。", 2, 1,
                     "Native_InfiniteDarkSource", {}, false, {enabled ? "on" : "off"});
@@ -105,7 +118,7 @@ namespace gloss::gameplay {
                     add("state_" + state.first + (enabled ? "_on" : "_off"),
                         state.second + (enabled ? "：开启" : "：关闭"),
                         "提交明确的状态操作；开关结果、死亡与换图后的行为需回读验证。", 1, 1,
-                        "GM_State", {}, false, {"preset", state.first, enabled ? "on" : "off"});
+                        "Native_Invulnerable", {}, false, {enabled ? "on" : "off"});
                 }
             }
             add("refill_medicine", "补满药品", "将已装备药品补满至当前上限（含能力加成）；并修复旧版写入的异常上限。", 1, 1, "Native_RefillMedicine", {}, true);
@@ -141,7 +154,7 @@ namespace gloss::gameplay {
             add("activate_talent", "激活指定天赋", "前置节点、点数扣除、重复调用和保存行为待验证。", 3, 2, "GM_ActivateTalent", {Name("天赋 FName ID")}, true);
             add("activate_all_talents", "激活全部天赋", "批量进度操作，不能保证可撤销。", 3, 2, "GM_ActivateAllTalent", {}, true);
             add("discover_enemies", "发现敌人图鉴", "新增图鉴发现，覆盖范围与保存行为待验证。", 5, 2, "GM_DiscoverAllEnemies", {}, true);
-            add("get_location", "读取坐标", "只显示游戏实际返回的当前位置。", 4, 3, "GM_GetPlayerLocation");
+            add("get_location", "读取坐标", "只显示游戏实际返回的当前位置。", 4, 3, "Native_ReadLocation");
             add("save_position", "记录位置", "保存槽名称与写入范围待验证。", 4, 3, "GM_SavePosition",
                 {{"slot_name", "位置槽名称", ParamType::String, "GlossTrainer", 0, 0, 64}}, true);
             add("move_to", "移动到坐标", "坐标使用 X,Y,Z 格式；可能启动异步移动任务，模式、超时和到达结果待验证。", 4, 3, "GM_MoveTo",
