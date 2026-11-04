@@ -618,3 +618,14 @@ Release 产物 [GlossTrainer.asi](../../output/pbz-native-icons-20261105/artifac
 最终本地 Release ASI SHA-256 `C79A3AB2915CD9283C33B1294785E2A9C3074F1045CA6FFA82F6AAB105AE3C4B`，未再次覆盖游戏安装。源码版本 `1.2.0`、发布通道 `PhantomBladeZero/v1.2.0`；双语说明已同步 `CL-302256_JKS-17280` 和实际支持的主程序哈希。正式下载以 GitHub Actions 同一提交的候选包验证和标签构建产物为准，不能把本地 ASI 哈希当作 CI 包中 ASI 的哈希。
 
 PowerShell 5.1 和 7 的便携包、通道隔离、PBZ 安装约定测试分别为 29、45、45 项，两种环境均全部通过。安装约定中的旧主程序哈希同步为本版构建，测试仍核对包路径、五文件清单、许可、Loader 架构/哈希、升级保留配置及无旧 ASI 重复加载。Loader 使用重新下载并核对固定官方 SHA-256 的 v10.0.0 归档。[打包与安装日志](../../output/pbz-release-v1.2.0-20261105/validation/)。
+
+## 2026-11-05 v1.2.0 正式发布核验
+
+源码提交 `83840a99ebc7dc912389dce61767af58a3e6ae66` 已推送，注释标签 `PhantomBladeZero/v1.2.0` 指向该提交。先运行[候选构建](https://github.com/GlossMod/GlossTrainer/actions/runs/41919098030)，Debug/Release 均成功，下载候选并核对源码身份、ZIP、SHA256SUMS 和五文件载荷后再推送标签。[标签构建与发布](https://github.com/GlossMod/GlossTrainer/actions/runs/41920289831)的双配置测试、脚本契约、打包和发布作业均成功。
+
+[正式 Release](https://github.com/GlossMod/GlossTrainer/releases/tag/PhantomBladeZero/v1.2.0) 包含 ZIP 和对应 SHA256SUMS 两个附件，不是草稿或预发布。发布后重新下载，GitHub 附件 digest、正式候选与公开附件字节、版本/游戏/源码提交、发布说明和注释标签目标均核对一致；ZIP 只含双语说明、Loader DLL/INI 和一个 `scripts/GlossTrainer.asi`。[发布核验回执](../../output/pbz-release-v1.2.0-20261105/publication/published-verification.json)。
+
+- 正式 ZIP SHA-256：`e6a954ac18f99f69fb49a2a2e39609d3d420998473769e2fa597ad279eb66867`。
+- 正式 ASI SHA-256：`5abbd496e733f0901d153a9d6d1f3ad5d18509ec4108f34d85caa04a3b3e3daf`。
+
+本轮发布未重启或替换本机游戏插件。发布成功及 CI 通过不改变前述实机验收范围；部分物品通用图标、最终开箱过滤画面和密集场景性能的限制已写入发布说明。
