@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - '*/v*.*.*'
+      - '!DnDG/v*.*.*'  # DnDG uses its own Godot SDK build and Steam package.
   workflow_dispatch:
     inputs:
       game:

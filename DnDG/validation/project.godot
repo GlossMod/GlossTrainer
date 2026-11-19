@@ -1,0 +1,10 @@
+; Minimal isolated project for the DnDG adapter regression fixture.
+config_version=5
+
+[application]
+config/name="DnDG Game Adapter Fixture"
+config/version="2.0.8.1"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

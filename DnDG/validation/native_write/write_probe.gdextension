@@ -1,0 +1,6 @@
+[configuration]
+entry_symbol = "native_write_init"
+compatibility_minimum = "4.6"
+
+[libraries]
+windows.x86_64 = "res://write_probe.dll"

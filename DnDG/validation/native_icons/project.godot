@@ -1,0 +1,6 @@
+[application]
+config/name="GlossTrainer DnDG Icon Fixture"
+config/version="2.0.8.1"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"

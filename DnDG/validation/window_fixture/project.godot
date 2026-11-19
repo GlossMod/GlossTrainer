@@ -1,0 +1,24 @@
+; Staged with the current DnDG scripts; no game, Steam, or real saves are loaded.
+config_version=5
+
+[application]
+config/name="DnDG Window Geometry Fixture"
+config/features=PackedStringArray("4.6")
+config/use_custom_user_dir=true
+config/custom_user_dir_name="GlossTrainer/DnDG/validation/window-geometry"
+
+[autoload]
+GlossTrainer="*res://gloss_trainer/trainer_overlay.gd"
+
+[display]
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/stretch/mode="viewport"
+window/stretch/scale_mode="integer"
+window/subwindows/embed_subwindows=true
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+
+[gloss_trainer]
+version="0.1.4"

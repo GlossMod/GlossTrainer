@@ -1,0 +1,137 @@
+add_rules("mode.debug", "mode.release")
+
+-- Match godot-cpp template_release in both trainer configurations.
+set_runtimes("MD")
+
+add_requires("imgui 1.92.9", {configs = {win32 = true, dx11 = true, dx12 = true}})
+add_requires("minhook 1.3.4", "nlohmann_json 3.12.0")
+
+option("godot_cpp")
+    set_default("")
+    set_showmenu(true)
+    set_description("Prepared godot-cpp 10.0.0-stable API 4.6 directory for the native game bridge")
+option_end()
+
+local sdk = get_config("godot_cpp")
+if sdk and sdk ~= "" then
+    sdk = path.absolute(sdk)
+end
+
+local function add_godot_sdk()
+    if sdk and sdk ~= "" then
+        local api = path.join(sdk, "gen", "include", "godot_cpp", "classes", "scene_tree.hpp")
+        local lib = path.join(sdk, "bin", "libgodot-cpp.windows.template_release.x86_64.lib")
+        on_load(function (target)
+            assert(os.isfile(api) and os.isfile(lib), "Prepare the pinned Godot 4.6 SDK first; see DnDG/docs/native.md")
+        end)
+        add_includedirs(path.join(sdk, "include"), path.join(sdk, "gen", "include"))
+        add_linkdirs(path.join(sdk, "bin"))
+        add_links("libgodot-cpp.windows.template_release.x86_64")
+        add_defines("TYPED_METHOD_BIND", "WINDOWS_ENABLED", "GDEXTENSION", "THREADS_ENABLED", "NDEBUG", "_ITERATOR_DEBUG_LEVEL=0")
+        add_cxxflags("/permissive-", {tools = "cl"})
+    else
+        on_load(function ()
+            raise("DnDG requires --godot_cpp=<prepared SDK directory>; see DnDG/docs/native.md")
+        end)
+    end
+end
+
+target("DnDG")
+    set_kind("shared")
+    set_basename("GlossTrainer")
+    set_extension(".asi")
+    set_arch("x64")
+    set_languages("cxx20")
+    set_targetdir(path.join(os.scriptdir(), "..", "build", "DnDG", "$(mode)"))
+    add_files("native/*.cpp")
+    add_godot_sdk()
+    if is_mode("release") and sdk and sdk ~= "" then
+        -- Keep godot-cpp's __FILE__ diagnostics without embedding the local SDK directory.
+        add_cxxflags("/d1trimfile:" .. path.translate(sdk .. "/"), {tools = "cl", force = true})
+    end
+    add_packages("imgui", "minhook", "nlohmann_json")
+    add_defines("WIN32_LEAN_AND_MEAN", "NOMINMAX", "UNICODE", "_UNICODE")
+    add_cxxflags("/utf-8", "/EHsc", "/Zc:__cplusplus", {tools = "cl"})
+    add_syslinks("dxgi", "d3d12", "dxguid", "d3dcompiler", "user32", "gdi32", "imm32", "dwmapi", "winhttp", "shell32", "ole32")
+target_end()
+
+target("GlossTrainerDnDGModelTests")
+    set_default(false)
+    set_kind("binary")
+    set_languages("cxx20")
+    set_targetdir(path.join(os.scriptdir(), "..", "build", "DnDG", "$(mode)"))
+    add_files("native/model.cpp", "validation/native_model_tests.cpp")
+    add_includedirs("native")
+    add_cxxflags("/utf-8", "/EHsc", "/Zc:__cplusplus", {tools = "cl"})
+target_end()
+
+
+target("GlossTrainerDnDGUpdateTests")
+    set_default(false)
+    set_kind("binary")
+    set_languages("cxx20")
+    set_targetdir(path.join(os.scriptdir(), "..", "build", "DnDG", "$(mode)"))
+    add_files("native/update.cpp", "validation/native_update_tests.cpp")
+    add_includedirs("native")
+    add_packages("nlohmann_json")
+    add_defines("WIN32_LEAN_AND_MEAN", "NOMINMAX")
+    add_cxxflags("/utf-8", "/EHsc", "/Zc:__cplusplus", {tools = "cl"})
+    add_syslinks("winhttp")
+target_end()
+
+target("GlossTrainerDnDGOverlayTests")
+    set_default(false)
+    set_kind("binary")
+    set_languages("cxx20")
+    set_targetdir(path.join(os.scriptdir(), "..", "build", "DnDG", "$(mode)"))
+    add_files("native/model.cpp", "native/overlay.cpp", "native/icons.cpp", "native/update.cpp", "validation/native_overlay_tests.cpp")
+    add_includedirs("native")
+    add_packages("imgui", "nlohmann_json")
+    add_defines("WIN32_LEAN_AND_MEAN", "NOMINMAX", "UNICODE", "_UNICODE")
+    add_cxxflags("/utf-8", "/EHsc", "/Zc:__cplusplus", {tools = "cl"})
+    add_syslinks("winhttp", "shell32", "ole32", "user32", "imm32")
+target_end()
+
+
+target("GlossTrainerDnDGIconProbe")
+    set_default(false)
+    set_kind("shared")
+    set_basename("dndg_icon_probe")
+    set_arch("x64")
+    set_languages("cxx20")
+    set_targetdir(path.join(os.scriptdir(), "..", "build", "DnDG", "$(mode)"))
+    add_files("native/game_read.cpp", "native/game_icon_pixels.cpp", "validation/native_icons/icon_probe.cpp")
+    add_includedirs("native")
+    add_godot_sdk()
+    add_defines("WIN32_LEAN_AND_MEAN", "NOMINMAX", "UNICODE", "_UNICODE")
+    add_cxxflags("/utf-8", "/EHsc", "/Zc:__cplusplus", {tools = "cl"})
+target_end()
+
+
+
+target("GlossTrainerDnDGNativeWriteProbe")
+    set_default(false)
+    set_kind("shared")
+    set_basename("write_probe")
+    set_arch("x64")
+    set_languages("cxx20")
+    set_targetdir(path.join(os.scriptdir(), "..", "build", "DnDG", "$(mode)"))
+    add_files("native/game_read.cpp", "native/game_write.cpp", "validation/native_write/write_probe.cpp")
+    add_includedirs("native")
+    add_godot_sdk()
+    add_defines("WIN32_LEAN_AND_MEAN", "NOMINMAX", "UNICODE", "_UNICODE")
+    add_cxxflags("/utf-8", "/EHsc", "/Zc:__cplusplus", {tools = "cl"})
+target_end()
+target("GlossTrainerDnDGDx12CaptureTests")
+    set_default(false)
+    set_kind("binary")
+    set_languages("cxx20")
+    set_targetdir(path.join(os.scriptdir(), "..", "build", "DnDG", "$(mode)"))
+    add_files("native/model.cpp", "native/overlay.cpp", "native/icons.cpp", "native/update.cpp",
+        "validation/native_dx12_capture_tests.cpp", "validation/native_dx12_readback.cpp")
+    add_includedirs("native")
+    add_packages("imgui", "nlohmann_json")
+    add_defines("WIN32_LEAN_AND_MEAN", "NOMINMAX", "UNICODE", "_UNICODE")
+    add_cxxflags("/utf-8", "/EHsc", "/Zc:__cplusplus", {tools = "cl"})
+    add_syslinks("d3d12", "d3dcompiler", "dxgi", "dxguid", "windowscodecs", "ole32", "winhttp", "shell32", "user32", "imm32")
+target_end()

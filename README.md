@@ -3,7 +3,7 @@
 
 GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个游戏的界面、功能适配与验证代码放在独立目录；公共构建、安装和发布工具保留在项目根目录。
 
-使用 C++20、Dear ImGui 和 MinHook，提供支持 亮色 / 暗色主题的界面、可自定义快捷键、配置持久化和日志。可在设置中修改。游戏接口与兼容范围以各模块文档为准。
+原生模块使用 C++20、Dear ImGui 和 MinHook；DnDG 的原生 ASI 通过 Ultimate ASI Loader 加载，通过安装脚本配置 Godot 游戏线程桥接。各模块提供支持 亮色 / 暗色主题的界面、可自定义快捷键、配置持久化和日志。可在设置中修改。游戏接口与兼容范围以各模块文档为准。
 
 ## 游戏模块
 
@@ -11,6 +11,7 @@ GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个
 | -------------------------------------------- | -------------------------------------------- |
 | [BlackMythWukong](BlackMythWukong/readme.md) | 《黑神话：悟空》的功能、安装、使用及适配说明 |
 | [PhantomBladeZero](PhantomBladeZero/readme.md) | 《影之刃零》内置修改器测试版，含原生调用、状态读回与亮暗 UI，部分功能待验证 |
+| [DnDG](DnDG/README.md) | 《Dungeons & Degenerate Gamblers》2.0.8.1 的原生内置修改器，支持 Steam 目录安装 |
 
 ## 关于项目
 
@@ -34,6 +35,8 @@ GlossTrainer 是面向 Windows x64 单机游戏的游戏内工具项目。每个
 
 ## 构建与发布
 
+下方 xmake 命令适用于已登记的发布模块。DnDG 使用[独立构建与发布流程](DnDG/docs/native.md)。
+
 需要 Windows、Visual Studio 2022 C++ 桌面工具、Windows SDK 及 [xmake](https://xmake.io/)。在仓库根目录配置，再构建相应模块：
 
 ```powershell
@@ -51,7 +54,7 @@ xmake project -k compile_commands .vscode
 
 安装 XMake 扩展后，其默认设置会在 `xmake.lua` 变化时自动更新数据库，也可执行 `XMake: UpdateIntellisense` 手动更新。`compile_commands.json` 含本机路径，不提交到 Git。
 
-正式 `<游戏ID>/vX.Y.Z` 标签（例如 `BlackMythWukong/v1.0.0`）只触发对应游戏的 Debug / Release 构建、回归、打包和 Releases 发布。每个游戏独立版本；包名、校验文件、候选产物和输出目录均按游戏隔离。手动运行 workflow 时指定游戏 ID，仅构建验证。注册表、迁移规则和本地打包方式见 [发布说明](docs/releasing.md)。
+已登记模块的 `<游戏ID>/vX.Y.Z` 标签（例如 `BlackMythWukong/v1.0.0`）只触发对应游戏的 Debug / Release 构建、回归、打包和 Releases 发布。每个游戏独立版本；包名、校验文件、候选产物和输出目录均按游戏隔离。手动运行 workflow 时指定游戏 ID，仅构建验证。注册表、迁移规则和本地打包方式见 [发布说明](docs/releasing.md)。
 
 更新检查按游戏通道筛选公开 GitHub Releases，不使用仓库全局 Latest，也不自动下载安装。成功确认有新版后要求玩家自行下载；检查失败不限制使用，仅显示“检查更新失败”。
 

@@ -1,0 +1,8 @@
+{
+  "enabled_classes": [
+    "Node", "Node2D", "CanvasItem", "SceneTree", "Window", "Control", "Viewport",
+    "ResourceLoader", "ProjectSettings", "TranslationServer", "Engine", "OS", "Script",
+    "PackedScene", "Image", "Texture2D", "AtlasTexture", "ImageTexture", "Sprite2D",
+    "RegEx", "RegExMatch", "Input", "InputEvent", "Tween"
+  ]
+}

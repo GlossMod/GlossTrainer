@@ -15,4 +15,6 @@ data
 
 **/docs/*-reference/
 tools
+!/DnDG/tools/
+/DnDG/tools/__pycache__/
 tmp
